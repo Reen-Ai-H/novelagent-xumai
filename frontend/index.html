@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>多智能体网文共创引擎</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="desk-light"></div>
+
+    <main id="appShell" class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">书</div>
+          <div>
+            <p>Novel Agent</p>
+            <strong>网文共创台</strong>
+          </div>
+          <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="折叠侧边栏" aria-expanded="true">
+            <span></span>
+          </button>
+        </div>
+
+        <nav class="side-nav" aria-label="功能导航">
+          <button class="nav-card active" type="button" data-view="overview">
+            <span>总览</span>
+            <small>字数、进度、状态</small>
+          </button>
+          <button class="nav-card" type="button" data-view="studioPlan">
+            <span>开始创作</span>
+            <small>规划、审核、生成</small>
+          </button>
+          <div class="sub-nav" aria-label="开始创作子页面">
+            <button class="sub-nav-card" type="button" data-view="studioPlan">
+              <span>章节创作</span>
+              <small>规划、审核、成稿</small>
+            </button>
+            <button class="sub-nav-card" type="button" data-view="characters">
+              <span>人物设定</span>
+              <small>角色卡片</small>
+            </button>
+            <button class="sub-nav-card" type="button" data-view="lore">
+              <span>剧情设定</span>
+              <small>鱼骨时间线</small>
+            </button>
+          </div>
+          <button class="nav-card" type="button" data-view="publish">
+            <span>一键发表</span>
+            <small>功能前瞻</small>
+          </button>
+          <button class="nav-card" type="button" data-view="preview">
+            <span>小说预览</span>
+            <small>沉浸阅读成稿</small>
+          </button>
+        </nav>
+
+        <div class="sidebar-note">
+          <span class="ink-dot"></span>
+          <p>作者：makerzhu</p>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div class="agent-banner">
+            <p id="agentEyebrow" class="eyebrow">Human-in-the-Loop Web Novel Agent</p>
+            <h1 id="agentTitle">把长篇故事放回书桌上慢慢打磨</h1>
+            <div id="agentStream" class="agent-stream">等待你的下一次创作指令。</div>
+          </div>
+          <div class="stage-pill">
+            <span class="status-dot"></span>
+            <div>
+              <small>当前阶段</small>
+              <strong id="stageLabel">未开始</strong>
+            </div>
+          </div>
+        </header>
+
+        <section id="overviewView" class="view active">
+          <div class="overview-hero paper-card">
+            <div>
+              <p class="eyebrow">Overview</p>
+              <h2>项目总览</h2>
+              <p>
+                这里会汇总当前小说创作进度。生成章节后，字数、剧情节点和最新章节状态会自动更新。
+              </p>
+            </div>
+            <div class="book-ornament" aria-hidden="true">
+              <div class="book-cover"></div>
+              <div class="book-pages"></div>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <article class="stat-card">
+              <span>小说总字数</span>
+              <strong id="wordCountStat">0</strong>
+              <small>按已生成正文估算</small>
+            </article>
+            <article class="stat-card">
+              <span>当前章节</span>
+              <strong id="chapterStat">第 1 章</strong>
+              <small id="sessionStat">尚未创建会话</small>
+            </article>
+            <article class="stat-card">
+              <span>剧情进度</span>
+              <strong id="progressStat">未开始</strong>
+              <small id="beatsStat">0 个剧情节点</small>
+            </article>
+            <article class="stat-card">
+              <span>审查状态</span>
+              <strong id="reviewStat">待生成</strong>
+              <small>Reviewer 输出会显示在创作页</small>
+            </article>
+          </div>
+
+          <div class="paper-card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Pipeline</p>
+                <h2>章节工作流</h2>
+              </div>
+            </div>
+            <div class="pipeline" aria-label="工作流阶段">
+              <div class="step active" data-stage="planning">Planner</div>
+              <div class="step" data-stage="awaiting_human_review">人工审核</div>
+              <div class="step" data-stage="writing">Writer</div>
+              <div class="step" data-stage="reviewing">Reviewer</div>
+              <div class="step" data-stage="completed">Librarian</div>
+            </div>
+          </div>
+        </section>
+
+        <section id="studioPlanView" class="view">
+          <section class="studio-page-grid">
+            <article class="paper-card input-card">
+              <div class="card-title">
+                <div>
+                  <p class="eyebrow">步骤一</p>
+                  <h2>章节规划输入</h2>
+                </div>
+                <button id="fillExampleBtn" class="ghost-btn" type="button">填入示例</button>
+              </div>
+
+              <label>
+                世界观设定
+                <textarea id="worldviewInput" rows="5" placeholder="例如：玄幻都市，灵气复苏，主角逐步揭开家族秘密。"></textarea>
+              </label>
+
+              <div class="two-col">
+                <label>
+                  章节号
+                  <input id="chapterInput" type="number" min="1" value="1" />
+                </label>
+                <label>
+                  会话 ID（可选）
+                  <input id="sessionInput" type="text" placeholder="留空自动生成" />
+                </label>
+              </div>
+
+              <label>
+                前文摘要
+                <textarea id="summaryInput" rows="3" placeholder="上一章发生了什么？有哪些未解决的伏笔？"></textarea>
+              </label>
+
+              <label>
+                本章创作要求
+                <textarea id="instructionInput" rows="3" placeholder="例如：结尾要有强悬念，避免主角过早暴露底牌。"></textarea>
+              </label>
+
+              <section class="character-builder" aria-label="人物卡片输入">
+                <div class="inline-title">
+                  <div>
+                    <strong>人物卡片（可选）</strong>
+                    <small>用于约束角色人设、动机和当前状态，不需要手写 JSON。</small>
+                  </div>
+                  <button id="addCharacterBtn" class="ghost-btn compact" type="button">新增人物</button>
+                </div>
+                <div id="charactersBuilder" class="character-form-list"></div>
+              </section>
+
+              <button id="planBtn" class="primary-btn" type="button">生成剧情节点</button>
+            </article>
+            <aside class="paper-card stage-sidebar">
+              <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
+              <div class="stage-sidebar-body">
+                <p class="eyebrow">创作阶段</p>
+                <h2>从设定开始</h2>
+                <p>先输入世界观、章节目标和人物卡。Planner 会把这些信息整理成本章剧情节点。</p>
+              </div>
+              <div class="stage-rail" aria-label="开始创作阶段">
+                <button class="stage-nav-card active" type="button" data-view="studioPlan">1. 章节规划输入</button>
+                <button class="stage-nav-card" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
+                <button class="stage-nav-card" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
+              </div>
+            </aside>
+          </section>
+        </section>
+
+        <section id="studioReviewView" class="view">
+          <section class="studio-page-grid">
+            <article class="paper-card review-card">
+              <div class="card-title">
+                <div>
+                  <p class="eyebrow">步骤二</p>
+                  <h2>人工审核剧情节点</h2>
+                </div>
+                <button id="refreshBtn" class="ghost-btn" type="button">刷新状态</button>
+              </div>
+
+              <div id="sessionBadge" class="session-badge">尚未创建会话</div>
+              <div id="beatsContainer" class="beats-empty">
+                点击“生成剧情节点”后，Planner 的输出会显示在这里，你可以直接修改后提交。
+              </div>
+
+              <div class="review-decision" role="group" aria-label="审核结果">
+                <button id="approveDecisionBtn" class="decision-btn active" type="button" data-decision="approved">同意</button>
+                <button id="rejectDecisionBtn" class="decision-btn" type="button" data-decision="rejected">打回</button>
+              </div>
+
+              <label>
+                用户建议
+                <textarea id="feedbackInput" rows="3" placeholder="例如：同意，但第二个节点需要加强冲突。"></textarea>
+              </label>
+
+              <button id="approveBtn" class="primary-btn secondary" type="button" disabled>提交审核并继续生成</button>
+            </article>
+            <aside class="paper-card stage-sidebar">
+              <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
+              <div class="stage-sidebar-body">
+                <p class="eyebrow">创作阶段</p>
+                <h2>审核剧情骨架</h2>
+                <p>这里专门处理 Planner 输出。你可以逐个修改剧情节点，再交给 Writer 生成正文。</p>
+              </div>
+              <div class="stage-rail" aria-label="开始创作阶段">
+                <button class="stage-nav-card" type="button" data-view="studioPlan">1. 章节规划输入</button>
+                <button class="stage-nav-card active" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
+                <button class="stage-nav-card" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
+              </div>
+            </aside>
+          </section>
+        </section>
+
+        <section id="studioDraftView" class="view">
+          <section class="studio-page-grid draft-page-grid">
+            <div class="draft-stack">
+              <article class="paper-card">
+              <div class="card-title">
+                <div>
+                  <p class="eyebrow">章节结果</p>
+                  <h2>章节草稿</h2>
+                </div>
+              </div>
+              <pre id="draftOutput" class="output-box">完成审核提交后，Writer 生成的草稿会显示在这里。</pre>
+              </article>
+
+              <article class="paper-card">
+              <div class="card-title">
+                <div>
+                  <p class="eyebrow">记忆与审查</p>
+                  <h2>设定增量与审查意见</h2>
+                </div>
+              </div>
+              <div id="metaOutput" class="output-box meta-panel">
+                设定管理员与审稿人的结果会显示在这里。
+              </div>
+              </article>
+
+              <section id="chapterDecisionPanel" class="paper-card chapter-decision-panel is-hidden">
+            <div class="decision-copy">
+              <p class="eyebrow">章节确认</p>
+              <h2 id="decisionTitle">等待你的决定</h2>
+              <p id="decisionMessage">Reviewer 审查完成后，可以接受本章节，或让 Writer 根据意见修订。</p>
+            </div>
+            <div id="revisionCountdown" class="countdown-badge is-hidden">10 秒后自动同意修改</div>
+            <div class="decision-actions">
+              <button id="acceptChapterBtn" class="primary-btn secondary" type="button">接受本章节并抽取设定</button>
+              <button id="reviseNowBtn" class="primary-btn" type="button">同意修改</button>
+              <button id="waitRevisionBtn" class="ghost-btn" type="button">再等等</button>
+              <button id="confirmReviseBtn" class="ghost-btn" type="button">重新确认打回修改</button>
+            </div>
+              </section>
+            </div>
+            <aside class="paper-card stage-sidebar">
+              <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
+              <div class="stage-sidebar-body">
+                <p class="eyebrow">创作阶段</p>
+                <h2>看正文与审查</h2>
+                <p>Writer 的正文、Reviewer 的审查意见和最终设定抽取结果会集中显示在这里。</p>
+              </div>
+              <div class="stage-rail" aria-label="开始创作阶段">
+                <button class="stage-nav-card" type="button" data-view="studioPlan">1. 章节规划输入</button>
+                <button class="stage-nav-card" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
+                <button class="stage-nav-card active" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
+              </div>
+            </aside>
+          </section>
+        </section>
+
+        <section id="charactersView" class="view">
+          <article class="paper-card codex-page">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Character Codex</p>
+                <h2>人物设定卡片</h2>
+              </div>
+            </div>
+            <div id="characterCards" class="character-empty">
+              Librarian 抽取到人物变化后，会在这里以游戏角色卡形式展示。
+            </div>
+          </article>
+        </section>
+
+        <section id="loreView" class="view">
+          <article class="paper-card lore-page">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Lore Timeline</p>
+                <h2>剧情设定鱼骨线</h2>
+              </div>
+            </div>
+            <div class="timeline-hint">横向剧情线支持向右滚动，适合长篇章节持续追加设定。</div>
+            <div id="loreFishbone" class="fishbone-empty">
+              章节生成后，世界观增量、道具、地点、伏笔会沿剧情线展示。
+            </div>
+          </article>
+        </section>
+
+        <section id="publishView" class="view">
+          <div class="paper-card publish-hero">
+            <div>
+              <p class="eyebrow">Coming Soon</p>
+              <h2>一键发表</h2>
+              <p>
+                未来这里会接入晋江、番茄、起点等平台的自动发布流程。当前仅展示功能示例，不允许提交账号、密码或执行发布。
+              </p>
+            </div>
+            <span class="locked-badge">未开放</span>
+          </div>
+
+          <div class="publish-grid">
+            <article class="platform-card">
+              <strong>晋江文学城</strong>
+              <p>章节标题、正文、作话、存稿箱发布。</p>
+              <button type="button" disabled>演示入口</button>
+            </article>
+            <article class="platform-card">
+              <strong>番茄小说</strong>
+              <p>作品卷管理、草稿同步、发布前格式检查。</p>
+              <button type="button" disabled>演示入口</button>
+            </article>
+            <article class="platform-card">
+              <strong>起点中文网</strong>
+              <p>章节上传、定时发布、数据回填。</p>
+              <button type="button" disabled>演示入口</button>
+            </article>
+          </div>
+
+          <article class="paper-card disabled-form">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Preview Only</p>
+                <h2>账号配置示例</h2>
+              </div>
+            </div>
+            <div class="two-col">
+              <label>
+                平台
+                <input value="示例平台，不可操作" disabled />
+              </label>
+              <label>
+                用户名
+                <input value="writer@example.com" disabled />
+              </label>
+            </div>
+            <label>
+              密码 / Token
+              <input value="************" disabled />
+            </label>
+            <button class="primary-btn" type="button" disabled>功能未开放，暂不可发表</button>
+          </article>
+        </section>
+
+        <section id="previewView" class="view">
+          <article class="reader-shell">
+            <div class="reader-book">
+              <p class="eyebrow">Reader Preview</p>
+              <h2 id="previewTitle">第 1 章</h2>
+              <div id="previewContent" class="reader-content">
+                这里会像正式小说阅读页一样展示已经生成的正文。完成一次章节生成后，内容会自动同步到这里。
+              </div>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
