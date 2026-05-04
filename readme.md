@@ -1,138 +1,118 @@
 # 多智能体网文共创引擎
 
-Human-in-the-Loop Web Novel Agent 是一个基于大模型、多智能体协作和 RAG 的长篇网文半自动生成系统。项目目标是缓解 LLM 写长篇小说时常见的上下文遗忘、逻辑发散和角色崩坏问题，并允许用户在关键节点介入审核。
+Human-in-the-Loop Web Novel Agent 是一个基于 FastAPI、LangGraph、LangChain 和 RAG 的长篇网文半自动生成系统。它的目标是让大模型参与长篇小说创作时，不再只做一次性文本生成，而是围绕“规划、人工审核、写作、审查、设定抽取、长期记忆”形成可持续推进的创作流程。
 
-## 核心思路
+项目当前已经可以完成单章创作闭环，并正在从“可演示原型”推进到“稳定化小说工程”：接受章节后会写入长期记忆，作品目录模型和本地 JSON 持久化层已经具备雏形，后续重点是把作品目录持久化正式接入工作流。
 
-系统采用 LangGraph 状态机架构，多个 Agent 共享并修改同一个 `NovelState`：
+## 核心流程
 
-- `Planner Agent`：根据世界观、人物图谱和上一章进度生成本章剧情节点。
-- `Writer Agent`：结合剧情节点和 RAG 检索到的设定撰写章节草稿。
-- `Reviewer Agent`：检查 OOC、逻辑漏洞、设定冲突和节奏问题。
-- `Librarian Agent`：在用户最终接受章节后，从正文中抽取新人物、新道具、关系变化和世界观增量。
+系统采用 LangGraph 状态机架构，多个 Agent 共享并更新同一个 `NovelState`。
 
-Planner 生成剧情节点后，工作流会进入 `awaiting_human_review` 阶段。用户确认或修改节点后，Writer 先生成正文并立即返回前端展示，再由 Reviewer 单独审查。只有用户最终接受本章节后，Librarian 才会抽取设定并完成本章记忆更新。
+```text
+Planner -> 人工审核 -> Writer -> Reviewer -> 用户确认 -> Librarian -> 长期记忆
+```
+
+- `Planner Agent`：根据世界观、人物卡、前文摘要和用户要求生成本章剧情节点。
+- `Writer Agent`：读取用户确认后的剧情节点，并结合 RAG 检索到的长期记忆生成章节草稿。
+- `Reviewer Agent`：结合正文、人物卡、世界观和长期记忆检查 OOC、逻辑漏洞、设定冲突和伏笔断裂。
+- `Librarian Agent`：只在用户接受章节后抽取章节摘要、世界观增量、人物变化、地点、道具和伏笔。
+- `MemoryStore`：将已接受章节的稳定信息写入 `.novel_memory/{project_id}.json`，供后续章节检索。
+
+## 当前阶段
+
+阶段六：稳定化小说工程。
+
+已完成：
+
+- FastAPI 后端入口和静态前端工作台。
+- LangGraph 小说工作流：`Planner -> Writer -> Reviewer -> Librarian`。
+- Planner 后的人工审核断点：用户可以修改剧情节点后再进入正文生成。
+- Writer、Reviewer、Librarian 均接入 LangChain + Pydantic 结构化输出，并保留本地降级逻辑。
+- 章节流程拆分为 `Writer -> Reviewer -> 用户确认 -> Librarian`，正文、审查和设定抽取分阶段展示。
+- 前端工作台支持总览、章节创作、剧情审核、草稿审查、人物设定、剧情设定、一键发表前瞻和小说预览。
+- 新增作品级模型 `NovelProject`、`VolumePlan`、`ChapterRecord`，可在内存中维护章节目录。
+- 新增 RAG 记忆模型 `MemoryItem`、`RetrievalContext`。
+- 新增本地 JSON 记忆库 `JsonMemoryStore`，按作品写入 `.novel_memory/{project_id}.json`。
+- Writer / Reviewer 会在生成或审查前检索长期记忆并注入 prompt。
+- 已修复 RAG 闭环：长期记忆只在 `accept_chapter` 中，Librarian 成功抽取且章节进入 `completed` 后写入；Writer 草稿和 Reviewer 审查阶段不会污染记忆库。
+- 新增 `tests/test_accept_chapter_memory.py`，验证接受章节后会生成 JSON 记忆文件并产生 `MemoryItem`。
+- 新增 `app/core/project_store.py`，提供 `ProjectStore` 抽象和 `JsonProjectStore` 本地 JSON 持久化实现。
+- 新增 `requirements.txt` 和 `.env.example`，整理启动依赖与环境变量模板。
+
+仍未完成：
+
+- `JsonProjectStore` 已完成独立存储层，但尚未接入 `NovelWorkflowService`；当前 API 读取的作品目录仍主要来自进程内内存。
+- 服务重启后，章节目录还不能自动从 `.novel_projects/{project_id}.json` 恢复。
+- 分卷规划 `VolumePlan` 还没有接入 Planner 的节奏控制。
+- 章节重写、版本记录、修稿对比和人工定稿记录尚未完成。
+- 当前 RAG 是本地 JSON + 关键词重叠检索，尚未接入 embedding、Chroma、FAISS 等语义向量库。
+- Writer 正文生成还不是 token 流式输出。
+- 小说级主线/支线、伏笔生命周期、角色成长弧线还未完整建模。
 
 ## 技术栈
 
 - Python 3.10+
 - FastAPI
 - LangGraph
-- LangChain
+- LangChain / LangChain OpenAI
 - Pydantic v2
-- python-dotenv / pydantic-settings
-- RAG：用于检索长篇世界观、人物卡、历史章节摘要和伏笔
-
-## 当前阶段
-
-阶段四：单章节共创闭环基本成型。
-
-已完成：
-
-- 创建 `app/models`、`app/agents`、`app/core` 等基础目录。
-- 使用 Pydantic v2 定义 `CharacterCard`、`PlotBeat`、`ChapterDraft`。
-- 使用 `TypedDict` 定义 LangGraph 全局状态 `NovelState`。
-- 创建 Planner、Writer、Librarian、Reviewer 节点骨架。
-- 创建 LangGraph 状态图，并在 Writer 前设置人工审核断点。
-- 新增小说工作流 API：生成剧情节点、提交审核结果、读取会话状态。
-- 新增 FastAPI 托管的前端工作台，支持左侧功能导航、折叠侧栏、项目总览、开始创作、一键发表前瞻和小说预览。
-- `开始创作` 下新增独立子页面：人物设定以游戏角色卡展示，剧情设定以横向可滚动鱼骨线展示。
-- 顶部条幅会在 Agent 运行时展示预制动态文案，生成结果统一在正文、设定和审查面板中展示。
-- Planner Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级到本地剧情节点，保证流程可继续演示。
-- Writer Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级为剧情节点草稿。
-- Librarian Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级为章节摘要设定。
-- Reviewer Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级为基础规则审查。
-- 章节流程已拆分为 `Writer -> Reviewer -> 用户确认 -> Librarian`：正文先展示，审查后可自动或手动打回修稿，用户接受章节后再抽取设定。
-- `开始创作` 已拆成章节规划、剧情审核、草稿审查三个阶段页，并在页面右侧提供可折叠阶段导航。
-- 人物卡片输入已从 JSON 文本框改为可视化表单，支持随窗口宽度自适应多列展示。
-- 草稿审查页已将章节正文与审查/设定面板并排展示，降低单页拥挤感。
-- 保留现有 FastAPI 与 LangChain 对话链路，后续继续接入真正的 token 流式状态输出和 RAG 长文本记忆库。
-
-当前项目已经基本具备“单个章节”的完整半自动共创能力：用户输入设定，Planner 规划剧情节点，用户审核后 Writer 生成正文，Reviewer 审查并可触发修稿，用户接受后 Librarian 抽取章节记忆。下一阶段重点不再只是单章生成，而是把多个章节串联成一本可持续维护的小说工程。
-
-## 当前能力边界
-
-已具备：
-
-- 单章规划：根据世界观、前文摘要、人物卡和本章要求生成剧情节点。
-- 人工审核：用户可以修改 Planner 输出后再进入正文生成。
-- 正文生成：Writer 根据确认后的剧情节点生成章节草稿。
-- 审查修稿：Reviewer 给出结构化审查意见；不通过时可自动或手动触发 Writer 修稿。
-- 设定抽取：用户接受章节后，Librarian 抽取人物状态、世界观增量、道具、地点和伏笔。
-- 前端工作台：支持章节创作、人物设定、剧情设定、小说预览和一键发表前瞻。
-
-暂未完成：
-
-- 多章节连续创作还没有形成稳定的章节队列、卷纲和长期进度管理。
-- RAG 长文本记忆库尚未真正落地，当前主要依赖会话状态和单次设定抽取。
-- Writer 正文生成还不是 token 流式输出，前端仍需等待单次 LLM 请求返回。
-- Reviewer 只负责审查和触发修稿，还没有形成多轮版本对比、差异查看和人工定稿记录。
-- 小说级结构如作品信息、分卷、主线/支线、伏笔生命周期、角色成长弧线还未建模。
-
-## 下一阶段路线
-
-从“单章可用”走向“正式生成一本小说”，建议按下面顺序推进：
-
-1. 多章节连续创作
-   - 增加作品级 `NovelProject` / `VolumePlan` / `ChapterPlan` 概念。
-   - 支持从上一章摘要、已确认设定和未回收伏笔中生成下一章。
-   - 前端增加章节列表、章节状态、继续写下一章和重写某章能力。
-
-2. 长文本记忆与 RAG
-   - 将已接受章节、章节摘要、人物卡、地点、道具、伏笔写入可检索记忆库。
-   - Writer 和 Reviewer 在生成/审查前检索相关历史设定，减少长篇上下文遗忘。
-   - Librarian 从“展示设定”升级为“维护可检索设定库”。
-
-3. 小说级规划
-   - 增加整本书的题材、卖点、主线目标、阶段爽点、分卷结构和结局方向。
-   - Planner 不只规划单章，还能根据卷纲控制节奏，避免剧情发散。
-   - 加入伏笔生命周期：埋下、强化、误导、回收、废弃。
-
-4. 流式与异步体验
-   - Writer 正文生成改为 token 流式输出，边生成边显示。
-   - Reviewer 和 Librarian 可放到后台异步执行，减少用户等待。
-   - 前端展示真实 Agent 状态，而不是只用预制动态文案。
-
-5. 成稿管理与发布准备
-   - 支持章节版本、人工定稿、导出 Markdown / TXT。
-   - 增加小说预览目录、章节切换、总字数统计和章节质量概览。
-   - 一键发表仍保持前瞻页，待账号安全、平台适配和人工确认机制完善后再接入真实发布。
+- pydantic-settings / python-dotenv
+- 原生 HTML / CSS / JavaScript 前端
+- 本地 JSON RAG 记忆库
+- 本地 JSON 作品目录持久化层
 
 ## 目录结构
 
 ```text
 novelagent/
 ├── app/
-│   ├── agents/              # LangGraph Agent 节点：Planner / Writer / Librarian / Reviewer
-│   │   ├── librarian_chain.py # Librarian 结构化 LLM 输出链
-│   │   ├── novel_nodes.py    # 小说工作流节点
-│   │   ├── planner_chain.py  # Planner 结构化 LLM 输出链
-│   │   ├── reviewer_chain.py # Reviewer 结构化 LLM 输出链
-│   │   └── writer_chain.py   # Writer 结构化 LLM 输出链
-│   ├── core/                # 应用基础设施：配置、日志、RAG、图编排等
-│   │   └── novel_graph.py    # LangGraph 状态图和会话服务
-│   ├── models/              # 小说领域模型与 LangGraph 状态定义
-│   │   ├── character.py     # CharacterCard 人物卡片
-│   │   ├── chapter.py       # PlotBeat 与 ChapterDraft
-│   │   ├── librarian.py     # LibrarianOutput 结构化输出
-│   │   ├── planner.py       # PlannerOutput 结构化输出
-│   │   ├── reviewer.py      # ReviewerOutput 结构化输出
-│   │   ├── writer.py        # WriterOutput 结构化输出
-│   │   └── state.py         # NovelState 全局状态
-│   ├── chain.py             # 现有 LangChain 对话链路
-│   ├── novel_routes.py      # /novel 小说工作流接口
-│   └── routes.py            # 现有 /chat 流式接口
+│   ├── agents/
+│   │   ├── librarian_chain.py     # Librarian 结构化 LLM 输出链
+│   │   ├── novel_nodes.py         # LangGraph 节点：Planner / Writer / Reviewer / Librarian
+│   │   ├── planner_chain.py       # Planner 结构化 LLM 输出链
+│   │   ├── reviewer_chain.py      # Reviewer 结构化 LLM 输出链
+│   │   └── writer_chain.py        # Writer 结构化 LLM 输出链
+│   ├── core/
+│   │   ├── memory.py              # RAG 记忆库抽象与本地 JSON 实现
+│   │   ├── novel_graph.py         # LangGraph 状态图和会话服务
+│   │   ├── project_store.py       # 作品目录持久化抽象与本地 JSON 实现
+│   │   └── retriever.py           # RAG 检索和记忆条目构造
+│   ├── models/
+│   │   ├── character.py           # CharacterCard
+│   │   ├── chapter.py             # PlotBeat / ChapterDraft
+│   │   ├── librarian.py           # LibrarianOutput
+│   │   ├── memory.py              # MemoryItem / RetrievalContext
+│   │   ├── planner.py             # PlannerOutput
+│   │   ├── project.py             # NovelProject / VolumePlan / ChapterRecord
+│   │   ├── reviewer.py            # ReviewerOutput
+│   │   ├── state.py               # NovelState
+│   │   └── writer.py              # WriterOutput
+│   ├── chain.py                   # 保留的通用 LangChain 对话链路
+│   ├── novel_routes.py            # /novel 小说工作流 API
+│   └── routes.py                  # /chat 流式聊天 API
 ├── core/
-│   └── config.py            # 现有配置管理
+│   └── config.py                  # 环境变量和 LLM 配置
 ├── frontend/
-│   ├── index.html           # 前端工作台页面
-│   ├── styles.css           # 朴素写作风格与纸张/书本拟物化样式
-│   └── app.js               # 调用 /novel API 的交互逻辑
+│   ├── app.js                     # 前端工作台交互逻辑
+│   ├── index.html                 # 前端工作台页面
+│   └── styles.css                 # 前端样式
 ├── schemas/
-│   ├── chat.py              # 现有聊天接口 Schema
-│   └── novel.py             # 小说工作流 API Schema
-├── main.py                  # FastAPI 应用入口
+│   ├── chat.py                    # 通用聊天接口 Schema
+│   └── novel.py                   # 小说工作流 API Schema
+├── tests/
+│   ├── __init__.py
+│   └── test_accept_chapter_memory.py
+├── .env.example                   # 环境变量模板
+├── requirements.txt               # Python 运行依赖
+├── main.py                        # FastAPI 应用入口
 └── readme.md
+```
+
+运行时会产生两个本地目录，均已加入 `.gitignore`：
+
+```text
+.novel_memory/       # RAG 长期记忆
+.novel_projects/     # 作品目录持久化文件，存储层已完成，工作流接入待完成
 ```
 
 ## 核心数据模型
@@ -140,12 +120,45 @@ novelagent/
 - `CharacterCard`：人物卡片，记录姓名、别名、叙事定位、长期人设、当前心理状态、当前物理状态、关系、物品、秘密和时间线。
 - `PlotBeat`：剧情节点，记录节点顺序、摘要、叙事目的、出场人物、地点、冲突、预期结果和连续性约束。
 - `ChapterDraft`：章节草稿，记录章节号、标题、采用的剧情节点、正文、审查意见、修订记录、质量评分和草稿状态。
-- `NovelState`：LangGraph 全局状态，记录世界观、当前章节、当前阶段、人物图谱、RAG 检索上下文、人工反馈、设定抽取结果、审查反馈和用户接受状态。
+- `NovelState`：LangGraph 全局状态，记录世界观、章节号、当前阶段、人物图谱、剧情节点、草稿、RAG 检索结果、人工反馈、审查反馈和设定抽取结果。
+- `MemoryItem`：长期记忆条目，记录作品 ID、分类、标题、正文、来源章节、标签、重要度和来源信息。
+- `RetrievalContext`：一次 RAG 检索命中的上下文，记录命中条目、相关性分数、命中原因和可注入 prompt 的格式化文本。
+- `NovelProject`：作品级工程，记录作品标题、世界观、分卷规划、章节目录、当前章节、最近会话和总字数。
+- `VolumePlan`：分卷规划模型，预留分卷标题、主线摘要和章节范围。
+- `ChapterRecord`：章节目录记录，记录章节状态、关联会话、摘要、字数、草稿快照和更新时间。
 
-## 启动方式
+## 安装与启动
+
+当前本机验证使用的 conda 环境是 `ai_project`。如果旧文档或旧命令里出现 `ai-agent`，请以当前可用环境为准，或把下面命令中的环境名替换成你的实际环境。
+
+准备环境：
 
 ```bash
-uvicorn main:app --reload
+conda activate ai_project
+python -m pip install -r requirements.txt
+copy .env.example .env
+```
+
+编辑 `.env`，填入真实配置。不要提交真实 `.env`。
+
+```env
+OPENAI_API_KEY="sk-your-api-key"
+OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_MODEL="qwen3.6-plus"
+LLM_TEMPERATURE="0.7"
+```
+
+启动服务：
+
+```bash
+conda activate ai_project
+python -m uvicorn main:app --reload
+```
+
+如果当前 shell 没有 `conda` 命令，也可以直接使用本机已验证的 Python 路径：
+
+```bash
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -m uvicorn main:app --reload
 ```
 
 浏览器打开：
@@ -154,20 +167,16 @@ uvicorn main:app --reload
 http://127.0.0.1:8000/
 ```
 
-前端工作台包含：
+## 前端工作台
 
-- `总览`：展示小说总字数、当前章节、剧情节点数量、工作流阶段和审查状态。
-- `开始创作`：当前主功能，支持生成剧情节点、人工审核修改、继续生成章节草稿。
+- `总览`：展示小说总字数、当前章节、剧情节点数量、工作流阶段、审查状态和章节目录。
+- `开始创作`：输入世界观、章节号、前文摘要、创作要求和人物卡。
+- `剧情审核`：展示 Planner 输出的剧情节点，用户可逐项修改后提交。
+- `草稿审查`：展示 Writer 正文、Reviewer 审查意见、修稿按钮和接受章节按钮。
 - `人物设定`：展示 Librarian 抽取出的人物卡片和状态变化。
-- `剧情设定`：以横向可滚动鱼骨线展示世界观增量、道具、地点、伏笔和章节摘要。
-- `一键发表`：功能前瞻页，仅展示晋江、番茄、起点等平台的未来发布能力，当前不可操作。
-- `小说预览`：以正式阅读页形式展示已生成章节正文。
-
-当前仍可调用既有 `POST /chat` 接口，请求体：
-
-```json
-{"query": "你的问题"}
-```
+- `剧情设定`：以横向鱼骨线展示世界观增量、道具、地点、伏笔和章节摘要。
+- `一键发表`：功能前瞻页，当前不可操作。
+- `小说预览`：以阅读页形式展示当前选中章节正文。
 
 ## 小说工作流 API
 
@@ -177,6 +186,8 @@ http://127.0.0.1:8000/
 curl -X POST http://127.0.0.1:8000/novel/chapters/plan \
   -H "Content-Type: application/json" \
   -d '{
+    "project_id": "default",
+    "project_title": "月光禁区",
     "global_worldview": "玄幻都市，灵气复苏，主角逐步揭开家族秘密。",
     "chapter_number": 1,
     "previous_summary": "主角刚收到一封神秘信件。",
@@ -185,7 +196,7 @@ curl -X POST http://127.0.0.1:8000/novel/chapters/plan \
   }'
 ```
 
-接口会返回 `session_id` 和 `plot_beats`。用户确认或修改剧情节点后，提交继续生成正文：
+提交人工确认后的剧情节点，生成章节草稿：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/approve \
@@ -196,24 +207,183 @@ curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/approve \
   }'
 ```
 
-随后可依次触发 Reviewer 审查、Writer 修稿或接受章节后的 Librarian 设定抽取：
+触发 Reviewer 审查：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/review
+```
 
+根据 Reviewer 意见修稿：
+
+```bash
 curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/revise \
   -H "Content-Type: application/json" \
   -d '{"human_feedback": "同意按 Reviewer 意见修订。"}'
+```
 
+接受章节并触发 Librarian 抽取设定。只有这个阶段会写入长期记忆：
+
+```bash
 curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/accept \
   -H "Content-Type: application/json" \
   -d '{"human_feedback": "接受本章节。"}'
 ```
 
-调试时可读取当前会话状态：
+读取会话状态：
 
 ```bash
 curl http://127.0.0.1:8000/novel/sessions/{session_id}
 ```
 
-当前 Planner、Writer、Librarian、Reviewer 均已接入基于 LangChain 的 Pydantic 结构化输出，并保留本地降级逻辑。后续可继续接入 RAG 检索、长文本记忆库和真正的 token 流式状态输出。
+读取作品目录：
+
+```bash
+curl http://127.0.0.1:8000/novel/projects/current
+curl http://127.0.0.1:8000/novel/projects/default
+```
+
+基于上一章摘要继续规划下一章：
+
+```bash
+curl -X POST http://127.0.0.1:8000/novel/projects/default/chapters/next \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_instruction": "延续上一章悬念，开头承接钥匙异动。",
+    "characters": []
+  }'
+```
+
+保留的通用聊天接口：
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query": "你的问题"}'
+```
+
+## RAG 长文本记忆
+
+当前 RAG 是轻量本地实现，重点是先把接口和工作流稳定下来。
+
+写入路径：
+
+```text
+.novel_memory/{project_id}.json
+```
+
+相关文件：
+
+- `app/models/memory.py`：定义 `MemoryItem` 和 `RetrievalContext`。
+- `app/core/memory.py`：定义 `MemoryStore` 抽象和 `JsonMemoryStore` 本地 JSON 实现。
+- `app/core/retriever.py`：把 `NovelState` 转成检索 query，并把最终章节状态转成 `MemoryItem`。
+- `app/agents/novel_nodes.py`：Writer / Reviewer 调用 RAG 检索。
+- `app/core/novel_graph.py`：`accept_chapter` 在章节完成后写入长期记忆。
+
+检索流程：
+
+```text
+NovelState
+-> _build_query
+-> JsonMemoryStore.search
+-> RetrievalContext
+-> format_retrieved_context
+-> 注入 Writer / Reviewer prompt
+```
+
+写入流程：
+
+```text
+用户接受章节
+-> Librarian 抽取设定
+-> current_stage = completed
+-> build_memory_items_from_state
+-> memory_store.add_items
+-> .novel_memory/{project_id}.json
+```
+
+当前检索策略：
+
+- 英文/数字按正则切词。
+- 中文按连续汉字生成二字词。
+- 使用 query 和记忆条目的关键词重叠做召回。
+- 根据关键词重叠度、记忆重要度、章节距离、记忆分类加权排序。
+
+## 作品目录持久化
+
+`app/core/project_store.py` 已新增独立持久化层：
+
+- `ProjectStore`：抽象接口。
+- `JsonProjectStore`：本地 JSON 实现。
+- `save_project(project)`：保存 `NovelProject`。
+- `load_project(project_id)`：读取指定作品。
+- `list_projects()`：列出所有本地作品。
+- `delete_project(project_id)`：删除作品目录文件。
+
+写入路径：
+
+```text
+.novel_projects/{project_id}.json
+```
+
+当前状态：存储层已完成，但还没有接入 `NovelWorkflowService`。下一步应在 `_ensure_project`、`_upsert_chapter_record`、`get_project` 等路径中加载和保存 `NovelProject`，让服务重启后仍能恢复章节目录。
+
+## 验证命令
+
+建议在 `ai_project` 环境中执行：
+
+```bash
+conda activate ai_project
+
+python -m compileall app schemas tests main.py
+
+python -m unittest tests.test_accept_chapter_memory
+
+python -c "from app.core.novel_graph import build_novel_graph; graph=build_novel_graph(); print('graph_ok')"
+
+python -c "import main; from app.novel_routes import router; print('main_import_ok'); print(len(router.routes))"
+
+python -m uvicorn main:app --reload
+```
+
+如果 `conda` 不在 PATH 中，可直接使用：
+
+```bash
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -m compileall app schemas tests main.py
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -m unittest tests.test_accept_chapter_memory
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -c "from app.core.novel_graph import build_novel_graph; graph=build_novel_graph(); print('graph_ok')"
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -c "import main; from app.novel_routes import router; print('main_import_ok'); print(len(router.routes))"
+```
+
+本次 README 更新前已通过：
+
+```text
+compileall: OK
+tests.test_accept_chapter_memory: OK
+```
+
+## 下一步路线
+
+1. 接入作品目录持久化
+   - 将 `JsonProjectStore` 接入 `NovelWorkflowService`。
+   - 规划、审查、修稿、接受章节后自动保存 `NovelProject`。
+   - 服务启动或首次读取时从 `.novel_projects/{project_id}.json` 恢复目录。
+
+2. 章节版本与重写
+   - 增加章节版本号。
+   - 保存原草稿、Reviewer 修订意见、修订稿和人工定稿。
+   - 支持版本对比和回滚。
+
+3. RAG 升级
+   - 保留 `MemoryStore` 接口。
+   - 新增 embedding 字段和语义检索实现。
+   - 可替换接入 Chroma、FAISS 或其它向量库。
+
+4. 流式与异步体验
+   - Writer 正文改成 token 流式输出。
+   - Reviewer 和 Librarian 后台执行。
+   - 前端展示真实 Agent 状态，而不是预制动态文案。
+
+5. 小说级规划
+   - 增加全书卖点、主线目标、分卷节奏、高潮节点和结局方向。
+   - Planner 基于卷纲控制单章节奏。
+   - 建模伏笔生命周期：埋下、强化、误导、回收、废弃。

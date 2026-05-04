@@ -39,6 +39,8 @@ const stageStepIndex = {
 };
 
 const appState = {
+  projectId: "default",
+  project: null,
   sessionId: "",
   plotBeats: [],
   activeBeatIndex: 0,
@@ -69,6 +71,7 @@ const characterRoleOptions = [
 const elements = {
   appShell: $("#appShell"),
   sidebarToggle: $("#sidebarToggle"),
+  projectTitle: $("#projectTitleInput"),
   worldview: $("#worldviewInput"),
   chapter: $("#chapterInput"),
   session: $("#sessionInput"),
@@ -95,6 +98,7 @@ const elements = {
   agentStream: $("#agentStream"),
   toast: $("#toast"),
   wordCountStat: $("#wordCountStat"),
+  projectStat: $("#projectStat"),
   chapterStat: $("#chapterStat"),
   sessionStat: $("#sessionStat"),
   progressStat: $("#progressStat"),
@@ -102,6 +106,8 @@ const elements = {
   reviewStat: $("#reviewStat"),
   previewTitle: $("#previewTitle"),
   previewContent: $("#previewContent"),
+  chapterCatalog: $("#chapterCatalog"),
+  continueNextBtn: $("#continueNextBtn"),
   chapterDecisionPanel: $("#chapterDecisionPanel"),
   decisionTitle: $("#decisionTitle"),
   decisionMessage: $("#decisionMessage"),
@@ -266,12 +272,29 @@ function countChineseWords(text) {
   return compact.length;
 }
 
+function syncProject(project) {
+  appState.project = project || appState.project;
+  if (!appState.project) {
+    return;
+  }
+  appState.projectId = appState.project.project_id || "default";
+  if (appState.project.title && appState.project.title !== "未命名作品" && !elements.projectTitle.value) {
+    elements.projectTitle.value = appState.project.title;
+  }
+  if (appState.project.global_worldview && !elements.worldview.value) {
+    elements.worldview.value = appState.project.global_worldview;
+  }
+  renderChapterCatalog();
+  updateOverview();
+}
+
 function updateOverview() {
   const draftContent = appState.draft?.content || "";
   const chapterNumber = Number(elements.chapter.value || appState.draft?.chapter_number || 1);
-  const wordCount = countChineseWords(draftContent);
+  const wordCount = appState.project?.total_word_count || countChineseWords(draftContent);
 
   elements.wordCountStat.textContent = String(wordCount);
+  elements.projectStat.textContent = appState.project?.title || "默认作品";
   elements.chapterStat.textContent = `第 ${chapterNumber} 章`;
   elements.sessionStat.textContent = appState.sessionId
     ? `Session: ${appState.sessionId.slice(0, 8)}...`
@@ -284,6 +307,51 @@ function updateOverview() {
   elements.previewContent.textContent =
     draftContent ||
     "这里会像正式小说阅读页一样展示已经生成的正文。完成一次章节生成后，内容会自动同步到这里。";
+}
+
+function renderChapterCatalog() {
+  const chapters = appState.project?.chapters || [];
+  if (!chapters.length) {
+    elements.chapterCatalog.className = "chapter-catalog-empty";
+    elements.chapterCatalog.textContent =
+      "接受章节后，这里会形成作品目录。你可以切换已生成章节，也可以从上一章摘要继续规划下一章。";
+    return;
+  }
+
+  elements.chapterCatalog.className = "chapter-catalog";
+  elements.chapterCatalog.innerHTML = chapters
+    .map((chapter) => {
+      const isActive = Number(elements.chapter.value || 1) === chapter.chapter_number;
+      const status = stageText[chapter.status] || {
+        planned: "已规划",
+        drafted: "已成稿",
+        reviewed: "已审查",
+        needs_revision: "需修改",
+        approved: "已接受",
+        completed: "已完成",
+        failed: "失败",
+      }[chapter.status] || chapter.status;
+      return `
+        <button class="chapter-record ${isActive ? "active" : ""}" type="button" data-chapter-number="${chapter.chapter_number}">
+          <span>第 ${chapter.chapter_number} 章</span>
+          <strong>${escapeHtml(chapter.title || "未命名章节")}</strong>
+          <small>${escapeHtml(status)} · ${chapter.word_count || 0} 字</small>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function chapterStatusToStage(status) {
+  return {
+    planned: "awaiting_human_review",
+    drafted: "awaiting_review",
+    reviewed: "awaiting_chapter_acceptance",
+    needs_revision: "awaiting_revision_decision",
+    approved: "awaiting_chapter_acceptance",
+    completed: "completed",
+    failed: "failed",
+  }[status] || "planning";
 }
 
 function renderMemoryPanels() {
@@ -740,6 +808,40 @@ async function requestJson(url, options = {}) {
   return data;
 }
 
+async function loadProject(projectId = appState.projectId) {
+  const endpoint = projectId && projectId !== "default" ? `/novel/projects/${projectId}` : "/novel/projects/current";
+  const data = await requestJson(endpoint);
+  syncProject(data.project);
+  return data.project;
+}
+
+function selectChapter(chapterNumber) {
+  const chapter = (appState.project?.chapters || []).find(
+    (item) => item.chapter_number === chapterNumber,
+  );
+  if (!chapter) {
+    return;
+  }
+
+  elements.chapter.value = String(chapter.chapter_number);
+  elements.summary.value = chapter.summary || elements.summary.value;
+  if (chapter.session_id) {
+    updateSession(chapter.session_id);
+    elements.session.value = chapter.session_id;
+  }
+  if (chapter.draft) {
+    appState.draft = chapter.draft;
+    appState.plotBeats = chapter.draft.plot_beats || [];
+    elements.draftOutput.textContent = chapter.draft.content || "草稿为空。";
+    renderBeats(appState.plotBeats);
+    renderMetaMessage(`已切换到第 ${chapter.chapter_number} 章目录记录。`);
+  }
+  updateStage(chapterStatusToStage(chapter.status));
+  renderChapterCatalog();
+  updateOverview();
+  switchView(chapter.draft ? "studioDraft" : "studioPlan");
+}
+
 function renderBeats(beats) {
   appState.plotBeats = beats || [];
   appState.activeBeatIndex = 0;
@@ -859,6 +961,9 @@ function collectEditedBeats() {
 
 function updateSession(sessionId) {
   appState.sessionId = sessionId || "";
+  if (appState.sessionId) {
+    elements.session.value = appState.sessionId;
+  }
   elements.sessionBadge.textContent = appState.sessionId
     ? `Session: ${appState.sessionId}`
     : "尚未创建会话";
@@ -908,6 +1013,8 @@ async function planChapter() {
     });
     const payload = {
       session_id: elements.session.value.trim() || null,
+      project_id: appState.projectId,
+      project_title: elements.projectTitle.value.trim() || null,
       global_worldview: elements.worldview.value.trim(),
       chapter_number: Number(elements.chapter.value || 1),
       previous_summary: elements.summary.value.trim() || null,
@@ -930,6 +1037,7 @@ async function planChapter() {
     elements.draftOutput.textContent = "剧情节点已生成。请审核并提交后继续生成正文。";
     renderMetaMessage(data.message);
     renderMemoryPanels();
+    await loadProject();
     switchView("studioReview");
     finishAgentRun({
       agent: "Planner",
@@ -1027,6 +1135,7 @@ async function reviewDraft() {
       method: "POST",
     });
     renderRunResult(data);
+    await loadProject();
     finishAgentRun({
       agent: "Reviewer",
       stage: data.current_stage,
@@ -1120,6 +1229,7 @@ async function acceptChapter() {
       }),
     });
     renderRunResult(data);
+    await loadProject();
     finishAgentRun({
       agent: "Librarian",
       stage: data.current_stage,
@@ -1139,6 +1249,67 @@ async function acceptChapter() {
   }
 }
 
+async function continueNextChapter() {
+  try {
+    syncCharacterForms();
+    setLoading(elements.continueNextBtn, true, "规划下一章...");
+    startAgentRun({
+      agent: "Planner",
+      stage: "planning",
+      title: "Planner 正在承接上一章继续规划",
+      messages: [
+        "正在读取作品目录和最近完成章节摘要，整理下一章承接点。",
+        "正在把未解决冲突和新的章节目标合并成剧情节点。",
+        "正在生成下一章 Planner 输出，稍后进入人工审核。",
+      ],
+    });
+
+    const data = await requestJson(`/novel/projects/${appState.projectId}/chapters/next`, {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: null,
+        user_instruction: elements.instruction.value.trim() || null,
+        characters: collectCharacters(),
+      }),
+    });
+
+    appState.draft = null;
+    appState.loreUpdates = {};
+    appState.characterUpdates = {};
+    elements.chapter.value = String(data.plot_beats?.[0]?.chapter_number || Number(elements.chapter.value || 0) + 1);
+    setDecisionPanel(null);
+    updateSession(data.session_id);
+    updateStage(data.current_stage);
+    renderBeats(data.plot_beats);
+    elements.draftOutput.textContent = "下一章剧情节点已生成。请审核并提交后继续生成正文。";
+    renderMetaMessage(data.message);
+    renderMemoryPanels();
+    await loadProject();
+    const plannedChapter = appState.project?.chapters?.find((chapter) => chapter.session_id === data.session_id);
+    if (plannedChapter) {
+      elements.chapter.value = String(plannedChapter.chapter_number);
+      elements.summary.value = plannedChapter.summary || elements.summary.value;
+    }
+    switchView("studioReview");
+    finishAgentRun({
+      agent: "Planner",
+      stage: data.current_stage,
+      title: "下一章剧情节点已生成",
+      message: "目录已追加新的章节记录。请审核剧情节点后继续生成正文。",
+    });
+    showToast("已开始规划下一章。");
+  } catch (error) {
+    failAgentRun({
+      agent: "Planner",
+      title: "继续写下一章时遇到问题",
+      message: error.message,
+    });
+    showToast(error.message);
+  } finally {
+    setLoading(elements.continueNextBtn, false);
+  }
+}
+
 async function refreshState() {
   if (!appState.sessionId) {
     showToast("暂无可刷新的会话。");
@@ -1148,6 +1319,7 @@ async function refreshState() {
   try {
     const data = await requestJson(`/novel/sessions/${appState.sessionId}`);
     renderRunResult(data);
+    await loadProject();
     showToast("状态已刷新。");
   } catch (error) {
     showToast(error.message);
@@ -1155,6 +1327,7 @@ async function refreshState() {
 }
 
 function fillExample() {
+  elements.projectTitle.value = "月光禁区";
   elements.worldview.value =
     "玄幻都市，灵气复苏刚刚开始。主角林澈出身没落修行世家，家族旧宅里藏着一枚会回应月光的青铜钥匙。";
   elements.chapter.value = "1";
@@ -1206,6 +1379,13 @@ elements.beatsContainer.addEventListener("click", (event) => {
   appState.activeBeatIndex = Number(tab.dataset.index || 0);
   renderActiveBeat();
 });
+elements.chapterCatalog.addEventListener("click", (event) => {
+  const record = event.target.closest(".chapter-record");
+  if (!record) {
+    return;
+  }
+  selectChapter(Number(record.dataset.chapterNumber || 1));
+});
 elements.approveDecisionBtn.addEventListener("click", () => setReviewDecision("approved"));
 elements.rejectDecisionBtn.addEventListener("click", () => setReviewDecision("rejected"));
 elements.addCharacterBtn.addEventListener("click", () => addCharacter());
@@ -1220,6 +1400,7 @@ elements.planBtn.addEventListener("click", planChapter);
 elements.approveBtn.addEventListener("click", approvePlan);
 elements.refreshBtn.addEventListener("click", refreshState);
 elements.fillExampleBtn.addEventListener("click", fillExample);
+elements.continueNextBtn.addEventListener("click", continueNextChapter);
 elements.acceptChapterBtn.addEventListener("click", acceptChapter);
 elements.reviseNowBtn.addEventListener("click", () => reviseDraft("用户立即同意 Writer 按 Reviewer 意见修订。"));
 elements.waitRevisionBtn.addEventListener("click", holdRevisionDecision);
@@ -1232,3 +1413,4 @@ updateOverview();
 renderMemoryPanels();
 setReviewDecision("approved");
 bindAutoResize();
+loadProject().catch((error) => showToast(error.message));

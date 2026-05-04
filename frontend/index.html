@@ -96,7 +96,7 @@
             <article class="stat-card">
               <span>小说总字数</span>
               <strong id="wordCountStat">0</strong>
-              <small>按已生成正文估算</small>
+              <small id="projectStat">默认作品</small>
             </article>
             <article class="stat-card">
               <span>当前章节</span>
@@ -113,6 +113,19 @@
               <strong id="reviewStat">待生成</strong>
               <small>Reviewer 输出会显示在创作页</small>
             </article>
+          </div>
+
+          <div class="paper-card chapter-catalog-card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Chapter Catalog</p>
+                <h2>章节目录</h2>
+              </div>
+              <button id="continueNextBtn" class="primary-btn secondary" type="button">继续写下一章</button>
+            </div>
+            <div id="chapterCatalog" class="chapter-catalog-empty">
+              接受章节后，这里会形成作品目录。你可以切换已生成章节，也可以从上一章摘要继续规划下一章。
+            </div>
           </div>
 
           <div class="paper-card">
@@ -146,6 +159,11 @@
               <label>
                 世界观设定
                 <textarea id="worldviewInput" rows="5" placeholder="例如：玄幻都市，灵气复苏，主角逐步揭开家族秘密。"></textarea>
+              </label>
+
+              <label>
+                作品标题
+                <input id="projectTitleInput" type="text" placeholder="例如：月光禁区" />
               </label>
 
               <div class="two-col">

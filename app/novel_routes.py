@@ -6,10 +6,12 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.novel_graph import novel_workflow_service
 from schemas.novel import (
+    ContinueChapterRequest,
     NovelActionRequest,
     NovelApprovalRequest,
     NovelPlanRequest,
     NovelPlanResponse,
+    NovelProjectResponse,
     NovelRunResponse,
 )
 
@@ -23,6 +25,8 @@ async def plan_chapter(request: NovelPlanRequest) -> NovelPlanResponse:
 
     session_id, state = novel_workflow_service.plan_chapter(
         session_id=request.session_id,
+        project_id=request.project_id,
+        project_title=request.project_title,
         global_worldview=request.global_worldview,
         chapter_number=request.chapter_number,
         previous_summary=request.previous_summary,
@@ -35,6 +39,45 @@ async def plan_chapter(request: NovelPlanRequest) -> NovelPlanResponse:
         current_stage=state["current_stage"],
         plot_beats=state.get("current_plot_beats", []),
         message=state.get("error_message") or "Planner 已生成剧情节点，工作流已在 Writer 前暂停。",
+    )
+
+
+@router.get("/projects/current", response_model=NovelProjectResponse)
+async def get_current_project() -> NovelProjectResponse:
+    """读取默认作品的章节目录和进度。"""
+
+    return NovelProjectResponse(project=novel_workflow_service.get_project())
+
+
+@router.get("/projects/{project_id}", response_model=NovelProjectResponse)
+async def get_project(project_id: str) -> NovelProjectResponse:
+    """读取指定作品的章节目录和进度。"""
+
+    return NovelProjectResponse(project=novel_workflow_service.get_project(project_id))
+
+
+@router.post("/projects/{project_id}/chapters/next", response_model=NovelPlanResponse)
+async def plan_next_chapter(
+    project_id: str,
+    request: ContinueChapterRequest,
+) -> NovelPlanResponse:
+    """基于作品目录、上一章摘要和当前世界观继续规划下一章。"""
+
+    try:
+        session_id, state = novel_workflow_service.plan_next_chapter(
+            project_id=project_id,
+            session_id=request.session_id,
+            user_instruction=request.user_instruction,
+            characters=request.characters,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return NovelPlanResponse(
+        session_id=session_id,
+        current_stage=state["current_stage"],
+        plot_beats=state.get("current_plot_beats", []),
+        message=state.get("error_message") or "已根据作品目录规划下一章剧情节点。",
     )
 
 
@@ -63,6 +106,7 @@ async def approve_plot_beats(
         extracted_lore_updates=state.get("extracted_lore_updates", {}),
         extracted_character_updates=state.get("extracted_character_updates", {}),
         review_feedback=state.get("review_feedback", []),
+        retrieved_context=state.get("retrieved_context", []),
         message=state.get("error_message")
         or "Writer 已生成章节草稿，等待 Reviewer 审查。",
     )
@@ -86,6 +130,7 @@ async def review_chapter_draft(session_id: str) -> NovelRunResponse:
         extracted_lore_updates=state.get("extracted_lore_updates", {}),
         extracted_character_updates=state.get("extracted_character_updates", {}),
         review_feedback=state.get("review_feedback", []),
+        retrieved_context=state.get("retrieved_context", []),
         message=state.get("error_message") or "Reviewer 已完成结构化审查。",
     )
 
@@ -114,6 +159,7 @@ async def revise_chapter_draft(
         extracted_lore_updates=state.get("extracted_lore_updates", {}),
         extracted_character_updates=state.get("extracted_character_updates", {}),
         review_feedback=state.get("review_feedback", []),
+        retrieved_context=state.get("retrieved_context", []),
         message=state.get("error_message") or "Writer 已根据审查意见生成修订草稿。",
     )
 
@@ -142,6 +188,7 @@ async def accept_chapter(
         extracted_lore_updates=state.get("extracted_lore_updates", {}),
         extracted_character_updates=state.get("extracted_character_updates", {}),
         review_feedback=state.get("review_feedback", []),
+        retrieved_context=state.get("retrieved_context", []),
         message=state.get("error_message") or "章节已接受，Librarian 已完成设定抽取。",
     )
 
@@ -162,5 +209,6 @@ async def get_session_state(session_id: str) -> NovelRunResponse:
         extracted_lore_updates=state.get("extracted_lore_updates", {}),
         extracted_character_updates=state.get("extracted_character_updates", {}),
         review_feedback=state.get("review_feedback", []),
+        retrieved_context=state.get("retrieved_context", []),
         message="已读取当前小说工作流会话状态。",
     )

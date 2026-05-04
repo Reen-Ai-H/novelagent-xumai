@@ -650,6 +650,68 @@ label {
   gap: 10px;
 }
 
+.chapter-catalog-card {
+  margin-bottom: 18px;
+}
+
+.chapter-catalog-empty {
+  min-height: 116px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(139, 94, 52, 0.32);
+  border-radius: 20px;
+  padding: 18px;
+  color: var(--muted);
+  background: rgba(255, 250, 240, 0.52);
+  text-align: center;
+  line-height: 1.8;
+}
+
+.chapter-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.chapter-record {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+  color: var(--ink);
+  background: rgba(255, 253, 246, 0.72);
+  text-align: left;
+  box-shadow: var(--inset);
+}
+
+.chapter-record:hover,
+.chapter-record.active {
+  border-color: rgba(139, 94, 52, 0.34);
+  background: #fff8e8;
+  transform: translateY(-1px);
+}
+
+.chapter-record span,
+.chapter-record strong,
+.chapter-record small {
+  display: block;
+}
+
+.chapter-record span {
+  color: var(--brown);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.chapter-record strong {
+  margin-top: 7px;
+  font-size: 17px;
+}
+
+.chapter-record small {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
 .step {
   position: relative;
   overflow: hidden;

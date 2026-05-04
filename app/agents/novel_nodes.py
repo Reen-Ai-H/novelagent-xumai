@@ -6,11 +6,21 @@ LangChain 结构化输出链，并继续复用这些 Pydantic 模型。
 
 from __future__ import annotations
 
+from app.core.retriever import retrieve_context_for_state
 from app.agents.librarian_chain import extract_lore_with_llm
 from app.agents.planner_chain import generate_plot_beats_with_llm
 from app.agents.reviewer_chain import review_chapter_with_llm
 from app.agents.writer_chain import generate_chapter_with_llm
-from app.models import ChapterDraft, CharacterCard, NovelState, PlotBeat
+from app.models import ChapterDraft, CharacterCard, NovelState, PlotBeat, RetrievalContext
+
+
+def _retrieve_context(state: NovelState) -> tuple[list[RetrievalContext], str | None]:
+    """检索长期记忆；失败时降级为空上下文，避免阻断创作流程。"""
+
+    try:
+        return retrieve_context_for_state(state), None
+    except Exception as exc:  # noqa: BLE001 - RAG 失败不能阻断章节生成。
+        return [], f"RAG 检索失败，已跳过长期记忆：{exc}"
 
 
 def _fallback_plot_beats(state: NovelState) -> list[PlotBeat]:
@@ -100,6 +110,7 @@ def writer_agent(state: NovelState) -> dict:
         if isinstance(character, CharacterCard)
     ]
     plot_beats = sorted(state.get("current_plot_beats", []), key=lambda beat: beat.order)
+    retrieved_context, retrieval_error = _retrieve_context(state)
 
     try:
         writer_output = generate_chapter_with_llm(
@@ -110,11 +121,12 @@ def writer_agent(state: NovelState) -> dict:
             plot_beats=plot_beats,
             human_feedback=human_feedback,
             previous_draft=previous_draft,
+            retrieved_context=retrieved_context,
         )
         title = writer_output.title or f"第 {chapter_number} 章"
         content = writer_output.content
         revision_notes = writer_output.writing_notes
-        error_message = None
+        error_message = retrieval_error
     except Exception as exc:  # noqa: BLE001 - Writer 失败时保留可演示的降级草稿。
         title = f"第 {chapter_number} 章"
         content = "\n\n".join(
@@ -123,6 +135,8 @@ def writer_agent(state: NovelState) -> dict:
         )
         revision_notes = ["Writer LLM 调用失败，已使用剧情节点生成降级草稿。"]
         error_message = f"Writer LLM 调用失败，已使用降级草稿：{exc}"
+        if retrieval_error:
+            error_message = f"{retrieval_error}；{error_message}"
 
     draft = ChapterDraft(
         chapter_number=chapter_number,
@@ -140,6 +154,7 @@ def writer_agent(state: NovelState) -> dict:
         "current_draft": draft,
         "current_stage": "awaiting_review",
         "review_feedback": [],
+        "retrieved_context": retrieved_context,
         "error_message": error_message,
     }
 
@@ -214,7 +229,8 @@ def reviewer_agent(state: NovelState) -> dict:
 
     comments: list[str]
     revision_notes = list(draft.revision_notes)
-    error_message = None
+    retrieved_context, retrieval_error = _retrieve_context(state)
+    error_message = retrieval_error
 
     try:
         character_graph = state.get("character_graph", {})
@@ -228,6 +244,7 @@ def reviewer_agent(state: NovelState) -> dict:
             global_lore=state.get("global_lore", {}),
             characters=characters,
             draft=draft,
+            retrieved_context=retrieved_context,
         )
         comments = reviewer_output.reviewer_comments
         if reviewer_output.revision_suggestions:
@@ -248,6 +265,8 @@ def reviewer_agent(state: NovelState) -> dict:
         fallback_note = "Reviewer LLM 调用失败，已使用基础规则审查。"
         revision_notes.append(fallback_note)
         error_message = f"{fallback_note}：{exc}"
+        if retrieval_error:
+            error_message = f"{retrieval_error}；{error_message}"
 
     reviewer_comments = comments or ["Reviewer 结构化审查通过，未发现明显 OOC、逻辑断裂或设定冲突。"]
     reviewed_draft = draft.model_copy(
@@ -262,6 +281,7 @@ def reviewer_agent(state: NovelState) -> dict:
     return {
         "current_draft": reviewed_draft,
         "review_feedback": reviewed_draft.reviewer_comments,
+        "retrieved_context": retrieved_context,
         "current_stage": "awaiting_chapter_acceptance"
         if passed
         else "awaiting_revision_decision",
