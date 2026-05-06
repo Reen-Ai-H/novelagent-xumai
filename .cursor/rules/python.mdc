@@ -1,0 +1,6 @@
+---
+description: 
+alwaysApply: true
+---
+
+本项目 Python 环境是 conda env ai_project，运行 Python/uvicorn/pytest 时必须使用该环境

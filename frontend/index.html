@@ -9,7 +9,7 @@
   <body>
     <div class="desk-light"></div>
 
-    <main id="appShell" class="app-shell">
+    <main id="appShell" class="app-shell home-mode">
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">书</div>
@@ -17,41 +17,44 @@
             <p>Novel Agent</p>
             <strong>网文共创台</strong>
           </div>
+          <button id="homeBtn" class="home-btn" type="button">首页</button>
           <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="折叠侧边栏" aria-expanded="true">
             <span></span>
           </button>
         </div>
 
         <nav class="side-nav" aria-label="功能导航">
-          <button class="nav-card active" type="button" data-view="overview">
+          <button class="nav-card" type="button" data-view="overview">
             <span>总览</span>
             <small>字数、进度、状态</small>
           </button>
           <button class="nav-card" type="button" data-view="studioPlan">
-            <span>开始创作</span>
-            <small>规划、审核、生成</small>
+            <span>章节创作</span>
+            <small>规划、审核、成稿</small>
           </button>
-          <div class="sub-nav" aria-label="开始创作子页面">
-            <button class="sub-nav-card" type="button" data-view="studioPlan">
-              <span>章节创作</span>
-              <small>规划、审核、成稿</small>
-            </button>
-            <button class="sub-nav-card" type="button" data-view="characters">
-              <span>人物设定</span>
-              <small>角色卡片</small>
-            </button>
-            <button class="sub-nav-card" type="button" data-view="lore">
-              <span>剧情设定</span>
-              <small>鱼骨时间线</small>
-            </button>
-          </div>
-          <button class="nav-card" type="button" data-view="publish">
-            <span>一键发表</span>
-            <small>功能前瞻</small>
+          <button class="nav-card" type="button" data-view="fullPlan">
+            <span>全文规划</span>
+            <small>主线、卷纲、章节表</small>
+          </button>
+          <button class="nav-card" type="button" data-view="batchStudio">
+            <span>多章节任务</span>
+            <small>规划、批量草稿</small>
+          </button>
+          <button class="nav-card" type="button" data-view="characters">
+            <span>人物设定</span>
+            <small>角色卡片</small>
+          </button>
+          <button class="nav-card" type="button" data-view="lore">
+            <span>剧情设定</span>
+            <small>鱼骨时间线</small>
           </button>
           <button class="nav-card" type="button" data-view="preview">
             <span>小说预览</span>
             <small>沉浸阅读成稿</small>
+          </button>
+          <button class="nav-card" type="button" data-view="publish">
+            <span>一键发表</span>
+            <small>功能前瞻</small>
           </button>
         </nav>
 
@@ -77,8 +80,98 @@
           </div>
         </header>
 
-        <section id="overviewView" class="view active">
-          <div class="overview-hero paper-card">
+        <section id="homeView" class="view active">
+          <section class="home-hero">
+            <div class="home-hero-copy">
+              <p class="eyebrow">Novel Command Center</p>
+              <h1>管理你的长篇宇宙，从下一章开始。</h1>
+              <p>选择已有作品继续推进，或从一本新书的全文规划开始。首页只做作品管理，进入工作台后再处理章节、设定和预览。</p>
+              <div class="home-actions">
+                <button id="showNewBookBtn" class="primary-btn" type="button">新建作品</button>
+                <button id="refreshHomeProjectsBtn" class="ghost-btn" type="button">刷新作品列表</button>
+              </div>
+            </div>
+            <div class="manuscript-shelf" aria-hidden="true">
+              <div class="shelf-line"></div>
+              <div class="floating-book book-a"></div>
+              <div class="floating-book book-b"></div>
+              <div class="floating-book book-c"></div>
+              <div class="floating-card card-a">第 12 章</div>
+              <div class="floating-card card-b">伏笔回收</div>
+              <div class="floating-card card-c">角色弧线</div>
+            </div>
+          </section>
+
+          <section id="newBookPanel" class="home-new-book is-hidden">
+            <article class="glass-panel new-book-card">
+              <div class="card-title">
+                <div>
+                  <p class="eyebrow">New Book Flow</p>
+                  <h2>新书规划</h2>
+                </div>
+                <button id="cancelNewBookBtn" class="ghost-btn compact" type="button">收起</button>
+              </div>
+              <div class="new-book-grid">
+                <label>
+                  作品标题
+                  <input id="newBookTitleInput" type="text" placeholder="例如：月光禁区" />
+                </label>
+                <label>
+                  题材
+                  <input id="newBookGenreInput" type="text" placeholder="例如：玄幻都市 / 悬疑升级 / 群像冒险" />
+                </label>
+                <label>
+                  世界观
+                  <textarea id="newBookWorldviewInput" rows="5" placeholder="写下作品的世界规则、时代背景、核心秘密。"></textarea>
+                </label>
+                <label>
+                  主角设定
+                  <textarea id="newBookHeroInput" rows="5" placeholder="主角身份、欲望、缺陷、初始处境。"></textarea>
+                </label>
+              </div>
+              <button id="createBookBtn" class="primary-btn" type="button">生成可编辑作品设定草案</button>
+              <div id="newBookDraftPanel" class="setting-draft-panel is-hidden">
+                <div class="card-title">
+                  <div>
+                    <p class="eyebrow">Editable Draft</p>
+                    <h2>作品设定草案</h2>
+                  </div>
+                </div>
+                <label>
+                  作品标题
+                  <input id="draftTitleInput" type="text" />
+                </label>
+                <label>
+                  作品定位
+                  <textarea id="draftPremiseInput" rows="3"></textarea>
+                </label>
+                <label>
+                  世界观草案
+                  <textarea id="draftWorldviewInput" rows="5"></textarea>
+                </label>
+                <label>
+                  主角草案
+                  <textarea id="draftHeroInput" rows="4"></textarea>
+                </label>
+                <button id="confirmSettingDraftBtn" class="primary-btn secondary" type="button">确认设定并生成全文规划</button>
+              </div>
+            </article>
+          </section>
+
+          <section class="home-section-head">
+            <div>
+              <p class="eyebrow">Library</p>
+              <h2>已创作作品</h2>
+            </div>
+            <span id="homeProjectCount">0 部作品</span>
+          </section>
+          <div id="homeProjectGrid" class="home-project-empty">
+            暂无作品。点击“新建作品”开始第一本书。
+          </div>
+        </section>
+
+        <section id="overviewView" class="view">
+          <div class="overview-hero panel-card">
             <div>
               <p class="eyebrow">Overview</p>
               <h2>项目总览</h2>
@@ -87,8 +180,8 @@
               </p>
             </div>
             <div class="book-ornament" aria-hidden="true">
-              <div class="book-cover"></div>
-              <div class="book-pages"></div>
+              <div class="signal-slab"></div>
+              <div class="signal-lines"></div>
             </div>
           </div>
 
@@ -115,7 +208,7 @@
             </article>
           </div>
 
-          <div class="paper-card chapter-catalog-card">
+          <div class="panel-card chapter-catalog-card">
             <div class="card-title">
               <div>
                 <p class="eyebrow">Chapter Catalog</p>
@@ -128,7 +221,7 @@
             </div>
           </div>
 
-          <div class="paper-card">
+          <div class="panel-card">
             <div class="card-title">
               <div>
                 <p class="eyebrow">Pipeline</p>
@@ -145,9 +238,112 @@
           </div>
         </section>
 
+        <section id="fullPlanView" class="view">
+          <article class="panel-card full-plan-card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Full Novel Plan</p>
+                <h2>全文规划</h2>
+              </div>
+              <div class="button-row">
+                <button id="generateFullPlanBtn" class="ghost-btn" type="button">AI 辅助补完规划</button>
+                <button id="saveFullPlanBtn" class="primary-btn secondary" type="button">保存人工修改</button>
+                <button id="enterFirstChapterBtn" class="primary-btn" type="button">进入第一章生成</button>
+              </div>
+            </div>
+
+            <div class="two-col">
+              <label>
+                主线简介 / 核心卖点
+                <textarea id="premiseInput" rows="4" placeholder="一句话故事前提、卖点或主线目标。"></textarea>
+              </label>
+              <label>
+                核心冲突
+                <textarea id="coreConflictInput" rows="4" placeholder="贯穿全文的对抗、秘密或价值冲突。"></textarea>
+              </label>
+            </div>
+            <div class="two-col">
+              <label>
+                结局方向
+                <textarea id="endingInput" rows="3" placeholder="终局状态、主角变化、最大谜底。"></textarea>
+              </label>
+              <label>
+                主题 / 爽点关键词
+                <textarea id="themesInput" rows="3" placeholder="用逗号分隔，例如：成长, 复仇, 群像, 反转"></textarea>
+              </label>
+            </div>
+            <label>
+              规划备注
+              <textarea id="planNotesInput" rows="3" placeholder="节奏、禁忌、必须保留的设定。"></textarea>
+            </label>
+
+            <div class="plan-section-head">
+              <div>
+                <strong>分卷规划</strong>
+                <small>可编辑 JSON，保存时会写回作品工程。</small>
+              </div>
+              <input id="targetChapterCountInput" type="number" min="1" value="10" aria-label="目标章节数" />
+            </div>
+            <textarea id="volumesInput" class="json-editor" rows="7" spellcheck="false"></textarea>
+
+            <div class="plan-section-head">
+              <div>
+                <strong>章节规划表</strong>
+                <small>多章节规划会先写入这里，确认后再批量生成草稿。</small>
+              </div>
+            </div>
+            <div id="chapterPlanTable" class="chapter-plan-empty">
+              暂无章节规划。可以生成全文规划骨架，或到“多章节任务”里先规划 3 / 5 / 10 章。
+            </div>
+          </article>
+        </section>
+
+        <section id="batchStudioView" class="view">
+          <article class="panel-card batch-card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Batch Studio</p>
+                <h2>多章节规划 / 生成</h2>
+              </div>
+            </div>
+            <div class="batch-controls">
+              <label>
+                起始章节
+                <input id="batchStartInput" type="number" min="1" value="1" />
+              </label>
+              <label>
+                生成章节数
+                <select id="batchCountSelect">
+                  <option value="3">3 章</option>
+                  <option value="5" selected>5 章</option>
+                  <option value="10">10 章</option>
+                </select>
+              </label>
+              <label>
+                批量要求
+                <textarea id="batchInstructionInput" rows="2" placeholder="例如：这组章节负责升级主线冲突，并在最后一章回收钥匙伏笔。"></textarea>
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="batchPlanBtn" class="primary-btn" type="button">生成多章节规划</button>
+              <button id="batchGenerateBtn" class="primary-btn secondary" type="button">确认规划并批量生成草稿</button>
+            </div>
+            <div id="batchStatusPanel" class="batch-status-empty">
+              先生成章节级大纲，确认章节规划表后再批量生成草稿。
+            </div>
+            <div id="batchQueuePanel" class="batch-queue-empty">
+              批量生成后，这里会按章节展示待审查、需修订、待接受入库等状态。
+            </div>
+            <div id="batchOutlineTable" class="chapter-plan-empty">
+              暂无批量章节规划。
+            </div>
+          </article>
+        </section>
+
         <section id="studioPlanView" class="view">
           <section class="studio-page-grid">
-            <article class="paper-card input-card">
+            <article class="panel-card input-card">
+              <div id="nextSeedPanel" class="next-seed-panel is-hidden"></div>
               <div class="card-title">
                 <div>
                   <p class="eyebrow">步骤一</p>
@@ -200,7 +396,7 @@
 
               <button id="planBtn" class="primary-btn" type="button">生成剧情节点</button>
             </article>
-            <aside class="paper-card stage-sidebar">
+            <aside class="panel-card stage-sidebar">
               <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
               <div class="stage-sidebar-body">
                 <p class="eyebrow">创作阶段</p>
@@ -208,6 +404,7 @@
                 <p>先输入世界观、章节目标和人物卡。Planner 会把这些信息整理成本章剧情节点。</p>
               </div>
               <div class="stage-rail" aria-label="开始创作阶段">
+                <button class="stage-nav-card" type="button" data-view="fullPlan">全文规划</button>
                 <button class="stage-nav-card active" type="button" data-view="studioPlan">1. 章节规划输入</button>
                 <button class="stage-nav-card" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
                 <button class="stage-nav-card" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
@@ -218,7 +415,7 @@
 
         <section id="studioReviewView" class="view">
           <section class="studio-page-grid">
-            <article class="paper-card review-card">
+            <article class="panel-card review-card">
               <div class="card-title">
                 <div>
                   <p class="eyebrow">步骤二</p>
@@ -244,7 +441,7 @@
 
               <button id="approveBtn" class="primary-btn secondary" type="button" disabled>提交审核并继续生成</button>
             </article>
-            <aside class="paper-card stage-sidebar">
+            <aside class="panel-card stage-sidebar">
               <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
               <div class="stage-sidebar-body">
                 <p class="eyebrow">创作阶段</p>
@@ -252,6 +449,7 @@
                 <p>这里专门处理 Planner 输出。你可以逐个修改剧情节点，再交给 Writer 生成正文。</p>
               </div>
               <div class="stage-rail" aria-label="开始创作阶段">
+                <button class="stage-nav-card" type="button" data-view="fullPlan">全文规划</button>
                 <button class="stage-nav-card" type="button" data-view="studioPlan">1. 章节规划输入</button>
                 <button class="stage-nav-card active" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
                 <button class="stage-nav-card" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
@@ -263,7 +461,7 @@
         <section id="studioDraftView" class="view">
           <section class="studio-page-grid draft-page-grid">
             <div class="draft-stack">
-              <article class="paper-card">
+              <article class="panel-card">
               <div class="card-title">
                 <div>
                   <p class="eyebrow">章节结果</p>
@@ -273,7 +471,7 @@
               <pre id="draftOutput" class="output-box">完成审核提交后，Writer 生成的草稿会显示在这里。</pre>
               </article>
 
-              <article class="paper-card">
+              <article class="panel-card">
               <div class="card-title">
                 <div>
                   <p class="eyebrow">记忆与审查</p>
@@ -285,22 +483,22 @@
               </div>
               </article>
 
-              <section id="chapterDecisionPanel" class="paper-card chapter-decision-panel is-hidden">
+              <section id="chapterDecisionPanel" class="panel-card chapter-decision-panel is-hidden">
             <div class="decision-copy">
               <p class="eyebrow">章节确认</p>
               <h2 id="decisionTitle">等待你的决定</h2>
-              <p id="decisionMessage">Reviewer 审查完成后，可以接受本章节，或让 Writer 根据意见修订。</p>
+              <p id="decisionMessage">AI 审查完成后，可以接受入库，或让 Writer 根据意见修订。</p>
             </div>
             <div id="revisionCountdown" class="countdown-badge is-hidden">10 秒后自动同意修改</div>
             <div class="decision-actions">
-              <button id="acceptChapterBtn" class="primary-btn secondary" type="button">接受本章节并抽取设定</button>
+              <button id="acceptChapterBtn" class="primary-btn secondary" type="button">接受入库并抽取设定</button>
               <button id="reviseNowBtn" class="primary-btn" type="button">同意修改</button>
               <button id="waitRevisionBtn" class="ghost-btn" type="button">再等等</button>
               <button id="confirmReviseBtn" class="ghost-btn" type="button">重新确认打回修改</button>
             </div>
               </section>
             </div>
-            <aside class="paper-card stage-sidebar">
+            <aside class="panel-card stage-sidebar">
               <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
               <div class="stage-sidebar-body">
                 <p class="eyebrow">创作阶段</p>
@@ -308,6 +506,7 @@
                 <p>Writer 的正文、Reviewer 的审查意见和最终设定抽取结果会集中显示在这里。</p>
               </div>
               <div class="stage-rail" aria-label="开始创作阶段">
+                <button class="stage-nav-card" type="button" data-view="fullPlan">全文规划</button>
                 <button class="stage-nav-card" type="button" data-view="studioPlan">1. 章节规划输入</button>
                 <button class="stage-nav-card" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
                 <button class="stage-nav-card active" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
@@ -317,7 +516,7 @@
         </section>
 
         <section id="charactersView" class="view">
-          <article class="paper-card codex-page">
+          <article class="panel-card codex-page">
             <div class="card-title">
               <div>
                 <p class="eyebrow">Character Codex</p>
@@ -331,22 +530,22 @@
         </section>
 
         <section id="loreView" class="view">
-          <article class="paper-card lore-page">
+          <article class="panel-card lore-page">
             <div class="card-title">
               <div>
-                <p class="eyebrow">Lore Timeline</p>
-                <h2>剧情设定鱼骨线</h2>
+                <p class="eyebrow">Lore Codex</p>
+                <h2>设定库与章节时间线</h2>
               </div>
             </div>
-            <div class="timeline-hint">横向剧情线支持向右滚动，适合长篇章节持续追加设定。</div>
-            <div id="loreFishbone" class="fishbone-empty">
-              章节生成后，世界观增量、道具、地点、伏笔会沿剧情线展示。
+            <div class="timeline-hint">稳定设定与章节摘要会从项目级设定库加载，和当前运行结果解耦。</div>
+            <div id="loreCodex" class="lore-codex-empty">
+              项目级设定库暂无记录。
             </div>
           </article>
         </section>
 
         <section id="publishView" class="view">
-          <div class="paper-card publish-hero">
+          <div class="panel-card publish-hero">
             <div>
               <p class="eyebrow">Coming Soon</p>
               <h2>一键发表</h2>
@@ -375,7 +574,7 @@
             </article>
           </div>
 
-          <article class="paper-card disabled-form">
+          <article class="panel-card disabled-form">
             <div class="card-title">
               <div>
                 <p class="eyebrow">Preview Only</p>
@@ -402,9 +601,23 @@
 
         <section id="previewView" class="view">
           <article class="reader-shell">
-            <div class="reader-book">
+            <aside class="reader-catalog panel-card">
+              <div class="card-title">
+                <div>
+                  <p class="eyebrow">Catalog</p>
+                  <h2>阅读目录</h2>
+                </div>
+              </div>
+              <div id="readerCatalog" class="reader-catalog-empty">暂无可阅读章节。</div>
+            </aside>
+            <div class="reader-pane">
               <p class="eyebrow">Reader Preview</p>
               <h2 id="previewTitle">第 1 章</h2>
+              <div class="reader-toolbar">
+                <button id="prevChapterBtn" class="ghost-btn compact" type="button">上一章</button>
+                <span id="previewStatus">未开始</span>
+                <button id="nextChapterBtn" class="ghost-btn compact" type="button">下一章</button>
+              </div>
               <div id="previewContent" class="reader-content">
                 这里会像正式小说阅读页一样展示已经生成的正文。完成一次章节生成后，内容会自动同步到这里。
               </div>

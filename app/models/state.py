@@ -46,6 +46,7 @@ class NovelState(TypedDict, total=False):
 
     # RAG 检索结果：写作前注入相关人物、地点、伏笔和历史章节摘要。
     retrieved_context: list[RetrievalContext]
+    temporary_context: dict[str, str]
 
     # Human-in-the-loop：Planner 后暂停，前端/API 可覆盖这里的节点后再继续。
     human_feedback: str | None

@@ -74,7 +74,7 @@ class JsonProjectStore(ProjectStore):
         for path in sorted(self.base_dir.glob("*.json")):
             raw_project = json.loads(path.read_text(encoding="utf-8"))
             projects.append(NovelProject.model_validate(raw_project))
-        return projects
+        return sorted(projects, key=lambda project: project.updated_at, reverse=True)
 
     def delete_project(self, project_id: str) -> bool:
         path = self._project_path(project_id)

@@ -102,6 +102,16 @@ def writer_agent(state: NovelState) -> dict:
     worldview = state.get("global_worldview", "")
     global_lore = state.get("global_lore", {})
     previous_summary = global_lore.get("previous_summary", "")
+    temporary_context = state.get("temporary_context", {})
+    if temporary_context:
+        temp_parts = [
+            temporary_context.get("previous_draft_summary", ""),
+            temporary_context.get("previous_hook", ""),
+            temporary_context.get("previous_character_state", ""),
+            temporary_context.get("recent_draft_summaries", ""),
+            temporary_context.get("batch_context_instruction", ""),
+        ]
+        previous_summary = "\n\n".join(part for part in [previous_summary, *temp_parts] if part)
     human_feedback = state.get("human_feedback")
     previous_draft = state.get("current_draft")
     characters = [
@@ -252,16 +262,19 @@ def reviewer_agent(state: NovelState) -> dict:
                 f"Reviewer 建议：{suggestion}"
                 for suggestion in reviewer_output.revision_suggestions
             )
-        passed = reviewer_output.passed and reviewer_output.quality_score >= 7
-        quality_score = reviewer_output.quality_score
+        strict_comments, quality_penalty = _strict_review_findings(state, comments)
+        comments = [*comments, *strict_comments]
+        quality_score = max(0.0, reviewer_output.quality_score - quality_penalty)
+        passed = reviewer_output.passed and quality_score >= 8.5 and not strict_comments
     except Exception as exc:  # noqa: BLE001 - Reviewer 失败时回退到基础规则审查。
         comments = []
         if not draft.content.strip():
             comments.append("正文为空，需要重新生成。")
         if not draft.plot_beats:
             comments.append("缺少剧情节点，无法检查章节逻辑。")
-        passed = not comments
-        quality_score = 7.0 if passed else 4.0
+        comments.extend(_strict_review_findings(state, comments)[0])
+        passed = False
+        quality_score = 6.5 if comments else 7.0
         fallback_note = "Reviewer LLM 调用失败，已使用基础规则审查。"
         revision_notes.append(fallback_note)
         error_message = f"{fallback_note}：{exc}"
@@ -287,3 +300,113 @@ def reviewer_agent(state: NovelState) -> dict:
         else "awaiting_revision_decision",
         "error_message": error_message,
     }
+
+
+def _strict_review_findings(state: NovelState, existing_comments: list[str]) -> tuple[list[str], float]:
+    """生产模式审查补充：第一稿和批量稿默认更严格。"""
+
+    draft = state.get("current_draft")
+    if draft is None:
+        return [], 0.0
+
+    findings: list[str] = []
+    content = draft.content or ""
+    compact = "".join(content.split())
+    temporary_context = state.get("temporary_context", {})
+    global_lore = state.get("global_lore", {})
+    previous_summary = global_lore.get("previous_summary", "")
+    is_batch_first_draft = temporary_context.get("batch_generation") == "true"
+    is_first_draft = not any("Reviewer 建议" in note for note in draft.revision_notes)
+
+    if len(compact) < 800:
+        findings.append("章节正文偏短，冲突、情绪转折或场景推进不足，建议扩写关键段落。")
+
+    if previous_summary and not _has_meaningful_overlap(previous_summary, content):
+        findings.append("与前文摘要承接不足，读者难以看出本章如何接住上一章局面。")
+
+    if temporary_context.get("previous_hook") and not _has_meaningful_overlap(
+        temporary_context["previous_hook"],
+        content,
+    ):
+        findings.append("上一章结尾钩子没有被有效回应，连续阅读时悬念推进不足。")
+
+    similar_chapter = _similar_recent_chapter(
+        current_chapter=state.get("current_chapter_number", 0),
+        recent_summaries=temporary_context.get("recent_draft_summaries", ""),
+        content=content,
+    )
+    if similar_chapter:
+        findings.append(
+            f"本章与第 {similar_chapter} 章的场景结构或冲突推进过于相似，需要重做差异化设计。"
+        )
+
+    if draft.plot_beats and not any(
+        beat.conflict or beat.expected_outcome or beat.purpose for beat in draft.plot_beats
+    ):
+        findings.append("剧情节点只描述事件，人物动机、冲突压力和结果变化偏弱。")
+
+    if _has_repetitive_segments(content):
+        findings.append("章节内部存在节奏或句式重复，场景推进显得相似，需要增加变化。")
+
+    if is_batch_first_draft and is_first_draft and not existing_comments:
+        findings.append("批量生成第一稿默认进入严格审查，请人工确认节奏、承接、人物动机和伏笔推进后再接受。")
+
+    unique_findings = list(dict.fromkeys(findings))
+    penalty = min(2.5, 0.35 * len(unique_findings))
+    return unique_findings, penalty
+
+
+def _has_meaningful_overlap(left: str, right: str) -> bool:
+    left_tokens = _review_tokens(left)
+    right_tokens = _review_tokens(right)
+    if not left_tokens or not right_tokens:
+        return False
+    return len(left_tokens & right_tokens) >= min(3, max(1, len(left_tokens) // 8))
+
+
+def _review_tokens(text: str) -> set[str]:
+    cleaned = "".join(char if char.isalnum() or "\u4e00" <= char <= "\u9fff" else " " for char in text)
+    latin = {part.lower() for part in cleaned.split() if len(part) >= 3}
+    cjk = [char for char in cleaned if "\u4e00" <= char <= "\u9fff"]
+    cjk_bigrams = {"".join(cjk[index : index + 2]) for index in range(max(len(cjk) - 1, 0))}
+    return latin | cjk_bigrams
+
+
+def _has_repetitive_segments(content: str) -> bool:
+    paragraphs = [paragraph.strip() for paragraph in content.splitlines() if paragraph.strip()]
+    if len(paragraphs) < 4:
+        return False
+    prefixes = [paragraph[:18] for paragraph in paragraphs if len(paragraph) >= 18]
+    return len(prefixes) != len(set(prefixes))
+
+
+def _similar_recent_chapter(
+    *,
+    current_chapter: int,
+    recent_summaries: str,
+    content: str,
+) -> int | None:
+    content_tokens = _review_tokens(content)
+    if not content_tokens:
+        return None
+
+    for line in recent_summaries.splitlines():
+        line = line.strip()
+        if not line.startswith("第 ") or "章：" not in line:
+            continue
+        prefix, summary = line.split("章：", 1)
+        try:
+            chapter_number = int(prefix.removeprefix("第 ").strip())
+        except ValueError:
+            continue
+        if chapter_number == current_chapter:
+            continue
+        summary_tokens = _review_tokens(summary)
+        if not summary_tokens:
+            continue
+        overlap = len(content_tokens & summary_tokens)
+        similarity = overlap / max(min(len(content_tokens), len(summary_tokens)), 1)
+        threshold = 0.38 if abs(current_chapter - chapter_number) > 1 else 0.48
+        if similarity >= threshold:
+            return chapter_number
+    return None
