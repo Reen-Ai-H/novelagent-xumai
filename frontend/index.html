@@ -15,7 +15,7 @@
           <div class="brand-mark">书</div>
           <div>
             <p>Novel Agent</p>
-            <strong>网文共创台</strong>
+            <strong>作品创作台</strong>
           </div>
           <button id="homeBtn" class="home-btn" type="button">首页</button>
           <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="折叠侧边栏" aria-expanded="true">
@@ -46,7 +46,7 @@
           </button>
           <button class="nav-card" type="button" data-view="lore">
             <span>剧情设定</span>
-            <small>鱼骨时间线</small>
+            <small>设定库 / 时间线</small>
           </button>
           <button class="nav-card" type="button" data-view="preview">
             <span>小说预览</span>
@@ -83,9 +83,9 @@
         <section id="homeView" class="view active">
           <section class="home-hero">
             <div class="home-hero-copy">
-              <p class="eyebrow">Novel Command Center</p>
-              <h1>管理你的长篇宇宙，从下一章开始。</h1>
-              <p>选择已有作品继续推进，或从一本新书的全文规划开始。首页只做作品管理，进入工作台后再处理章节、设定和预览。</p>
+              <p class="eyebrow">Creation Command Center</p>
+              <h1>把作品、规划、章节和设定放进同一个创作中枢。</h1>
+              <p>首页负责作品管理和新书启动；进入工作台后再处理章节生产、全文规划、批量任务、设定库和阅读预览。</p>
               <div class="home-actions">
                 <button id="showNewBookBtn" class="primary-btn" type="button">新建作品</button>
                 <button id="refreshHomeProjectsBtn" class="ghost-btn" type="button">刷新作品列表</button>
@@ -93,9 +93,9 @@
             </div>
             <div class="manuscript-shelf" aria-hidden="true">
               <div class="shelf-line"></div>
-              <div class="floating-book book-a"></div>
-              <div class="floating-book book-b"></div>
-              <div class="floating-book book-c"></div>
+              <div class="floating-volume volume-a"></div>
+              <div class="floating-volume volume-b"></div>
+              <div class="floating-volume volume-c"></div>
               <div class="floating-card card-a">第 12 章</div>
               <div class="floating-card card-b">伏笔回收</div>
               <div class="floating-card card-c">角色弧线</div>
@@ -103,7 +103,7 @@
           </section>
 
           <section id="newBookPanel" class="home-new-book is-hidden">
-            <article class="glass-panel new-book-card">
+            <article class="glass-panel new-volume-card">
               <div class="card-title">
                 <div>
                   <p class="eyebrow">New Book Flow</p>
@@ -179,7 +179,7 @@
                 这里会汇总当前小说创作进度。生成章节后，字数、剧情节点和最新章节状态会自动更新。
               </p>
             </div>
-            <div class="book-ornament" aria-hidden="true">
+            <div class="signal-ornament" aria-hidden="true">
               <div class="signal-slab"></div>
               <div class="signal-lines"></div>
             </div>
@@ -205,6 +205,33 @@
               <span>审查状态</span>
               <strong id="reviewStat">待生成</strong>
               <small>Reviewer 输出会显示在创作页</small>
+            </article>
+          </div>
+
+          <div class="command-grid">
+            <article class="command-card primary-command">
+              <span>Next Action</span>
+              <h3>继续推进当前作品</h3>
+              <p>准备下一章会先返回可编辑输入草稿，确认后才进入 Planner。</p>
+              <button class="primary-btn compact" type="button" data-quick-view="studioPlan">进入章节创作</button>
+            </article>
+            <article class="command-card">
+              <span>Structure</span>
+              <h3>全文规划</h3>
+              <p>编辑主线、分卷和章节表，让后续章节有稳定方向。</p>
+              <button class="ghost-btn compact" type="button" data-quick-view="fullPlan">打开规划</button>
+            </article>
+            <article class="command-card">
+              <span>Batch</span>
+              <h3>多章节任务</h3>
+              <p>先生成章节队列，再逐章审查、修订、接受入库。</p>
+              <button class="ghost-btn compact" type="button" data-quick-view="batchStudio">查看队列</button>
+            </article>
+            <article class="command-card">
+              <span>Reader</span>
+              <h3>小说预览</h3>
+              <p>按目录切章阅读，未完成章节只显示状态和处理入口。</p>
+              <button class="ghost-btn compact" type="button" data-quick-view="preview">进入阅读器</button>
             </article>
           </div>
 

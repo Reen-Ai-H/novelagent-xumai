@@ -1,15 +1,15 @@
 :root {
   color-scheme: light;
-  --bg: #eef1ef;
-  --desk: #d8dedb;
-  --paper: #fbfaf6;
-  --paper-deep: #f0f3f1;
-  --ink: #17201f;
-  --muted: #66716e;
-  --line: rgba(23, 32, 31, 0.13);
-  --brown: #2f6f68;
-  --brown-deep: #182523;
-  --green: #4e8a7d;
+  --bg: #eef2ef;
+  --desk: #d9e1de;
+  --surface: #fbfcfa;
+  --surface-deep: #edf2ef;
+  --ink: #121b1b;
+  --muted: #60706c;
+  --line: rgba(18, 27, 27, 0.13);
+  --accent: #2d6f68;
+  --ink-deep: #0f1919;
+  --green: #5d9488;
   --red: #9a4b3f;
   --silver: #dce3e0;
   --warm: #f8efe2;
@@ -26,14 +26,9 @@ body {
   margin: 0;
   color: var(--ink);
   font-family:
-    "Noto Serif SC", "Songti SC", "Microsoft YaHei", ui-serif, Georgia, serif;
+    "Inter", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
   background:
-    radial-gradient(circle at 82% 12%, rgba(78, 138, 125, 0.18), transparent 24rem),
-    radial-gradient(circle at 18% 16%, rgba(248, 239, 226, 0.95), transparent 22rem),
-    linear-gradient(90deg, rgba(23, 32, 31, 0.035) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(23, 32, 31, 0.03) 1px, transparent 1px),
-    linear-gradient(135deg, #f8f4ed 0%, var(--bg) 55%, #dfe7e3 100%);
-  background-size: auto, 42px 42px, 42px 42px, auto;
+    linear-gradient(135deg, #f8faf7 0%, var(--bg) 48%, #dce6e2 100%);
 }
 
 button,
@@ -103,10 +98,10 @@ label {
   top: -160px;
   right: 10%;
   width: 460px;
-  height: 460px;
+  height: 2px;
   border-radius: 999px;
-  background: rgba(255, 244, 195, 0.38);
-  filter: blur(24px);
+  background: linear-gradient(90deg, transparent, rgba(45, 111, 104, 0.24), transparent);
+  filter: none;
   pointer-events: none;
 }
 
@@ -145,12 +140,12 @@ label {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  border: 1px solid rgba(92, 59, 32, 0.18);
+  border: 1px solid rgba(18, 27, 27, 0.12);
   border-radius: 30px;
   padding: 18px;
   background:
-    linear-gradient(145deg, rgba(255, 250, 240, 0.86), rgba(241, 226, 202, 0.86)),
-    var(--paper);
+    linear-gradient(145deg, rgba(251, 252, 250, 0.9), rgba(228, 235, 232, 0.9)),
+    var(--surface);
   box-shadow: var(--shadow);
   transition:
     padding 220ms ease,
@@ -184,7 +179,7 @@ label {
   width: 14px;
   height: 2px;
   border-radius: 999px;
-  background: var(--brown-deep);
+  background: var(--ink-deep);
 }
 
 .sidebar-toggle::before,
@@ -209,7 +204,7 @@ label {
   color: #f8fbf8;
   background:
     linear-gradient(90deg, rgba(0, 0, 0, 0.16), transparent 18%),
-    linear-gradient(135deg, var(--brown), var(--brown-deep));
+    linear-gradient(135deg, var(--accent), var(--ink-deep));
   box-shadow: 7px 8px 0 rgba(23, 32, 31, 0.12);
   font-weight: 900;
 }
@@ -457,7 +452,7 @@ label {
   padding: 14px 18px;
   background:
     linear-gradient(100deg, rgba(255, 250, 240, 0.9), rgba(247, 236, 217, 0.8)),
-    var(--paper);
+    var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -507,12 +502,12 @@ label {
   height: 1.1em;
   margin-left: 3px;
   vertical-align: -0.2em;
-  background: var(--brown);
+  background: var(--accent);
   animation: caretBlink 0.9s step-end infinite;
 }
 
 .eyebrow {
-  color: var(--brown);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.16em;
@@ -540,7 +535,7 @@ label {
   width: 13px;
   height: 13px;
   border-radius: 999px;
-  background: var(--brown);
+  background: var(--accent);
   box-shadow: 0 0 0 7px rgba(78, 138, 125, 0.14);
   animation: pulse 1.9s infinite;
 }
@@ -572,8 +567,7 @@ label {
   padding: clamp(28px, 4vw, 54px);
   color: #f8fbf8;
   background:
-    linear-gradient(135deg, rgba(14, 22, 22, 0.94), rgba(30, 55, 52, 0.9)),
-    radial-gradient(circle at 72% 16%, rgba(126, 191, 174, 0.38), transparent 24rem);
+    linear-gradient(135deg, rgba(14, 22, 22, 0.96), rgba(30, 55, 52, 0.92));
   box-shadow: 0 28px 80px rgba(17, 28, 27, 0.22);
 }
 
@@ -614,7 +608,7 @@ label {
   background: linear-gradient(90deg, transparent, rgba(248, 250, 246, 0.28), transparent);
 }
 
-.floating-book,
+.floating-volume,
 .floating-card {
   position: absolute;
   border: 1px solid rgba(248, 250, 246, 0.16);
@@ -622,7 +616,7 @@ label {
   animation: floatShelf 5.6s ease-in-out infinite;
 }
 
-.floating-book {
+.floating-volume {
   bottom: 52px;
   width: 82px;
   height: 210px;
@@ -630,19 +624,19 @@ label {
   background: linear-gradient(160deg, rgba(248, 239, 226, 0.92), rgba(78, 138, 125, 0.74));
 }
 
-.book-a {
+.volume-a {
   right: 280px;
   transform: rotate(-7deg);
 }
 
-.book-b {
+.volume-b {
   right: 188px;
   height: 250px;
   background: linear-gradient(160deg, rgba(220, 227, 224, 0.92), rgba(47, 111, 104, 0.82));
   animation-delay: 420ms;
 }
 
-.book-c {
+.volume-c {
   right: 94px;
   height: 188px;
   background: linear-gradient(160deg, rgba(248, 239, 226, 0.88), rgba(24, 37, 35, 0.86));
@@ -690,7 +684,7 @@ label {
   backdrop-filter: blur(18px);
 }
 
-.new-book-card {
+.new-volume-card {
   display: grid;
   gap: 16px;
 }
@@ -796,10 +790,25 @@ label {
 .project-meta span {
   border-radius: 999px;
   padding: 5px 8px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(78, 138, 125, 0.12);
   font-size: 12px;
   font-weight: 900;
+}
+
+.project-progress {
+  height: 7px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(18, 27, 27, 0.08);
+}
+
+.project-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--green));
 }
 
 .project-card-body small {
@@ -848,7 +857,7 @@ label {
   line-height: 1.8;
 }
 
-.book-ornament {
+.signal-ornament {
   position: relative;
   width: 132px;
   height: 104px;
@@ -882,6 +891,58 @@ label {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 18px;
+}
+
+.command-grid {
+  display: grid;
+  grid-template-columns: 1.2fr repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.command-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 178px;
+  border: 1px solid rgba(18, 27, 27, 0.1);
+  border-radius: 22px;
+  padding: 18px;
+  background: rgba(251, 252, 250, 0.74);
+  box-shadow: var(--inset);
+}
+
+.command-card span {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.command-card h3,
+.command-card p {
+  margin: 0;
+}
+
+.command-card h3 {
+  font-size: 20px;
+}
+
+.command-card p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.primary-command {
+  color: #f8fbf8;
+  background:
+    linear-gradient(135deg, rgba(15, 25, 25, 0.96), rgba(45, 111, 104, 0.9));
+}
+
+.primary-command span,
+.primary-command p {
+  color: rgba(248, 251, 248, 0.72);
 }
 
 .stat-card,
@@ -983,7 +1044,7 @@ label {
 }
 
 .chapter-record-main span {
-  color: var(--brown);
+  color: var(--accent);
   font-size: 13px;
   font-weight: 900;
 }
@@ -1002,7 +1063,7 @@ label {
   border: 1px solid rgba(23, 32, 31, 0.1);
   border-radius: 12px;
   padding: 8px 10px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(78, 138, 125, 0.12);
   font-size: 12px;
   font-weight: 900;
@@ -1140,7 +1201,7 @@ label {
 }
 
 .chapter-plan-row strong {
-  color: var(--brown);
+  color: var(--accent);
 }
 
 .chapter-plan-row p {
@@ -1213,7 +1274,7 @@ label {
 }
 
 .seed-grid strong {
-  color: var(--brown-deep);
+  color: var(--ink-deep);
 }
 
 .seed-grid p {
@@ -1239,7 +1300,7 @@ label {
   position: absolute;
   inset: auto 0 0;
   height: 4px;
-  background: linear-gradient(90deg, var(--brown), var(--green));
+  background: linear-gradient(90deg, var(--accent), var(--green));
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 260ms ease;
@@ -1247,7 +1308,7 @@ label {
 
 .step.active,
 .step.done {
-  color: var(--brown-deep);
+  color: var(--ink-deep);
 }
 
 .step.active::before,
@@ -1268,11 +1329,17 @@ label {
 }
 
 .studio-page-grid {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 18px;
+  align-items: start;
 }
 
 .draft-page-grid {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 18px;
+  align-items: start;
 }
 
 .draft-stack {
@@ -1287,16 +1354,15 @@ label {
 }
 
 .stage-sidebar {
-  position: fixed;
-  top: 154px;
-  right: 0;
+  position: sticky;
+  top: 18px;
   z-index: 3;
-  width: 228px;
+  width: auto;
   display: grid;
   gap: 10px;
-  border-radius: 22px 0 0 22px;
+  border-radius: 22px;
   padding: 14px;
-  box-shadow: -10px 16px 32px rgba(17, 28, 27, 0.12);
+  box-shadow: 0 16px 32px rgba(17, 28, 27, 0.1);
   transition:
     width 180ms ease,
     padding 180ms ease,
@@ -1314,7 +1380,7 @@ label {
   border-radius: 999px;
   padding: 7px 10px;
   color: #f8fbf8;
-  background: linear-gradient(135deg, var(--brown), var(--green));
+  background: linear-gradient(135deg, var(--accent), var(--green));
   font-size: 12px;
   font-weight: 900;
   writing-mode: horizontal-tb;
@@ -1359,7 +1425,7 @@ label {
   border: 1px solid rgba(23, 32, 31, 0.14);
   border-radius: 14px;
   padding: 10px 12px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(255, 250, 240, 0.62);
   text-align: left;
   font-weight: 900;
@@ -1379,7 +1445,7 @@ label {
 
 .stage-nav-card.active {
   color: #f8fbf8;
-  background: linear-gradient(135deg, var(--brown), var(--green));
+  background: linear-gradient(135deg, var(--accent), var(--green));
 }
 
 .is-hidden {
@@ -1420,7 +1486,7 @@ label {
 
 .primary-btn {
   color: #f8fbf8;
-  background: linear-gradient(135deg, var(--brown), var(--brown-deep));
+  background: linear-gradient(135deg, var(--accent), var(--ink-deep));
   box-shadow: 0 14px 26px rgba(23, 32, 31, 0.24);
 }
 
@@ -1429,7 +1495,7 @@ label {
 }
 
 .ghost-btn {
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(78, 138, 125, 0.12);
 }
 
@@ -1536,7 +1602,7 @@ label {
   height: 34px;
   border-radius: 12px;
   color: #f8fbf8;
-  background: linear-gradient(135deg, var(--brown), var(--green));
+  background: linear-gradient(135deg, var(--accent), var(--green));
   font-weight: 900;
 }
 
@@ -1545,7 +1611,7 @@ label {
   width: fit-content;
   border-radius: 999px;
   padding: 8px 12px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(78, 138, 125, 0.12);
   font-size: 13px;
   font-weight: 900;
@@ -1578,14 +1644,14 @@ label {
   border: 1px solid rgba(23, 32, 31, 0.16);
   border-radius: 999px;
   padding: 9px 13px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(255, 253, 246, 0.72);
   font-weight: 900;
 }
 
 .beat-tab.active {
   color: #f8fbf8;
-  background: linear-gradient(135deg, var(--brown), var(--green));
+  background: linear-gradient(135deg, var(--accent), var(--green));
 }
 
 .beat-card {
@@ -1621,7 +1687,7 @@ label {
   height: 34px;
   border-radius: 12px;
   color: #f8fbf8;
-  background: linear-gradient(135deg, var(--brown), var(--green));
+  background: linear-gradient(135deg, var(--accent), var(--green));
   font-weight: 900;
 }
 
@@ -1635,7 +1701,7 @@ label {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 12px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(255, 250, 240, 0.72);
   font-weight: 900;
 }
@@ -1737,13 +1803,13 @@ label {
 .meta-summary strong {
   display: block;
   margin-top: 7px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   font-size: 20px;
 }
 
 .meta-card h3 {
   margin: 0 0 10px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   font-size: 17px;
 }
 
@@ -1812,8 +1878,8 @@ label {
   border-radius: 24px;
   padding: 16px;
   background:
-    linear-gradient(160deg, rgba(255, 253, 246, 0.96), rgba(238, 222, 194, 0.76)),
-    var(--paper);
+    linear-gradient(160deg, rgba(251, 252, 250, 0.96), rgba(229, 237, 233, 0.82)),
+    var(--surface);
   box-shadow:
     var(--inset),
     0 14px 28px rgba(17, 28, 27, 0.13);
@@ -1825,7 +1891,6 @@ label {
   inset: 0 0 auto;
   height: 74px;
   background:
-    radial-gradient(circle at 18% 20%, rgba(255, 250, 240, 0.55), transparent 36px),
     linear-gradient(135deg, rgba(78, 138, 125, 0.92), rgba(96, 123, 90, 0.86));
 }
 
@@ -1839,7 +1904,7 @@ label {
   border: 3px solid rgba(255, 250, 240, 0.86);
   border-radius: 20px;
   color: #f8fbf8;
-  background: linear-gradient(135deg, var(--brown-deep), var(--brown));
+  background: linear-gradient(135deg, var(--ink-deep), var(--accent));
   box-shadow: 0 12px 22px rgba(17, 28, 27, 0.2);
   font-size: 28px;
   font-weight: 900;
@@ -1854,7 +1919,7 @@ label {
   display: inline-flex;
   border-radius: 999px;
   padding: 5px 10px;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(78, 138, 125, 0.12);
   font-size: 12px;
   font-weight: 900;
@@ -1977,7 +2042,7 @@ label {
 
 .platform-card button {
   width: 100%;
-  color: var(--brown-deep);
+  color: var(--ink-deep);
   background: rgba(78, 138, 125, 0.12);
 }
 
@@ -2047,7 +2112,7 @@ label {
 }
 
 .reader-chapter span {
-  color: var(--brown);
+  color: var(--accent);
   font-size: 13px;
   font-weight: 900;
 }
@@ -2151,14 +2216,13 @@ label {
   border-color: rgba(23, 32, 31, 0.12);
   background:
     linear-gradient(180deg, rgba(251, 250, 246, 0.92), rgba(228, 235, 232, 0.92)),
-    var(--paper);
+    var(--surface);
 }
 
 .brand-mark,
 .signal-slab,
 .character-form-index,
-.beat-index,
-.fishbone-dot {
+.beat-index {
   color: #f8fbf8;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent),
@@ -2173,8 +2237,7 @@ label {
 .overview-hero,
 .publish-hero {
   background:
-    linear-gradient(135deg, rgba(251, 250, 246, 0.92), rgba(232, 238, 235, 0.82)),
-    radial-gradient(circle at 92% 18%, rgba(78, 138, 125, 0.16), transparent 18rem);
+    linear-gradient(135deg, rgba(251, 252, 250, 0.94), rgba(232, 238, 235, 0.86));
 }
 
 .nav-card,
@@ -2185,8 +2248,7 @@ label {
 .chapter-plan-row,
 .batch-queue-row,
 .meta-card,
-.character-card,
-.fishbone-card {
+.character-card {
   border-color: rgba(23, 32, 31, 0.1);
   background: rgba(251, 250, 246, 0.76);
 }
@@ -2416,6 +2478,10 @@ label {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .command-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .studio-grid {
     grid-template-columns: 1fr;
   }
@@ -2481,6 +2547,7 @@ label {
 
   .side-nav,
   .stats-grid,
+  .command-grid,
   .publish-grid,
   .pipeline,
   .meta-summary,
@@ -2488,10 +2555,6 @@ label {
   .two-col,
   .small-grid {
     grid-template-columns: 1fr;
-  }
-
-  .fishbone::before {
-    left: 28px;
   }
 
   .sidebar,

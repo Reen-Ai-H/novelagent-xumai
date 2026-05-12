@@ -46,8 +46,8 @@ const appState = {
   activeBeatIndex: 0,
   reviewDecision: "approved",
   draft: null,
-  loreUpdates: {},
-  characterUpdates: {},
+  runLoreUpdates: {},
+  runCharacterUpdates: {},
   characters: [],
   stage: "planning",
   agentTimer: null,
@@ -419,19 +419,19 @@ function getProjectBrief(project) {
 }
 
 function getProjectLatestChapter(project) {
-  if (project?.latest_chapter_number) {
-    return {
-      chapter_number: project.latest_chapter_number,
-      title: project.latest_chapter_title,
-      status: project.latest_chapter_status,
-      session_id: project.latest_session_id,
-    };
+  if (!project?.latest_chapter_number) {
+    return null;
   }
-  return [...(project?.chapters || [])].sort((a, b) => a.chapter_number - b.chapter_number).at(-1);
+  return {
+    chapter_number: project.latest_chapter_number,
+    title: project.latest_chapter_title,
+    status: project.latest_chapter_status,
+    session_id: project.latest_session_id,
+  };
 }
 
 function renderHomeProjectGrid() {
-  const projects = appState.projects.length ? appState.projects : appState.project ? [appState.project] : [];
+  const projects = appState.projects;
   elements.homeProjectCount.textContent = `${projects.length} 部作品`;
   if (!projects.length) {
     elements.homeProjectGrid.className = "home-project-empty";
@@ -443,7 +443,10 @@ function renderHomeProjectGrid() {
   elements.homeProjectGrid.innerHTML = projects
     .map((project, index) => {
       const latestChapter = getProjectLatestChapter(project);
-      const latestStatus = getStatusLabel(project.latest_chapter_status || latestChapter?.status);
+      const latestStatus = getStatusLabel(project.latest_chapter_status);
+      const chapterCount = Number(project.chapter_count || 0);
+      const completedCount = Number(project.completed_chapter_count || 0);
+      const progress = chapterCount ? Math.round((completedCount / chapterCount) * 100) : 0;
       const updatedAt = project.updated_at ? new Date(project.updated_at).toLocaleString("zh-CN") : "未记录";
       return `
         <article class="project-card" data-project-id="${escapeHtml(project.project_id)}" style="--cover-index: ${index % 5}">
@@ -457,9 +460,13 @@ function renderHomeProjectGrid() {
               <p>${escapeHtml(getProjectBrief(project)).slice(0, 92)}</p>
               <div class="project-meta">
                 <span>${project.total_word_count || 0} 字</span>
-                <span>${project.chapter_count || 0} 章 / 完成 ${project.completed_chapter_count || 0}</span>
+                <span>${chapterCount} 章 / 完成 ${completedCount}</span>
                 <span>${escapeHtml(latestStatus)}</span>
               </div>
+              <div class="project-progress" aria-label="完成进度">
+                <i style="width: ${progress}%"></i>
+              </div>
+              <small>最近：${latestChapter ? `第 ${latestChapter.chapter_number} 章 · ${escapeHtml(latestChapter.title || "未命名章节")}` : "暂无章节"}</small>
               <small>更新：${escapeHtml(updatedAt)}</small>
             </div>
           </button>
@@ -561,7 +568,7 @@ function renderBatchStatus(task) {
     <small>章节：${(task.chapter_numbers || []).join(", ") || "未记录"}</small>
   `;
 
-  const results = appState.latestBatchResults || task.chapter_results || [];
+  const results = appState.latestBatchResults.length ? appState.latestBatchResults : task.chapter_results || [];
   const numbers = new Set(results.length ? results.map((result) => result.chapter_number) : task.chapter_numbers || []);
   const planned = getChapterPlans().filter((plan) => numbers.has(plan.chapter_number));
   renderChapterPlanTable(elements.batchOutlineTable, planned, { editable: true });
@@ -592,13 +599,13 @@ function renderBatchQueue(chapterResults) {
       const number = result.chapter_number;
       const plan = plansByNumber.get(number);
       const status = getBatchChapterStatusLabel(result);
-      const canView = Boolean(result.session_id || result.draft_status);
-      const conflict = result.conflict_type ? ` · ${escapeHtml(result.conflict_type)}` : "";
+      const canView = Boolean(result.session_id || result.draft_status || result.status === "generated");
+      const conflict = result.conflict_type ? ` · ${escapeHtml(localizeConflictType(result.conflict_type))}` : "";
       return `
         <article class="batch-queue-row ${result.conflict_type ? "has-conflict" : ""}" data-batch-chapter="${number}">
           <div>
             <strong>第 ${number} 章：${escapeHtml(status)}${conflict}</strong>
-            <p>${escapeHtml(plan?.title || "未命名章节")} · ${escapeHtml(plan?.summary || result.review_status || result.draft_status || "暂无摘要")}</p>
+            <p>${escapeHtml(plan?.title || "未命名章节")} · ${escapeHtml(plan?.summary || localizeBatchDetail(result) || "暂无摘要")}</p>
           </div>
           <div class="batch-row-actions">
             <button class="ghost-btn compact" type="button" data-batch-action="view" data-chapter-number="${number}" ${canView ? "" : "disabled"}>查看草稿</button>
@@ -643,6 +650,31 @@ function getBatchChapterStatusLabel(result) {
   }[result.status] || getStatusLabel(result.status);
 }
 
+function localizeConflictType(conflictType) {
+  return {
+    existing_draft: "已有草稿",
+    existing_completed: "已入库章节",
+    existing_chapter: "已有章节",
+    overwrite: "覆盖风险",
+  }[conflictType] || conflictType;
+}
+
+function localizeBatchDetail(result) {
+  if (result.review_status === "needs_revision") {
+    return "AI 建议修订";
+  }
+  if (result.review_status) {
+    return "AI 已审查，等待人工处理";
+  }
+  if (result.draft_status) {
+    return "草稿已生成，尚未进入长期记忆";
+  }
+  if (result.conflict_type) {
+    return `检测到${localizeConflictType(result.conflict_type)}，请走对比替换流程`;
+  }
+  return "";
+}
+
 function renderReaderCatalog() {
   const chapters = getProjectChapters();
   if (!chapters.length) {
@@ -684,23 +716,39 @@ function renderPreviewChapter(chapter) {
     return;
   }
 
-  appState.previewChapterNumber = chapter.chapter_number;
-  elements.previewTitle.textContent = chapter.title || `第 ${chapter.chapter_number} 章`;
-  elements.previewStatus.textContent = chapter.draft?.content
-    ? `第 ${chapter.chapter_number} 章 · ${getStatusLabel(chapter.status)} · ${chapter.word_count || countChineseWords(chapter.draft.content)} 字`
-    : `第 ${chapter.chapter_number} 章 · ${getStatusLabel(chapter.status)}`;
-  if (chapter.draft?.content) {
-    elements.previewContent.textContent = chapter.draft.content;
+  const normalized = normalizePreviewChapter(chapter);
+  appState.previewChapterNumber = normalized.chapter_number;
+  elements.previewTitle.textContent = normalized.title || `第 ${normalized.chapter_number} 章`;
+  elements.previewStatus.textContent = normalized.hasBody
+    ? `第 ${normalized.chapter_number} 章 · ${getStatusLabel(normalized.status)} · ${normalized.wordCount} 字`
+    : `第 ${normalized.chapter_number} 章 · ${getStatusLabel(normalized.status)}`;
+  if (normalized.hasBody) {
+    elements.previewContent.textContent = normalized.content;
   } else {
     elements.previewContent.innerHTML = `
       <div class="reader-status-panel">
         <strong>本章尚未形成可阅读正文</strong>
-        <p>当前状态：${escapeHtml(getStatusLabel(chapter.status))}。你可以进入章节工作区继续处理本章。</p>
-        <button class="primary-btn secondary compact" type="button" data-preview-action="process" data-chapter-number="${chapter.chapter_number}">去处理本章</button>
+        <p>${escapeHtml(normalized.message || `当前状态：${getStatusLabel(normalized.status)}。你可以进入章节工作区继续处理本章。`)}</p>
+        <button class="primary-btn secondary compact" type="button" data-preview-action="process" data-chapter-number="${normalized.chapter_number}">去处理本章</button>
       </div>
     `;
   }
   renderReaderCatalog();
+}
+
+function normalizePreviewChapter(payload) {
+  const rawChapter = payload.chapter || payload;
+  const content = payload.content || rawChapter.draft?.content || rawChapter.content || "";
+  const chapterNumber = payload.chapter_number || rawChapter.chapter_number || 1;
+  return {
+    chapter_number: chapterNumber,
+    title: payload.title || rawChapter.title || `第 ${chapterNumber} 章`,
+    status: payload.status || rawChapter.status || "missing",
+    content,
+    hasBody: Boolean(payload.has_body ?? content),
+    wordCount: payload.word_count || rawChapter.word_count || countChineseWords(content),
+    message: payload.message,
+  };
 }
 
 function renderNextSeedPanel(snapshot) {
@@ -930,8 +978,8 @@ function renderCharacterCards(characters) {
     .join("");
 }
 
-function renderLoreCodex(loreUpdates) {
-  const entries = Object.entries(loreUpdates || {});
+function renderLoreCodex(loreCodex) {
+  const entries = Object.entries(loreCodex || {});
   if (!entries.length) {
     elements.loreCodex.className = "lore-codex-empty";
     elements.loreCodex.textContent = "项目级设定库暂无记录。全文规划、章节摘要和入库设定会汇总到这里。";
@@ -971,10 +1019,6 @@ function renderLoreCodex(loreUpdates) {
         .join("") || '<div class="lore-codex-empty">暂无章节时间线。</div>'}
     </div>
   `;
-}
-
-function renderLoreFishbone(loreUpdates) {
-  renderLoreCodex(loreUpdates);
 }
 
 function updateStage(stage) {
@@ -1321,9 +1365,6 @@ async function loadProjectCodex(projectId = appState.projectId) {
 async function loadProjects() {
   const data = await requestJson("/novel/projects");
   appState.projects = data.projects || [];
-  if (!appState.projects.some((project) => project.project_id === appState.projectId) && appState.project) {
-    appState.projects.unshift(appState.project);
-  }
   renderHomeProjectGrid();
   return appState.projects;
 }
@@ -1598,7 +1639,7 @@ async function selectPreviewChapter(chapterNumber) {
 
   try {
     const data = await requestJson(`/novel/projects/${appState.projectId}/chapters/${chapterNumber}`);
-    renderPreviewChapter(data.chapter);
+    renderPreviewChapter(data);
   } catch (error) {
     renderPreviewChapter(localChapter);
     showToast(error.message);
@@ -1829,8 +1870,8 @@ function renderRunResult(data) {
   }
 
   appState.draft = data.draft || appState.draft;
-  appState.loreUpdates = data.extracted_lore_updates || appState.loreUpdates || {};
-  appState.characterUpdates = data.extracted_character_updates || appState.characterUpdates || {};
+  appState.runLoreUpdates = data.extracted_lore_updates || appState.runLoreUpdates || {};
+  appState.runCharacterUpdates = data.extracted_character_updates || appState.runCharacterUpdates || {};
   updateStage(data.current_stage);
 
   if (data.draft) {
@@ -1881,8 +1922,8 @@ async function planChapter() {
     });
 
     appState.draft = null;
-    appState.loreUpdates = {};
-    appState.characterUpdates = {};
+    appState.runLoreUpdates = {};
+    appState.runCharacterUpdates = {};
     setDecisionPanel(null);
     updateSession(data.session_id);
     updateStage(data.current_stage);
@@ -2084,6 +2125,7 @@ async function acceptChapter() {
     });
     renderRunResult(data);
     await loadProject();
+    await loadProjectCodex(appState.projectId);
     finishAgentRun({
       agent: "Librarian",
       stage: data.current_stage,
@@ -2119,8 +2161,8 @@ async function continueNextChapter() {
 
     appState.nextSnapshot = snapshot;
     appState.draft = null;
-    appState.loreUpdates = {};
-    appState.characterUpdates = {};
+    appState.runLoreUpdates = {};
+    appState.runCharacterUpdates = {};
     appState.plotBeats = [];
     elements.chapter.value = String(snapshot.chapter_number);
     elements.worldview.value = snapshot.global_worldview || snapshot.confirmed_worldview || elements.worldview.value;
@@ -2235,6 +2277,12 @@ $$(".nav-card, .sub-nav-card, .stage-nav-card").forEach((button) => {
 elements.homeBtn.addEventListener("click", () => switchView("home"));
 elements.sidebarToggle.addEventListener("click", toggleSidebar);
 document.addEventListener("click", (event) => {
+  const quickViewButton = event.target.closest("[data-quick-view]");
+  if (quickViewButton) {
+    switchView(quickViewButton.dataset.quickView);
+    return;
+  }
+
   if (!event.target.closest(".stage-collapse-btn")) {
     return;
   }
