@@ -6,6 +6,7 @@ from typing import Literal, TypedDict
 
 from app.models.chapter import ChapterDraft, PlotBeat
 from app.models.character import CharacterCard
+from app.models.memory import RetrievalContext
 
 
 WorkflowStage = Literal[
@@ -44,7 +45,8 @@ class NovelState(TypedDict, total=False):
     character_graph: dict[str, CharacterCard]
 
     # RAG 检索结果：写作前注入相关人物、地点、伏笔和历史章节摘要。
-    retrieved_context: list[str]
+    retrieved_context: list[RetrievalContext]
+    temporary_context: dict[str, str]
 
     # Human-in-the-loop：Planner 后暂停，前端/API 可覆盖这里的节点后再继续。
     human_feedback: str | None
@@ -57,4 +59,5 @@ class NovelState(TypedDict, total=False):
 
     # 运行时辅助信息，便于 API 层追踪错误和请求。
     session_id: str
+    project_id: str
     error_message: str | None

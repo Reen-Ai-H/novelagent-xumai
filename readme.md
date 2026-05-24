@@ -1,219 +1,442 @@
-# 多智能体网文共创引擎
+# 多智能体网文共创台
 
-Human-in-the-Loop Web Novel Agent 是一个基于大模型、多智能体协作和 RAG 的长篇网文半自动生成系统。项目目标是缓解 LLM 写长篇小说时常见的上下文遗忘、逻辑发散和角色崩坏问题，并允许用户在关键节点介入审核。
+Human-in-the-Loop Web Novel Agent 是一个面向长篇网文创作的 AI 共创工作台。项目目标不是一次性生成一段小说，而是把“开书规划、章节生成、AI 审查、人工确认、设定沉淀、长期记忆、继续更新、多章节推进”串成可持续运行的生产流程。
 
-## 核心思路
+当前项目已从单章 Demo 进入作品工程化阶段：后端已经具备作品 JSON 持久化、章节目录、全文规划、下一章预填、多章节批量任务、章节预览和 RAG 长期记忆闭环；前端已经有首页、作品工作台、章节创作、全文规划、多章节任务、设定页和阅读器雏形。下一阶段重点是把网页端体验打磨顺滑，再考虑手机端迁移。
 
-系统采用 LangGraph 状态机架构，多个 Agent 共享并修改同一个 `NovelState`：
+## 当前产品需求
 
-- `Planner Agent`：根据世界观、人物图谱和上一章进度生成本章剧情节点。
-- `Writer Agent`：结合剧情节点和 RAG 检索到的设定撰写章节草稿。
-- `Reviewer Agent`：检查 OOC、逻辑漏洞、设定冲突和节奏问题。
-- `Librarian Agent`：在用户最终接受章节后，从正文中抽取新人物、新道具、关系变化和世界观增量。
+### 1. 首页与作品管理
 
-Planner 生成剧情节点后，工作流会进入 `awaiting_human_review` 阶段。用户确认或修改节点后，Writer 先生成正文并立即返回前端展示，再由 Reviewer 单独审查。只有用户最终接受本章节后，Librarian 才会抽取设定并完成本章记忆更新。
+- 进入系统后先看到首页，而不是直接进入章节工作台。
+- 首页展示已经创作过的作品卡片，包括标题、摘要、章节数、完成章节数、字数、最近章节、最近更新时间、是否已有全文规划、是否已有下一章预填。
+- 首页可以新建作品，也可以从作品卡片进入工作台、继续创作或打开小说预览。
+- 新建作品不应强迫用户填完所有设定；作品名、题材、世界观、主角设定等信息至少填写一项即可启动。
+- 新书创建应先生成可编辑的作品设定草案，再进入全文规划草案确认。
 
-## 技术栈
+### 2. 新书流程
 
-- Python 3.10+
-- FastAPI
-- LangGraph
-- LangChain
-- Pydantic v2
-- python-dotenv / pydantic-settings
-- RAG：用于检索长篇世界观、人物卡、历史章节摘要和伏笔
-
-## 当前阶段
-
-阶段四：单章节共创闭环基本成型。
-
-已完成：
-
-- 创建 `app/models`、`app/agents`、`app/core` 等基础目录。
-- 使用 Pydantic v2 定义 `CharacterCard`、`PlotBeat`、`ChapterDraft`。
-- 使用 `TypedDict` 定义 LangGraph 全局状态 `NovelState`。
-- 创建 Planner、Writer、Librarian、Reviewer 节点骨架。
-- 创建 LangGraph 状态图，并在 Writer 前设置人工审核断点。
-- 新增小说工作流 API：生成剧情节点、提交审核结果、读取会话状态。
-- 新增 FastAPI 托管的前端工作台，支持左侧功能导航、折叠侧栏、项目总览、开始创作、一键发表前瞻和小说预览。
-- `开始创作` 下新增独立子页面：人物设定以游戏角色卡展示，剧情设定以横向可滚动鱼骨线展示。
-- 顶部条幅会在 Agent 运行时展示预制动态文案，生成结果统一在正文、设定和审查面板中展示。
-- Planner Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级到本地剧情节点，保证流程可继续演示。
-- Writer Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级为剧情节点草稿。
-- Librarian Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级为章节摘要设定。
-- Reviewer Agent 已接入 LangChain + Pydantic 结构化输出；调用失败时自动降级为基础规则审查。
-- 章节流程已拆分为 `Writer -> Reviewer -> 用户确认 -> Librarian`：正文先展示，审查后可自动或手动打回修稿，用户接受章节后再抽取设定。
-- `开始创作` 已拆成章节规划、剧情审核、草稿审查三个阶段页，并在页面右侧提供可折叠阶段导航。
-- 人物卡片输入已从 JSON 文本框改为可视化表单，支持随窗口宽度自适应多列展示。
-- 草稿审查页已将章节正文与审查/设定面板并排展示，降低单页拥挤感。
-- 保留现有 FastAPI 与 LangChain 对话链路，后续继续接入真正的 token 流式状态输出和 RAG 长文本记忆库。
-
-当前项目已经基本具备“单个章节”的完整半自动共创能力：用户输入设定，Planner 规划剧情节点，用户审核后 Writer 生成正文，Reviewer 审查并可触发修稿，用户接受后 Librarian 抽取章节记忆。下一阶段重点不再只是单章生成，而是把多个章节串联成一本可持续维护的小说工程。
-
-## 当前能力边界
-
-已具备：
-
-- 单章规划：根据世界观、前文摘要、人物卡和本章要求生成剧情节点。
-- 人工审核：用户可以修改 Planner 输出后再进入正文生成。
-- 正文生成：Writer 根据确认后的剧情节点生成章节草稿。
-- 审查修稿：Reviewer 给出结构化审查意见；不通过时可自动或手动触发 Writer 修稿。
-- 设定抽取：用户接受章节后，Librarian 抽取人物状态、世界观增量、道具、地点和伏笔。
-- 前端工作台：支持章节创作、人物设定、剧情设定、小说预览和一键发表前瞻。
-
-暂未完成：
-
-- 多章节连续创作还没有形成稳定的章节队列、卷纲和长期进度管理。
-- RAG 长文本记忆库尚未真正落地，当前主要依赖会话状态和单次设定抽取。
-- Writer 正文生成还不是 token 流式输出，前端仍需等待单次 LLM 请求返回。
-- Reviewer 只负责审查和触发修稿，还没有形成多轮版本对比、差异查看和人工定稿记录。
-- 小说级结构如作品信息、分卷、主线/支线、伏笔生命周期、角色成长弧线还未建模。
-
-## 下一阶段路线
-
-从“单章可用”走向“正式生成一本小说”，建议按下面顺序推进：
-
-1. 多章节连续创作
-   - 增加作品级 `NovelProject` / `VolumePlan` / `ChapterPlan` 概念。
-   - 支持从上一章摘要、已确认设定和未回收伏笔中生成下一章。
-   - 前端增加章节列表、章节状态、继续写下一章和重写某章能力。
-
-2. 长文本记忆与 RAG
-   - 将已接受章节、章节摘要、人物卡、地点、道具、伏笔写入可检索记忆库。
-   - Writer 和 Reviewer 在生成/审查前检索相关历史设定，减少长篇上下文遗忘。
-   - Librarian 从“展示设定”升级为“维护可检索设定库”。
-
-3. 小说级规划
-   - 增加整本书的题材、卖点、主线目标、阶段爽点、分卷结构和结局方向。
-   - Planner 不只规划单章，还能根据卷纲控制节奏，避免剧情发散。
-   - 加入伏笔生命周期：埋下、强化、误导、回收、废弃。
-
-4. 流式与异步体验
-   - Writer 正文生成改为 token 流式输出，边生成边显示。
-   - Reviewer 和 Librarian 可放到后台异步执行，减少用户等待。
-   - 前端展示真实 Agent 状态，而不是只用预制动态文案。
-
-5. 成稿管理与发布准备
-   - 支持章节版本、人工定稿、导出 Markdown / TXT。
-   - 增加小说预览目录、章节切换、总字数统计和章节质量概览。
-   - 一键发表仍保持前瞻页，待账号安全、平台适配和人工确认机制完善后再接入真实发布。
-
-## 目录结构
+新书流程应服务于“帮用户把模糊想法补成可写的作品工程”：
 
 ```text
-novelagent/
-├── app/
-│   ├── agents/              # LangGraph Agent 节点：Planner / Writer / Librarian / Reviewer
-│   │   ├── librarian_chain.py # Librarian 结构化 LLM 输出链
-│   │   ├── novel_nodes.py    # 小说工作流节点
-│   │   ├── planner_chain.py  # Planner 结构化 LLM 输出链
-│   │   ├── reviewer_chain.py # Reviewer 结构化 LLM 输出链
-│   │   └── writer_chain.py   # Writer 结构化 LLM 输出链
-│   ├── core/                # 应用基础设施：配置、日志、RAG、图编排等
-│   │   └── novel_graph.py    # LangGraph 状态图和会话服务
-│   ├── models/              # 小说领域模型与 LangGraph 状态定义
-│   │   ├── character.py     # CharacterCard 人物卡片
-│   │   ├── chapter.py       # PlotBeat 与 ChapterDraft
-│   │   ├── librarian.py     # LibrarianOutput 结构化输出
-│   │   ├── planner.py       # PlannerOutput 结构化输出
-│   │   ├── reviewer.py      # ReviewerOutput 结构化输出
-│   │   ├── writer.py        # WriterOutput 结构化输出
-│   │   └── state.py         # NovelState 全局状态
-│   ├── chain.py             # 现有 LangChain 对话链路
-│   ├── novel_routes.py      # /novel 小说工作流接口
-│   └── routes.py            # 现有 /chat 流式接口
-├── core/
-│   └── config.py            # 现有配置管理
-├── frontend/
-│   ├── index.html           # 前端工作台页面
-│   ├── styles.css           # 朴素写作风格与纸张/书本拟物化样式
-│   └── app.js               # 调用 /novel API 的交互逻辑
-├── schemas/
-│   ├── chat.py              # 现有聊天接口 Schema
-│   └── novel.py             # 小说工作流 API Schema
-├── main.py                  # FastAPI 应用入口
-└── readme.md
+首页新建作品 -> 任填至少一项设定 -> AI 补全作品设定草案 -> 用户编辑确认
+-> 创建 NovelProject -> 生成全文规划草案 -> 用户确认/修改 -> 第一章 Planner 输入
 ```
+
+新书阶段需要沉淀：
+
+- 作品标题与首页摘要。
+- 作品级世界观。
+- 人物初始设定。
+- 全文规划：故事前提、核心冲突、结局方向、主题/爽点、目标章节数。
+- 分卷规划。
+- 章节规划列表。
+
+### 3. 旧书更新流程
+
+旧书更新不能等同于开新书。用户点击继续写下一章时，不应该立即开始 Planner，而应该进入下一章工作区，并自动预填输入。
+
+预填来源包括：
+
+- 已完成章节的摘要。
+- 已确认世界观和稳定设定。
+- 当前人物状态。
+- 未解决伏笔。
+- 上一章结尾钩子。
+- 全文规划或章节规划中命中的下一章规划。
+- 系统推荐的下一章创作方向。
+- 用户可编辑的本章创作要求。
+
+当前后端通过 `prepare-next` 生成 `NextChapterSeed`，只负责准备输入，不触发正式 Planner；用户确认后才调用正式章节规划接口。
+
+### 4. 单章节创作闭环
+
+单章流程是项目的核心生产闭环：
+
+```text
+Planner -> 人工确认剧情节点 -> Writer -> Reviewer -> 人工接受/修订 -> Librarian -> 长期记忆
+```
+
+职责边界：
+
+- `Planner`：生成本章剧情节点和结构。
+- 人工审核：用户可修改剧情节点，确认后才进入正文写作。
+- `Writer`：根据确认后的剧情节点、作品设定、前文摘要和 RAG 记忆生成章节草稿。
+- `Reviewer`：严格审查正文质量、承接、人物动机、设定冲突、伏笔回应和节奏重复。
+- 人工确认：用户决定接受入库或要求修订。
+- `Librarian`：只在用户接受章节后抽取稳定设定、人物变化、章节摘要和伏笔信息。
+- `MemoryStore`：只保存已经被接受的稳定信息。
+
+长期记忆写入边界非常重要：
+
+- Planner 阶段不写入长期记忆。
+- Writer 草稿阶段不写入长期记忆。
+- Reviewer 审查阶段不写入长期记忆。
+- 批量草稿生成阶段不写入长期记忆。
+- 只有 `accept_chapter` 成功完成且 Librarian 抽取完成后，才写入 `.novel_memory/{project_id}.json`。
+
+### 5. 多章节批量流程
+
+多章节功能不是简单循环生成正文，而是一次性推进多个章节，并保留逐章确认权。
+
+目标流程：
+
+```text
+批量规划 3-10 章 -> 用户确认/修改章节规划
+-> 批量生成草稿 -> 批量 AI 审查
+-> 逐章进入待接受或待修订队列
+-> 用户逐章接受/修订
+-> accept 后才写长期记忆
+```
+
+当前要求：
+
+- 一次批量范围限制为 3-10 章。
+- 默认起始章应根据已有章节自动推断，而不是固定从第 1 章开始。
+- 如果批量范围内已有章节，默认不能静默覆盖。
+- 覆盖策略支持：
+  - `block`：发现已有章节直接阻止。
+  - `compare`：生成候选稿，保留原稿，供用户对比。
+  - `replace`：明确替换。
+  - `keep_existing`：跳过已有章节。
+- 批量生成需要给后续章节传递临时上下文，例如上一章草稿摘要、结尾钩子、人物状态，避免第 2 章和第 4 章内容重复。
+- 临时上下文只放在 `NovelState.temporary_context`，不污染长期记忆。
+- AI 审查在批量第一稿中应更严格，默认 8.5 分以下不通过，优先打回修订。
+
+### 6. 全文规划与章节规划
+
+全文规划不是一次性死表单，而是作品级长期控制台。用户可以随时回来修改。
+
+当前规划数据包括：
+
+- `FullNovelPlan`：故事前提、核心冲突、结局方向、主题/爽点、目标章节数、备注。
+- `VolumePlan`：分卷标题、分卷主线、章节范围。
+- `ChapterOutline`：章节号、标题、所属分卷、章节摘要、叙事目的、剧情节点。
+
+后续 Planner 应逐步更多消费这些规划，保证长篇节奏、章节目标和伏笔生命周期一致。
+
+### 7. 人物设定与剧情设定
+
+项目需要作品级设定库，而不是只展示当前章节抽取结果。
+
+当前后端已有：
+
+- `character_codex`：作品级人物设定集。
+- `lore_codex`：作品级剧情与世界观设定集。
+- `GET /novel/projects/{project_id}/codex`：读取项目级人物和设定聚合。
+
+产品要求：
+
+- 人物设定页重新进入后仍能看到作品级人物设定。
+- 剧情设定不应依赖临时鱼骨图形式，应转为可浏览、可编辑、可被后续 Planner/Writer 消费的设定库。
+- 设定来源要区分“AI 抽取建议”和“用户确认入库”。
+
+### 8. 小说预览与阅读器
+
+小说预览应像读者阅读器，而不是跳回草稿设置页。
+
+要求：
+
+- 有章节目录。
+- 有上一章/下一章切换。
+- 总览点击第几章时默认进入小说预览。
+- 未完成章节显示状态和处理入口，不假装是已完成正文。
+- 已有候选稿时可以展示原稿、候选稿和对比摘要。
+
+## 当前已实现功能
+
+### 后端能力
+
+- FastAPI 服务入口和静态前端挂载。
+- LangGraph 小说状态机。
+- Planner / Writer / Reviewer / Librarian 多智能体节点。
+- 单章工作流：规划、人工确认、写作、审查、修订、接受。
+- 本地 JSON RAG 记忆库：`.novel_memory/{project_id}.json`。
+- RAG 检索上下文注入 Writer / Reviewer。
+- RAG 写入闭环修正：只在章节接受后写入长期记忆。
+- 作品级模型 `NovelProject`。
+- 本地 JSON 作品持久化：`.novel_projects/{project_id}.json`。
+- 原子写入：临时文件写入后 `replace`。
+- `project_id` 简单校验，避免路径穿越。
+- 首页项目卡片响应 `ProjectCard`。
+- 全文规划、分卷规划、章节规划模型。
+- 下一章输入快照 `NextChapterSeed`。
+- 批量任务状态 `BatchGenerationRun` 和逐章结果 `BatchChapterResult`。
+- 章节预览响应 `ChapterPreviewResponse`，章节不存在时也返回可处理状态。
+- 批量覆盖策略和已有章节冲突提示。
+- 批量生成后自动进入待接受/待修订队列。
+- 批量生成临时上下文链路。
+- 严格 Reviewer：8.5 分以下默认不通过，批量第一稿倾向打回。
+
+### 前端能力
+
+- 首页作品入口。
+- 首页新建作品流程雏形。
+- 作品工作台。
+- 一级导航：总览、章节创作、全文规划、多章节任务、人物设定、剧情设定、小说预览、一键发表。
+- 继续写下一章改为先 `prepare-next` 预填，不直接 Planner。
+- 全文规划编辑页。
+- 多章节规划/生成页。
+- 批量任务逐章队列。
+- 小说阅读器雏形：目录、状态、上一章、下一章。
+- 状态文案逐步改为“待审查”“待接受入库”“建议修订”“已完成入库”等产品化表达。
 
 ## 核心数据模型
 
-- `CharacterCard`：人物卡片，记录姓名、别名、叙事定位、长期人设、当前心理状态、当前物理状态、关系、物品、秘密和时间线。
-- `PlotBeat`：剧情节点，记录节点顺序、摘要、叙事目的、出场人物、地点、冲突、预期结果和连续性约束。
-- `ChapterDraft`：章节草稿，记录章节号、标题、采用的剧情节点、正文、审查意见、修订记录、质量评分和草稿状态。
-- `NovelState`：LangGraph 全局状态，记录世界观、当前章节、当前阶段、人物图谱、RAG 检索上下文、人工反馈、设定抽取结果、审查反馈和用户接受状态。
+### NovelProject
 
-## 启动方式
+`NovelProject` 是作品工程的根模型，保存：
 
-```bash
-uvicorn main:app --reload
+- `project_id`
+- `title`
+- `project_brief`
+- `global_worldview`
+- `character_codex`
+- `lore_codex`
+- `full_plan`
+- `volumes`
+- `chapter_plans`
+- `chapters`
+- `next_chapter_input_snapshot`
+- `batch_tasks`
+- `latest_edited_chapter_number`
+- `latest_session_id`
+- `total_word_count`
+- `created_at`
+- `updated_at`
+
+### ChapterRecord
+
+章节目录记录，保存章节状态、草稿、审查结果、候选稿和对比摘要。
+
+主要状态：
+
+- `planned`
+- `drafted`
+- `reviewed`
+- `needs_revision`
+- `approved`
+- `completed`
+- `failed`
+
+### NextChapterSeed
+
+下一章输入快照，由 `prepare-next` 生成，供前端展示和用户编辑。
+
+主要字段：
+
+- 下一章章节号。
+- 世界观和已确认设定。
+- 前文摘要。
+- 当前人物状态。
+- 未解决伏笔。
+- 上一章结尾钩子。
+- 推荐创作方向。
+- 命中的章节规划。
+- 用户可编辑创作要求。
+
+### BatchGenerationRun
+
+批量任务记录，保存任务状态、章节号、会话映射、逐章结果、覆盖策略、待接受队列和待修订队列。
+
+## API 概览
+
+### 作品与首页
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/novel/projects` | 创建作品 |
+| `GET` | `/novel/projects` | 首页作品卡片列表 |
+| `GET` | `/novel/projects/current` | 当前默认作品 |
+| `GET` | `/novel/projects/{project_id}` | 作品完整状态 |
+| `GET` | `/novel/projects/{project_id}/codex` | 作品级人物与剧情设定 |
+
+### 全文规划与下一章准备
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/novel/projects/{project_id}/prepare-next` | 生成/读取下一章预填输入 |
+| `POST` | `/novel/projects/{project_id}/prepare-next` | 带用户要求生成下一章预填输入 |
+| `POST` | `/novel/projects/{project_id}/full-plan` | 生成或保存全文规划骨架 |
+| `PUT` | `/novel/projects/{project_id}/full-plan` | 更新全文规划、分卷规划、章节规划 |
+| `POST` | `/novel/projects/{project_id}/chapters/next` | 用户确认 seed 后正式规划下一章 |
+
+### 单章工作流
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/novel/chapters/plan` | 生成章节剧情节点 |
+| `POST` | `/novel/chapters/{session_id}/approve` | 人工确认剧情节点并进入 Writer |
+| `POST` | `/novel/chapters/{session_id}/review` | 对草稿执行 Reviewer 审查 |
+| `POST` | `/novel/chapters/{session_id}/revise` | 根据审查意见修订 |
+| `POST` | `/novel/chapters/{session_id}/accept` | 接受章节，触发 Librarian 和长期记忆写入 |
+| `GET` | `/novel/sessions/{session_id}` | 查询章节会话状态 |
+
+### 批量章节
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/novel/projects/{project_id}/batch/plan` | 批量规划 3-10 章 |
+| `POST` | `/novel/projects/{project_id}/batch/generate` | 批量生成草稿并审查 |
+
+`batch/generate` 的 `overwrite_policy`：
+
+- `block`：默认策略，已有章节返回 `409`。
+- `compare`：生成候选稿并保留原稿，供对比。
+- `replace`：明确覆盖。
+- `keep_existing`：跳过已有章节。
+
+### 阅读器
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/novel/projects/{project_id}/chapters/{chapter_number}` | 获取章节预览、正文、状态、上下章和候选稿对比 |
+
+章节不存在时也返回 `200`，状态为 `missing`，前端可以显示“去处理本章”。
+
+## 运行项目
+
+### 1. 创建环境
+
+推荐使用当前工程约定的 `ai_project` 环境。如果已经存在，可以直接跳过创建步骤。
+
+```powershell
+conda create -n ai_project python=3.10
+conda activate ai_project
+pip install -r requirements.txt
 ```
 
-浏览器打开：
+也可以直接使用当前机器上的解释器：
+
+```powershell
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -m pip install -r requirements.txt
+```
+
+### 2. 配置环境变量
+
+复制 `.env.example` 为 `.env`，填入真实 Key。
+
+```env
+OPENAI_API_KEY="sk-your-api-key"
+OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_MODEL="qwen3.6-plus"
+LLM_TEMPERATURE="0.7"
+```
+
+后端使用 `core/config.py` 读取 `.env`。
+
+### 3. 启动服务
+
+```powershell
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+访问：
 
 ```text
 http://127.0.0.1:8000/
 ```
 
-前端工作台包含：
+API 文档：
 
-- `总览`：展示小说总字数、当前章节、剧情节点数量、工作流阶段和审查状态。
-- `开始创作`：当前主功能，支持生成剧情节点、人工审核修改、继续生成章节草稿。
-- `人物设定`：展示 Librarian 抽取出的人物卡片和状态变化。
-- `剧情设定`：以横向可滚动鱼骨线展示世界观增量、道具、地点、伏笔和章节摘要。
-- `一键发表`：功能前瞻页，仅展示晋江、番茄、起点等平台的未来发布能力，当前不可操作。
-- `小说预览`：以正式阅读页形式展示已生成章节正文。
-
-当前仍可调用既有 `POST /chat` 接口，请求体：
-
-```json
-{"query": "你的问题"}
+```text
+http://127.0.0.1:8000/docs
 ```
 
-## 小说工作流 API
+## 本地数据
 
-生成剧情节点并暂停在 Writer 前：
+运行过程中会生成两个本地目录：
 
-```bash
-curl -X POST http://127.0.0.1:8000/novel/chapters/plan \
-  -H "Content-Type: application/json" \
-  -d '{
-    "global_worldview": "玄幻都市，灵气复苏，主角逐步揭开家族秘密。",
-    "chapter_number": 1,
-    "previous_summary": "主角刚收到一封神秘信件。",
-    "user_instruction": "结尾要留下强悬念",
-    "characters": []
-  }'
+```text
+.novel_projects/   # 作品工程 JSON
+.novel_memory/     # 已接受章节抽取出的长期记忆 JSON
 ```
 
-接口会返回 `session_id` 和 `plot_beats`。用户确认或修改剧情节点后，提交继续生成正文：
+这两个目录已加入 `.gitignore`，不会提交到仓库。
 
-```bash
-curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/approve \
-  -H "Content-Type: application/json" \
-  -d '{
-    "plot_beats": [],
-    "human_feedback": "剧情节点确认，可以继续写作。"
-  }'
+注意：作品目录已经持久化，但 LangGraph 的会话检查点当前仍主要依赖进程内状态。服务重启后，作品列表、章节目录、草稿快照可以从 `.novel_projects` 恢复；正在进行中的细粒度 LangGraph checkpoint 还不是完整持久化队列。
+
+## 验证命令
+
+```powershell
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -m compileall app schemas main.py tests
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -m unittest discover -s tests -v
+C:\Users\asus\anaconda3\envs\ai_project\python.exe -c "import main; print('main_import_ok'); print(len(main.app.routes))"
 ```
 
-随后可依次触发 Reviewer 审查、Writer 修稿或接受章节后的 Librarian 设定抽取：
+最近一次本地验证结果：
 
-```bash
-curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/review
+- `compileall` 通过。
+- `unittest discover`：10 tests OK。
+- `main_import_ok`。
+- 当前 FastAPI 路由数量：25。
 
-curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/revise \
-  -H "Content-Type: application/json" \
-  -d '{"human_feedback": "同意按 Reviewer 意见修订。"}'
+## 已知问题与下一步
 
-curl -X POST http://127.0.0.1:8000/novel/chapters/{session_id}/accept \
-  -H "Content-Type: application/json" \
-  -d '{"human_feedback": "接受本章节。"}'
-```
+### P0：网页端体验一致性
 
-调试时可读取当前会话状态：
+- 首页作品卡片接口已经返回 `ProjectCard`，前端部分位置仍可能按完整 `NovelProject.chapters` 读取数据，需要统一改为使用卡片字段。
+- 工作台视觉已经开始从旧棕色纸张风格迁移，但 CSS 中仍可能残留旧组件类名和局部色值，需要一次完整视觉清理。
+- 左侧导航、阅读器、总览章节点击、批量队列的状态跳转需要继续用浏览器逐项回归。
 
-```bash
-curl http://127.0.0.1:8000/novel/sessions/{session_id}
-```
+### P0：批量生成质量闭环
 
-当前 Planner、Writer、Librarian、Reviewer 均已接入基于 LangChain 的 Pydantic 结构化输出，并保留本地降级逻辑。后续可继续接入 RAG 检索、长文本记忆库和真正的 token 流式状态输出。
+- 批量流程已经具备规划、生成、审查和逐章状态队列，但前端的“逐章接受/修订/对比替换”还需要完整验证。
+- 批量章节之间虽然已有临时上下文链路，但仍要通过真实生成样本检查重复剧情、钩子承接和人物状态延续。
+- 已有章节冲突默认 `block`，前端必须明确提示用户，不允许静默覆盖。
+
+### P1：设定库产品化
+
+- 后端已有 `character_codex` 和 `lore_codex`，但前端设定页还需要从临时抽取展示升级为作品级设定库。
+- 剧情设定建议抛弃鱼骨线主展示，改为“设定条目 + 来源章节 + 状态 + 可编辑确认”的结构。
+- 需要区分 AI 建议、用户确认、长期记忆、当前草稿临时信息。
+
+### P1：全文规划真正驱动章节
+
+- 当前 `POST /full-plan` 主要是稳定结构化骨架生成/保存入口，不是完整 LLM 自动全文大纲生成器。
+- Planner 需要更深入消费全文规划、分卷目标和章节规划，而不是只作为前端展示资料。
+- 需要支持用户随时修改全文规划后，对后续章节 seed 和 batch plan 产生影响。
+
+### P2：工程化增强
+
+- RAG 当前是本地 JSON + 关键词检索，未来可升级为 embedding + 向量库。
+- 批量任务当前是同步执行，未来可迁移到异步任务队列。
+- Writer 暂未流式输出。
+- 草稿版本历史、对比 diff、回滚和人工定稿记录仍需补齐。
+- 手机端迁移应放在网页端流程稳定之后。
+
+## 建议分工
+
+### 窗口 1：核心工作流与质量
+
+- 保持 RAG 写入边界：只有接受章节后写长期记忆。
+- 持续优化 Reviewer 严格度和 Writer 批量上下文承接。
+- 检查 batch 临时上下文是否足以避免章节重复。
+- 推进 Planner 对全文规划和章节规划的真实消费。
+
+### 窗口 2：数据模型与 API 合同
+
+- 稳定 ProjectCard、ChapterPreviewResponse、BatchTaskResponse 合同。
+- 补齐设定库 API：确认、编辑、删除、来源追踪。
+- 完善章节候选稿对比、版本历史和覆盖策略。
+- 评估 LangGraph checkpoint 持久化方案。
+
+### 窗口 3：网页端产品体验
+
+- 彻底统一视觉风格，清理旧棕色/纸张风残留。
+- 修正首页作品卡片字段映射。
+- 打磨新书流程：少填也可启动，AI 补完后再确认。
+- 打磨旧书流程：prepare-next 工作区必须可编辑，确认后才 Planner。
+- 完整实现阅读器目录、上下章切换、章节状态入口。
+- 完整实现批量任务逐章接受、修订、对比替换。
+
+## 项目定位
+
+这个项目最终要成为“长篇小说生产工作台”，而不是聊天框或一次性生成器。它的核心价值在于：
+
+- 长篇上下文可持续。
+- 设定不会被草稿污染。
+- AI 负责规划、写作、审查和抽取。
+- 用户保留关键确认权。
+- 每一章都能沉淀成下一章可用的作品资产。
+

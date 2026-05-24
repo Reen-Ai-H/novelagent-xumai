@@ -15,4 +15,6 @@ __pycache__/
 
 # 忽略你的本地大文件数据（比如 RAG 用到的本地文档）
 data/
+.novel_memory/
+.novel_projects/
 *.pdf

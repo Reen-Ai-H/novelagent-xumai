@@ -1,0 +1,9 @@
+# Runtime dependencies inferred from current Python imports.
+fastapi
+uvicorn[standard]
+langchain-core
+langchain-openai
+langgraph
+pydantic
+pydantic-settings
+python-dotenv
