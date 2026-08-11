@@ -9,7 +9,7 @@
 | 权威文档 | changed-and-verified | `PRODUCT_SPEC`、`UX_FLOWS`、`DESIGN_SYSTEM`、`ACCEPTANCE`、`DECISIONS` 与本文件、`USER_GUIDE`、`ARCHITECTURE`、`DEVELOPMENT` 已指向当前开发版状态。 |
 | 规则与交接 | changed-and-verified | 根 `AGENTS.md` 保留下一次 Agent 必须遵守的边界；`PROGRESS.md`/`BLOCKED.md` 为本阶段现状；阶段旧记录在 `docs/history/`。 |
 | 记忆面 | not-applicable | Codex 生成记忆、`.codex` 现场和审计证据不属于仓库发布；保持 generated-read-only / n/a，不修改。 |
-| 工作区残留 | pending | 阶段 1–27 dirty worktree、临时 worktree/分支、本地数据和审计现场保留；只发布显式安全清单，清场候选等待确认。 |
+| 工作区残留 | pending | V1 主工作树已发布；另一个旧 worktree 含未提交源码和 `.novel_*` 本地数据，按数据保护规则保留。可确认无用的本地历史副本和临时文件单独清理。 |
 | 设计资产 | verified-current | `design-prototypes/` 作为 A/B/C 只读参考纳入；不改原型，不把原型当终审证明。 |
 | 自动化门禁 | changed-and-verified | 107 tests、0 failed、0 skipped；compileall、node check、diff check、OpenAPI 与本地烟雾在发布前复核。 |
 | 离线质量门 Q2 | changed-and-verified | 项目外脱敏黄金集 36 例，宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过、外部请求/Token/费用 0；研究目录不复制。 |
@@ -20,3 +20,5 @@
 ## 公开发布原则
 
 公开分支只包含源码、schema、测试、权威文档、规则、无值 `.env.example` 和设计参考。真实 Key、账户、正文、模型缓存、usage 数据、审计截图报告、浏览器 profile、`.codex` 和项目外质量研究全部排除。
+
+GitHub `main` 是 V1 开发基线。之后每个阶段必须在独立 `codex/stage-<编号>-<主题>` 分支完成提交和推送；仍待审计或质量复核的变更以 Draft PR 交接。

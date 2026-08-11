@@ -39,6 +39,16 @@ git diff --check
 - 作者正文、revision、pending changes 和历史恢复不得被后台覆盖；所有 AI 作品只有一条正式正文。
 - 新旧 API 都必须做 HttpOnly 会话、账户 owner 和 mode 校验；私有记忆只在服务端单人物推演使用。
 
+## GitHub 阶段工作流
+
+1. 从最新 `main` 创建 `codex/stage-<编号>-<主题>` 分支；一个阶段只承载一个可验收目标。
+2. 开工时记录基线，完成后运行与改动匹配的测试、静态检查和安全检查，并把真实结果写入 `PROGRESS.md`。
+3. 只显式暂存本阶段文件；确认没有 `.env`、`.novel_*`、`.codex`、审计/浏览器现场或项目外研究后再提交。
+4. 阶段一旦结束就推送到 GitHub，并在 `PROGRESS.md` 记录分支名、提交 SHA 和 PR URL。需要独立审计、模型质量评测或视觉终审时，PR 保持 Draft。
+5. 对应门禁通过后再合并到 `main`。合并分支不代表已部署、已发布正式 Release 或已通过尚未执行的质量评测。
+
+完成阶段不得只停留在本机工作树。若网络或 GitHub 权限阻止推送，把原始错误和可续跑命令写入 `BLOCKED.md`，不得把“本地已完成”描述成“已同步”。
+
 ## 数据备份与恢复
 
 停服务后备份完整的 `.novel_accounts`、`.novel_ai`、`.novel_independent`、`.novel_projects`、`.novel_memory`、`.novel_transactions` 目录。备份前保留原目录，恢复前先复制当前目录作为回滚副本；不要直接手改 JSON。恢复后先跑匿名首页/登录/书架和确定性测试，再做写入验证。
@@ -53,4 +63,4 @@ git diff --check
 
 ## 发布边界
 
-当前是 GitHub Draft PR 开发版，不是 merged、deployed 或 live verified。阶段 27 功能独立审计通过；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须另行确认。
+GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 27 功能独立审计通过；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。

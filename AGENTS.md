@@ -35,4 +35,5 @@
 - 产品决策先写 docs/DECISIONS.md，再同步相关规格、流程和验收。
 - 长任务先读本文件、PROGRESS.md、BLOCKED.md 和 docs/README.md；每轮记录真实命令结果。
 - 不用 skip、放宽断言、吞异常或假数据制造通过；保留既有 dirty worktree 并区分归属。
-- 当前是 GitHub 开发版准备阶段：阶段 27 独立审计已通过；离线质量门 Q2 已验证，但真实生成质量增益与产品集成仍 pending；未部署生产。
+- 每个阶段使用独立的 `codex/stage-<编号>-<主题>` 分支；完成本阶段门禁后必须提交并推送到 GitHub，并在 PROGRESS.md 记录分支、提交和 PR。需要复核的阶段保持 Draft PR，不得只留在本地。
+- GitHub `main` 是当前 V1 开发基线：阶段 27 独立审计已通过；离线质量门 Q2 已验证，但真实生成质量增益与产品集成仍 pending；未部署生产。
