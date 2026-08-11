@@ -3,659 +3,408 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>多智能体网文共创引擎</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <meta name="theme-color" content="#111827" />
+    <title>叙脉｜新一代写作体验</title>
+    <link rel="stylesheet" href="/static/styles.css?v=stage4-20260810b" />
   </head>
   <body>
-    <div class="desk-light"></div>
+    <div class="site-noise" aria-hidden="true"></div>
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
-    <main id="appShell" class="app-shell home-mode">
-      <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">书</div>
-          <div>
-            <p>Novel Agent</p>
-            <strong>作品创作台</strong>
-          </div>
-          <button id="homeBtn" class="home-btn" type="button">首页</button>
-          <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="折叠侧边栏" aria-expanded="true">
-            <span></span>
+    <main id="app" class="app-root">
+      <section id="landingScreen" class="screen landing-screen" data-screen="landing" aria-labelledby="landingTitle">
+        <header class="public-header page-width">
+          <a class="wordmark" href="/" data-route="/" aria-label="叙脉首页">
+            <span class="wordmark-seal" aria-hidden="true">
+              <svg viewBox="0 0 44 44" role="img">
+                <path d="M8 7.5h18.5L36 17v19.5H8z" />
+                <path d="M26.5 7.5V17H36M12 25h14M12 30h10" />
+                <path d="M10 20.5c5-3 9-3 14 0s9 3 14 0" />
+              </svg>
+            </span>
+            <span class="wordmark-text">叙脉</span>
+          </a>
+          <nav class="public-nav" aria-label="产品导航">
+            <a href="#features">功能</a>
+            <a href="#paths">作品示例</a>
+            <a href="/login" data-route="/login">登录</a>
+            <a class="button button-small button-primary" href="/login" data-route="/login">开始试用</a>
+          </nav>
+          <button id="mobileMenuButton" class="mobile-menu-button" type="button" aria-label="打开导航" aria-expanded="false">
+            <span></span><span></span>
           </button>
-        </div>
-
-        <nav class="side-nav" aria-label="功能导航">
-          <button class="nav-card" type="button" data-view="overview">
-            <span>总览</span>
-            <small>字数、进度、状态</small>
-          </button>
-          <button class="nav-card" type="button" data-view="studioPlan">
-            <span>章节创作</span>
-            <small>规划、审核、成稿</small>
-          </button>
-          <button class="nav-card" type="button" data-view="fullPlan">
-            <span>全文规划</span>
-            <small>主线、卷纲、章节表</small>
-          </button>
-          <button class="nav-card" type="button" data-view="batchStudio">
-            <span>多章节任务</span>
-            <small>规划、批量草稿</small>
-          </button>
-          <button class="nav-card" type="button" data-view="characters">
-            <span>人物设定</span>
-            <small>角色卡片</small>
-          </button>
-          <button class="nav-card" type="button" data-view="lore">
-            <span>剧情设定</span>
-            <small>设定库 / 时间线</small>
-          </button>
-          <button class="nav-card" type="button" data-view="preview">
-            <span>小说预览</span>
-            <small>沉浸阅读成稿</small>
-          </button>
-          <button class="nav-card" type="button" data-view="publish">
-            <span>一键发表</span>
-            <small>功能前瞻</small>
-          </button>
-        </nav>
-
-        <div class="sidebar-note">
-          <span class="ink-dot"></span>
-          <p>作者：makerzhu</p>
-        </div>
-      </aside>
-
-      <section class="workspace">
-        <header class="topbar">
-          <div class="agent-banner">
-            <p id="agentEyebrow" class="eyebrow">Human-in-the-Loop Web Novel Agent</p>
-            <h1 id="agentTitle">把长篇故事放回书桌上慢慢打磨</h1>
-            <div id="agentStream" class="agent-stream">等待你的下一次创作指令。</div>
-          </div>
-          <div class="stage-pill">
-            <span class="status-dot"></span>
-            <div>
-              <small>当前阶段</small>
-              <strong id="stageLabel">未开始</strong>
-            </div>
-          </div>
         </header>
 
-        <section id="homeView" class="view active">
-          <section class="home-hero">
-            <div class="home-hero-copy">
-              <p class="eyebrow">Creation Command Center</p>
-              <h1>把作品、规划、章节和设定放进同一个创作中枢。</h1>
-              <p>首页负责作品管理和新书启动；进入工作台后再处理章节生产、全文规划、批量任务、设定库和阅读预览。</p>
-              <div class="home-actions">
-                <button id="showNewBookBtn" class="primary-btn" type="button">新建作品</button>
-                <button id="refreshHomeProjectsBtn" class="ghost-btn" type="button">刷新作品列表</button>
-              </div>
+        <div class="landing-hero page-width">
+          <div class="hero-copy">
+            <p class="kicker"><span class="kicker-line"></span>新一代写作体验</p>
+            <h1 id="landingTitle">让长篇故事<br /><em>记得自己</em></h1>
+            <p class="hero-lede">独立创作，或让 AI 辅助写完整部长篇。人物、剧情线与章节记忆，始终跟得上你的故事。</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="/login" data-route="/login">开始试用 <span aria-hidden="true">↗</span></a>
+              <a class="button button-outline" href="#how-it-works">看看如何工作</a>
             </div>
-            <div class="manuscript-shelf" aria-hidden="true">
-              <div class="shelf-line"></div>
-              <div class="floating-volume volume-a"></div>
-              <div class="floating-volume volume-b"></div>
-              <div class="floating-volume volume-c"></div>
-              <div class="floating-card card-a">第 12 章</div>
-              <div class="floating-card card-b">伏笔回收</div>
-              <div class="floating-card card-c">角色弧线</div>
-            </div>
-          </section>
-
-          <section id="newBookPanel" class="home-new-book is-hidden">
-            <article class="glass-panel new-volume-card">
-              <div class="card-title">
-                <div>
-                  <p class="eyebrow">New Book Flow</p>
-                  <h2>新书规划</h2>
-                </div>
-                <button id="cancelNewBookBtn" class="ghost-btn compact" type="button">收起</button>
-              </div>
-              <div class="new-book-grid">
-                <label>
-                  作品标题
-                  <input id="newBookTitleInput" type="text" placeholder="例如：月光禁区" />
-                </label>
-                <label>
-                  题材
-                  <input id="newBookGenreInput" type="text" placeholder="例如：玄幻都市 / 悬疑升级 / 群像冒险" />
-                </label>
-                <label>
-                  世界观
-                  <textarea id="newBookWorldviewInput" rows="5" placeholder="写下作品的世界规则、时代背景、核心秘密。"></textarea>
-                </label>
-                <label>
-                  主角设定
-                  <textarea id="newBookHeroInput" rows="5" placeholder="主角身份、欲望、缺陷、初始处境。"></textarea>
-                </label>
-              </div>
-              <button id="createBookBtn" class="primary-btn" type="button">生成可编辑作品设定草案</button>
-              <div id="newBookDraftPanel" class="setting-draft-panel is-hidden">
-                <div class="card-title">
-                  <div>
-                    <p class="eyebrow">Editable Draft</p>
-                    <h2>作品设定草案</h2>
-                  </div>
-                </div>
-                <label>
-                  作品标题
-                  <input id="draftTitleInput" type="text" />
-                </label>
-                <label>
-                  作品定位
-                  <textarea id="draftPremiseInput" rows="3"></textarea>
-                </label>
-                <label>
-                  世界观草案
-                  <textarea id="draftWorldviewInput" rows="5"></textarea>
-                </label>
-                <label>
-                  主角草案
-                  <textarea id="draftHeroInput" rows="4"></textarea>
-                </label>
-                <button id="confirmSettingDraftBtn" class="primary-btn secondary" type="button">确认设定并生成全文规划</button>
-              </div>
-            </article>
-          </section>
-
-          <section class="home-section-head">
-            <div>
-              <p class="eyebrow">Library</p>
-              <h2>已创作作品</h2>
-            </div>
-            <span id="homeProjectCount">0 部作品</span>
-          </section>
-          <div id="homeProjectGrid" class="home-project-empty">
-            暂无作品。点击“新建作品”开始第一本书。
-          </div>
-        </section>
-
-        <section id="overviewView" class="view">
-          <div class="overview-hero panel-card">
-            <div>
-              <p class="eyebrow">Overview</p>
-              <h2>项目总览</h2>
-              <p>
-                这里会汇总当前小说创作进度。生成章节后，字数、剧情节点和最新章节状态会自动更新。
-              </p>
-            </div>
-            <div class="signal-ornament" aria-hidden="true">
-              <div class="signal-slab"></div>
-              <div class="signal-lines"></div>
+            <div class="hero-proof" aria-label="产品能力摘要">
+              <div><strong>一条</strong><span>正式正文</span></div>
+              <div><strong>两种</strong><span>创作路径</span></div>
+              <div><strong>长期</strong><span>作品记忆</span></div>
             </div>
           </div>
 
-          <div class="stats-grid">
-            <article class="stat-card">
-              <span>小说总字数</span>
-              <strong id="wordCountStat">0</strong>
-              <small id="projectStat">默认作品</small>
-            </article>
-            <article class="stat-card">
-              <span>当前章节</span>
-              <strong id="chapterStat">第 1 章</strong>
-              <small id="sessionStat">尚未创建会话</small>
-            </article>
-            <article class="stat-card">
-              <span>剧情进度</span>
-              <strong id="progressStat">未开始</strong>
-              <small id="beatsStat">0 个剧情节点</small>
-            </article>
-            <article class="stat-card">
-              <span>审查状态</span>
-              <strong id="reviewStat">待生成</strong>
-              <small>Reviewer 输出会显示在创作页</small>
-            </article>
-          </div>
-
-          <div class="command-grid">
-            <article class="command-card primary-command">
-              <span>Next Action</span>
-              <h3>继续推进当前作品</h3>
-              <p>准备下一章会先返回可编辑输入草稿，确认后才进入 Planner。</p>
-              <button class="primary-btn compact" type="button" data-quick-view="studioPlan">进入章节创作</button>
-            </article>
-            <article class="command-card">
-              <span>Structure</span>
-              <h3>全文规划</h3>
-              <p>编辑主线、分卷和章节表，让后续章节有稳定方向。</p>
-              <button class="ghost-btn compact" type="button" data-quick-view="fullPlan">打开规划</button>
-            </article>
-            <article class="command-card">
-              <span>Batch</span>
-              <h3>多章节任务</h3>
-              <p>先生成章节队列，再逐章审查、修订、接受入库。</p>
-              <button class="ghost-btn compact" type="button" data-quick-view="batchStudio">查看队列</button>
-            </article>
-            <article class="command-card">
-              <span>Reader</span>
-              <h3>小说预览</h3>
-              <p>按目录切章阅读，未完成章节只显示状态和处理入口。</p>
-              <button class="ghost-btn compact" type="button" data-quick-view="preview">进入阅读器</button>
-            </article>
-          </div>
-
-          <div class="panel-card chapter-catalog-card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Chapter Catalog</p>
-                <h2>章节目录</h2>
-              </div>
-              <button id="continueNextBtn" class="primary-btn secondary" type="button">继续写下一章</button>
+          <div class="hero-stage" aria-label="手稿、作品档案和两条创作路径的关系图">
+            <div class="stage-caption"><span>作品记忆示意</span><span class="mono">ARCHIVE / 01</span></div>
+            <div class="manuscript-sheet paper-card">
+              <div class="sheet-meta"><span>第一卷 · 雾港</span><span class="mono">DRAFT 03</span></div>
+              <h2>第 3 章　雨夜的来信</h2>
+              <div class="sheet-rules" aria-hidden="true"></div>
+              <p>雨落在青石板上，发出细碎而绵长的声响。灯火被风吹得摇晃，像随时会熄灭的心跳。</p>
+              <p class="sheet-fade">他摸着那封信，信封上没有署名，只有一枚被雨水晕开的印章。</p>
+              <p>城门口的守卫换了三拨，谁也没注意到，一个黑影已经在巷子里等了很久。</p>
+              <div class="sheet-cursor" aria-hidden="true"></div>
             </div>
-            <div id="chapterCatalog" class="chapter-catalog-empty">
-              接受章节后，这里会形成作品目录。你可以切换已生成章节，也可以从上一章摘要继续规划下一章。
+            <div class="archive-card paper-card">
+              <div class="archive-card-head"><span class="mini-icon">✦</span><strong>人物档案</strong><span class="ellipsis">···</span></div>
+              <div class="avatar-glyph glyph-blue" aria-hidden="true"><span></span></div>
+              <div class="archive-name"><strong>陆沉</strong><span>主要视角人物</span></div>
+              <dl>
+                <div><dt>身份</dt><dd>前调查员</dd></div>
+                <div><dt>核心目标</dt><dd>查明十年前事件的真相</dd></div>
+                <div><dt>当前状态</dt><dd>克制 · 敏锐 · 重责任</dd></div>
+              </dl>
+              <div class="tag-row"><span>苏晚晴</span><span>周临风</span><span>韩夜</span></div>
+            </div>
+            <svg class="story-thread thread-hero" viewBox="0 0 610 520" fill="none" aria-hidden="true">
+              <path class="thread-main" d="M82 334C171 336 206 375 274 350C338 327 356 265 413 269C459 272 455 322 506 322" />
+              <path class="thread-branch thread-blue" d="M506 322C551 322 542 269 582 253" />
+              <path class="thread-branch thread-red" d="M506 322C548 327 544 385 581 402" />
+              <circle cx="82" cy="334" r="7" /><circle cx="506" cy="322" r="7" /><circle cx="582" cy="253" r="7" /><circle cx="581" cy="402" r="7" />
+            </svg>
+            <div class="path-node path-independent"><span class="node-arrow">→</span><span>独立创作</span></div>
+            <div class="path-node path-ai"><span class="node-arrow">→</span><span>AI 辅助写作</span></div>
+            <div class="stage-index-card paper-card">
+              <span class="mini-icon">⌁</span><strong>故事脉络</strong><span class="mono">第 1 → 第 3 章</span>
             </div>
           </div>
+        </div>
 
-          <div class="panel-card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Pipeline</p>
-                <h2>章节工作流</h2>
-              </div>
-            </div>
-            <div class="pipeline" aria-label="工作流阶段">
-              <div class="step active" data-stage="planning">Planner</div>
-              <div class="step" data-stage="awaiting_human_review">人工审核</div>
-              <div class="step" data-stage="writing">Writer</div>
-              <div class="step" data-stage="reviewing">Reviewer</div>
-              <div class="step" data-stage="completed">Librarian</div>
-            </div>
+        <section id="features" class="landing-section product-section page-width">
+          <div class="section-heading">
+            <p class="kicker"><span class="kicker-line"></span>不是另一个写作框</p>
+            <h2>把写作时的安静，<br /><em>和作品的记忆放在一起。</em></h2>
+            <p>你只管写。叙脉把正文、人物、剧情线和章节状态收进同一套可回溯的作品记录。</p>
+          </div>
+          <div class="product-map">
+            <article class="product-card product-manuscript">
+              <span class="card-index mono">01 / 正文</span>
+              <h3>写作时，回到正文</h3>
+              <p>宽阔、安静的写作空间，保存每一次确定过的文字。</p>
+              <div class="card-sample sample-lines" aria-hidden="true"><i></i><i></i><i class="short"></i><i></i></div>
+            </article>
+            <article class="product-card product-archive">
+              <span class="card-index mono">02 / 档案</span>
+              <h3>章末，查看故事怎样变化</h3>
+              <p>人物状态、伏笔和剧情线，按章节留下来源，不抢你的写作节奏。</p>
+              <div class="card-sample sample-thread" aria-hidden="true"><span></span><span></span><span></span><b></b></div>
+            </article>
+            <article class="product-card product-director">
+              <span class="card-index mono">03 / AI 辅助</span>
+              <h3>需要时，让 AI 接上主线</h3>
+              <p>从故事蓝图到导演台，AI 辅助持续工作，你始终掌握唯一正文。</p>
+              <div class="card-sample sample-status" aria-hidden="true"><span>正在保存作品记忆</span><b></b></div>
+            </article>
           </div>
         </section>
 
-        <section id="fullPlanView" class="view">
-          <article class="panel-card full-plan-card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Full Novel Plan</p>
-                <h2>全文规划</h2>
-              </div>
-              <div class="button-row">
-                <button id="generateFullPlanBtn" class="ghost-btn" type="button">AI 辅助补完规划</button>
-                <button id="saveFullPlanBtn" class="primary-btn secondary" type="button">保存人工修改</button>
-                <button id="enterFirstChapterBtn" class="primary-btn" type="button">进入第一章生成</button>
-              </div>
-            </div>
-
-            <div class="two-col">
-              <label>
-                主线简介 / 核心卖点
-                <textarea id="premiseInput" rows="4" placeholder="一句话故事前提、卖点或主线目标。"></textarea>
-              </label>
-              <label>
-                核心冲突
-                <textarea id="coreConflictInput" rows="4" placeholder="贯穿全文的对抗、秘密或价值冲突。"></textarea>
-              </label>
-            </div>
-            <div class="two-col">
-              <label>
-                结局方向
-                <textarea id="endingInput" rows="3" placeholder="终局状态、主角变化、最大谜底。"></textarea>
-              </label>
-              <label>
-                主题 / 爽点关键词
-                <textarea id="themesInput" rows="3" placeholder="用逗号分隔，例如：成长, 复仇, 群像, 反转"></textarea>
-              </label>
-            </div>
-            <label>
-              规划备注
-              <textarea id="planNotesInput" rows="3" placeholder="节奏、禁忌、必须保留的设定。"></textarea>
-            </label>
-
-            <div class="plan-section-head">
-              <div>
-                <strong>分卷规划</strong>
-                <small>可编辑 JSON，保存时会写回作品工程。</small>
-              </div>
-              <input id="targetChapterCountInput" type="number" min="1" value="10" aria-label="目标章节数" />
-            </div>
-            <textarea id="volumesInput" class="json-editor" rows="7" spellcheck="false"></textarea>
-
-            <div class="plan-section-head">
-              <div>
-                <strong>章节规划表</strong>
-                <small>多章节规划会先写入这里，确认后再批量生成草稿。</small>
-              </div>
-            </div>
-            <div id="chapterPlanTable" class="chapter-plan-empty">
-              暂无章节规划。可以生成全文规划骨架，或到“多章节任务”里先规划 3 / 5 / 10 章。
-            </div>
-          </article>
-        </section>
-
-        <section id="batchStudioView" class="view">
-          <article class="panel-card batch-card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Batch Studio</p>
-                <h2>多章节规划 / 生成</h2>
-              </div>
-            </div>
-            <div class="batch-controls">
-              <label>
-                起始章节
-                <input id="batchStartInput" type="number" min="1" value="1" />
-              </label>
-              <label>
-                生成章节数
-                <select id="batchCountSelect">
-                  <option value="3">3 章</option>
-                  <option value="5" selected>5 章</option>
-                  <option value="10">10 章</option>
-                </select>
-              </label>
-              <label>
-                批量要求
-                <textarea id="batchInstructionInput" rows="2" placeholder="例如：这组章节负责升级主线冲突，并在最后一章回收钥匙伏笔。"></textarea>
-              </label>
-            </div>
-            <div class="button-row">
-              <button id="batchPlanBtn" class="primary-btn" type="button">生成多章节规划</button>
-              <button id="batchGenerateBtn" class="primary-btn secondary" type="button">确认规划并批量生成草稿</button>
-            </div>
-            <div id="batchStatusPanel" class="batch-status-empty">
-              先生成章节级大纲，确认章节规划表后再批量生成草稿。
-            </div>
-            <div id="batchQueuePanel" class="batch-queue-empty">
-              批量生成后，这里会按章节展示待审查、需修订、待接受入库等状态。
-            </div>
-            <div id="batchOutlineTable" class="chapter-plan-empty">
-              暂无批量章节规划。
-            </div>
-          </article>
-        </section>
-
-        <section id="studioPlanView" class="view">
-          <section class="studio-page-grid">
-            <article class="panel-card input-card">
-              <div id="nextSeedPanel" class="next-seed-panel is-hidden"></div>
-              <div class="card-title">
-                <div>
-                  <p class="eyebrow">步骤一</p>
-                  <h2>章节规划输入</h2>
-                </div>
-                <button id="fillExampleBtn" class="ghost-btn" type="button">填入示例</button>
-              </div>
-
-              <label>
-                世界观设定
-                <textarea id="worldviewInput" rows="5" placeholder="例如：玄幻都市，灵气复苏，主角逐步揭开家族秘密。"></textarea>
-              </label>
-
-              <label>
-                作品标题
-                <input id="projectTitleInput" type="text" placeholder="例如：月光禁区" />
-              </label>
-
-              <div class="two-col">
-                <label>
-                  章节号
-                  <input id="chapterInput" type="number" min="1" value="1" />
-                </label>
-                <label>
-                  会话 ID（可选）
-                  <input id="sessionInput" type="text" placeholder="留空自动生成" />
-                </label>
-              </div>
-
-              <label>
-                前文摘要
-                <textarea id="summaryInput" rows="3" placeholder="上一章发生了什么？有哪些未解决的伏笔？"></textarea>
-              </label>
-
-              <label>
-                本章创作要求
-                <textarea id="instructionInput" rows="3" placeholder="例如：结尾要有强悬念，避免主角过早暴露底牌。"></textarea>
-              </label>
-
-              <section class="character-builder" aria-label="人物卡片输入">
-                <div class="inline-title">
-                  <div>
-                    <strong>人物卡片（可选）</strong>
-                    <small>用于约束角色人设、动机和当前状态，不需要手写 JSON。</small>
-                  </div>
-                  <button id="addCharacterBtn" class="ghost-btn compact" type="button">新增人物</button>
-                </div>
-                <div id="charactersBuilder" class="character-form-list"></div>
-              </section>
-
-              <button id="planBtn" class="primary-btn" type="button">生成剧情节点</button>
-            </article>
-            <aside class="panel-card stage-sidebar">
-              <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
-              <div class="stage-sidebar-body">
-                <p class="eyebrow">创作阶段</p>
-                <h2>从设定开始</h2>
-                <p>先输入世界观、章节目标和人物卡。Planner 会把这些信息整理成本章剧情节点。</p>
-              </div>
-              <div class="stage-rail" aria-label="开始创作阶段">
-                <button class="stage-nav-card" type="button" data-view="fullPlan">全文规划</button>
-                <button class="stage-nav-card active" type="button" data-view="studioPlan">1. 章节规划输入</button>
-                <button class="stage-nav-card" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
-                <button class="stage-nav-card" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
-              </div>
-            </aside>
-          </section>
-        </section>
-
-        <section id="studioReviewView" class="view">
-          <section class="studio-page-grid">
-            <article class="panel-card review-card">
-              <div class="card-title">
-                <div>
-                  <p class="eyebrow">步骤二</p>
-                  <h2>人工审核剧情节点</h2>
-                </div>
-                <button id="refreshBtn" class="ghost-btn" type="button">刷新状态</button>
-              </div>
-
-              <div id="sessionBadge" class="session-badge">尚未创建会话</div>
-              <div id="beatsContainer" class="beats-empty">
-                点击“生成剧情节点”后，Planner 的输出会显示在这里，你可以直接修改后提交。
-              </div>
-
-              <div class="review-decision" role="group" aria-label="审核结果">
-                <button id="approveDecisionBtn" class="decision-btn active" type="button" data-decision="approved">同意</button>
-                <button id="rejectDecisionBtn" class="decision-btn" type="button" data-decision="rejected">打回</button>
-              </div>
-
-              <label>
-                用户建议
-                <textarea id="feedbackInput" rows="3" placeholder="例如：同意，但第二个节点需要加强冲突。"></textarea>
-              </label>
-
-              <button id="approveBtn" class="primary-btn secondary" type="button" disabled>提交审核并继续生成</button>
-            </article>
-            <aside class="panel-card stage-sidebar">
-              <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
-              <div class="stage-sidebar-body">
-                <p class="eyebrow">创作阶段</p>
-                <h2>审核剧情骨架</h2>
-                <p>这里专门处理 Planner 输出。你可以逐个修改剧情节点，再交给 Writer 生成正文。</p>
-              </div>
-              <div class="stage-rail" aria-label="开始创作阶段">
-                <button class="stage-nav-card" type="button" data-view="fullPlan">全文规划</button>
-                <button class="stage-nav-card" type="button" data-view="studioPlan">1. 章节规划输入</button>
-                <button class="stage-nav-card active" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
-                <button class="stage-nav-card" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
-              </div>
-            </aside>
-          </section>
-        </section>
-
-        <section id="studioDraftView" class="view">
-          <section class="studio-page-grid draft-page-grid">
-            <div class="draft-stack">
-              <article class="panel-card">
-              <div class="card-title">
-                <div>
-                  <p class="eyebrow">章节结果</p>
-                  <h2>章节草稿</h2>
-                </div>
-              </div>
-              <pre id="draftOutput" class="output-box">完成审核提交后，Writer 生成的草稿会显示在这里。</pre>
-              </article>
-
-              <article class="panel-card">
-              <div class="card-title">
-                <div>
-                  <p class="eyebrow">记忆与审查</p>
-                  <h2>设定增量与审查意见</h2>
-                </div>
-              </div>
-              <div id="metaOutput" class="output-box meta-panel">
-                设定管理员与审稿人的结果会显示在这里。
-              </div>
-              </article>
-
-              <section id="chapterDecisionPanel" class="panel-card chapter-decision-panel is-hidden">
-            <div class="decision-copy">
-              <p class="eyebrow">章节确认</p>
-              <h2 id="decisionTitle">等待你的决定</h2>
-              <p id="decisionMessage">AI 审查完成后，可以接受入库，或让 Writer 根据意见修订。</p>
-            </div>
-            <div id="revisionCountdown" class="countdown-badge is-hidden">10 秒后自动同意修改</div>
-            <div class="decision-actions">
-              <button id="acceptChapterBtn" class="primary-btn secondary" type="button">接受入库并抽取设定</button>
-              <button id="reviseNowBtn" class="primary-btn" type="button">同意修改</button>
-              <button id="waitRevisionBtn" class="ghost-btn" type="button">再等等</button>
-              <button id="confirmReviseBtn" class="ghost-btn" type="button">重新确认打回修改</button>
-            </div>
-              </section>
-            </div>
-            <aside class="panel-card stage-sidebar">
-              <button class="stage-collapse-btn" type="button" aria-label="折叠创作阶段导航" aria-expanded="true">阶段</button>
-              <div class="stage-sidebar-body">
-                <p class="eyebrow">创作阶段</p>
-                <h2>看正文与审查</h2>
-                <p>Writer 的正文、Reviewer 的审查意见和最终设定抽取结果会集中显示在这里。</p>
-              </div>
-              <div class="stage-rail" aria-label="开始创作阶段">
-                <button class="stage-nav-card" type="button" data-view="fullPlan">全文规划</button>
-                <button class="stage-nav-card" type="button" data-view="studioPlan">1. 章节规划输入</button>
-                <button class="stage-nav-card" type="button" data-view="studioReview">2. 人工审核剧情节点</button>
-                <button class="stage-nav-card active" type="button" data-view="studioDraft">3. 章节草稿与审查</button>
-              </div>
-            </aside>
-          </section>
-        </section>
-
-        <section id="charactersView" class="view">
-          <article class="panel-card codex-page">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Character Codex</p>
-                <h2>人物设定卡片</h2>
-              </div>
-            </div>
-            <div id="characterCards" class="character-empty">
-              Librarian 抽取到人物变化后，会在这里以游戏角色卡形式展示。
-            </div>
-          </article>
-        </section>
-
-        <section id="loreView" class="view">
-          <article class="panel-card lore-page">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Lore Codex</p>
-                <h2>设定库与章节时间线</h2>
-              </div>
-            </div>
-            <div class="timeline-hint">稳定设定与章节摘要会从项目级设定库加载，和当前运行结果解耦。</div>
-            <div id="loreCodex" class="lore-codex-empty">
-              项目级设定库暂无记录。
-            </div>
-          </article>
-        </section>
-
-        <section id="publishView" class="view">
-          <div class="panel-card publish-hero">
-            <div>
-              <p class="eyebrow">Coming Soon</p>
-              <h2>一键发表</h2>
-              <p>
-                未来这里会接入晋江、番茄、起点等平台的自动发布流程。当前仅展示功能示例，不允许提交账号、密码或执行发布。
-              </p>
-            </div>
-            <span class="locked-badge">未开放</span>
+        <section id="paths" class="landing-section paths-section page-width">
+          <div class="section-heading compact-heading">
+            <p class="kicker"><span class="kicker-line"></span>从你熟悉的方式开始</p>
+            <h2>两条路，<em>一套作品记忆。</em></h2>
           </div>
-
-          <div class="publish-grid">
-            <article class="platform-card">
-              <strong>晋江文学城</strong>
-              <p>章节标题、正文、作话、存稿箱发布。</p>
-              <button type="button" disabled>演示入口</button>
+          <div class="path-grid">
+            <article class="path-card independent-path">
+              <div class="path-card-top"><span class="path-symbol">Ⅰ</span><span class="mono">AUTHOR-LED</span></div>
+              <h3>独立创作</h3>
+              <p>你写正文，叙脉替你记住人物、剧情与章节变化。适合从空白开始，也适合把旧稿带回来。</p>
+              <a href="/login" data-route="/login" class="text-link">从独立创作开始 <span>↗</span></a>
             </article>
-            <article class="platform-card">
-              <strong>番茄小说</strong>
-              <p>作品卷管理、草稿同步、发布前格式检查。</p>
-              <button type="button" disabled>演示入口</button>
-            </article>
-            <article class="platform-card">
-              <strong>起点中文网</strong>
-              <p>章节上传、定时发布、数据回填。</p>
-              <button type="button" disabled>演示入口</button>
+            <article class="path-card ai-path">
+              <div class="path-card-top"><span class="path-symbol">Ⅱ</span><span class="mono">AI-ASSISTED</span></div>
+              <h3>AI 辅助写作</h3>
+              <p>先和主编聊清故事蓝图，再让 AI 团队持续工作。你在关键节点做选择，正文始终只有一条。</p>
+              <a href="/login" data-route="/login" class="text-link">尝试 AI 辅助写作 <span>↗</span></a>
             </article>
           </div>
-
-          <article class="panel-card disabled-form">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Preview Only</p>
-                <h2>账号配置示例</h2>
-              </div>
-            </div>
-            <div class="two-col">
-              <label>
-                平台
-                <input value="示例平台，不可操作" disabled />
-              </label>
-              <label>
-                用户名
-                <input value="writer@example.com" disabled />
-              </label>
-            </div>
-            <label>
-              密码 / Token
-              <input value="************" disabled />
-            </label>
-            <button class="primary-btn" type="button" disabled>功能未开放，暂不可发表</button>
-          </article>
         </section>
 
-        <section id="previewView" class="view">
-          <article class="reader-shell">
-            <aside class="reader-catalog panel-card">
-              <div class="card-title">
-                <div>
-                  <p class="eyebrow">Catalog</p>
-                  <h2>阅读目录</h2>
-                </div>
-              </div>
-              <div id="readerCatalog" class="reader-catalog-empty">暂无可阅读章节。</div>
-            </aside>
-            <div class="reader-pane">
-              <p class="eyebrow">Reader Preview</p>
-              <h2 id="previewTitle">第 1 章</h2>
-              <div class="reader-toolbar">
-                <button id="prevChapterBtn" class="ghost-btn compact" type="button">上一章</button>
-                <span id="previewStatus">未开始</span>
-                <button id="nextChapterBtn" class="ghost-btn compact" type="button">下一章</button>
-              </div>
-              <div id="previewContent" class="reader-content">
-                这里会像正式小说阅读页一样展示已经生成的正文。完成一次章节生成后，内容会自动同步到这里。
-              </div>
-            </div>
-          </article>
+        <section id="how-it-works" class="landing-section how-section page-width">
+          <div class="how-copy">
+            <p class="kicker"><span class="kicker-line"></span>如何工作</p>
+            <h2>故事越长，<br /><em>越值得被好好记住。</em></h2>
+          </div>
+          <ol class="how-steps">
+            <li><span class="step-number mono">01</span><div><strong>选择你的创作方式</strong><p>从独立创作或 AI 辅助写作开始，模式清晰、作品归属明确。</p></div></li>
+            <li><span class="step-number mono">02</span><div><strong>让作品持续保存</strong><p>邮箱登录后，作品和账户一起保存在服务端，刷新或换设备也能回来。</p></div></li>
+            <li><span class="step-number mono">03</span><div><strong>在章末看见变化</strong><p>正文、章节进度和故事记忆逐步连成一条线，下一次打开仍接得上。</p></div></li>
+          </ol>
         </section>
+
+        <footer class="public-footer page-width"><span>叙脉</span><span>新一代写作体验</span><span class="mono">A / 01</span></footer>
       </section>
 
-      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <section id="loginScreen" class="screen login-screen is-hidden" data-screen="login" aria-labelledby="loginTitle" aria-hidden="true">
+        <div class="login-layout">
+          <div class="login-archive" aria-label="故事档案示意">
+            <a class="wordmark login-wordmark" href="/" data-route="/"><span class="wordmark-seal" aria-hidden="true"><svg viewBox="0 0 44 44"><path d="M8 7.5h18.5L36 17v19.5H8z" /><path d="M26.5 7.5V17H36M12 25h14M12 30h10" /><path d="M10 20.5c5-3 9-3 14 0s9 3 14 0" /></svg></span><span class="wordmark-text">叙脉</span></a>
+            <p class="archive-tagline">新一代写作体验</p>
+            <div class="login-paper paper-card">
+              <div class="paper-clip" aria-hidden="true"></div>
+              <div class="sheet-meta"><span>叙脉 · 故事摘录</span><span class="mono">DATE / TODAY</span></div>
+              <h2>一封没有署名的信，<br />把所有人带回旧港。</h2>
+              <div class="sheet-rules" aria-hidden="true"></div>
+              <p>你写下的每一章，都会成为下一次打开作品时仍然可靠的上下文。</p>
+              <div class="paper-stamp mono">STATUS: DRAFT</div>
+            </div>
+            <div class="login-character-card character-a paper-card"><span class="avatar-glyph glyph-blue"><span></span></span><strong>陆沉</strong><small>主要视角人物</small><span class="mono">当前</span></div>
+            <div class="login-character-card character-b paper-card"><span class="avatar-glyph glyph-red"><span></span></span><strong>苏晚晴</strong><small>关系线索</small><span class="mono">INDEXED</span></div>
+            <svg class="story-thread thread-login" viewBox="0 0 640 660" fill="none" aria-hidden="true"><path d="M300 180C369 191 330 267 417 278C488 287 522 300 625 300" /><path d="M300 180C207 209 258 323 153 335C87 343 134 432 80 498" /><circle cx="300" cy="180" r="6" /><circle cx="625" cy="300" r="6" /><circle cx="80" cy="498" r="6" /></svg>
+            <span class="login-archive-foot mono">PROJECT / XUMAI-001</span>
+          </div>
+          <div class="login-panel">
+            <div class="login-panel-inner">
+              <div class="login-topline"><span>叙脉账户</span><a href="/" data-route="/">返回首页</a></div>
+              <h1 id="loginTitle">继续你的故事</h1>
+              <p class="login-intro">首次登录将自动创建账户。我们先用邮箱为你的作品留一把稳定的钥匙。</p>
+              <div id="sessionExpiredNotice" class="notice notice-blue is-hidden" role="status">会话已失效，请重新登录。你的作品数据仍会保留。</div>
+              <form id="emailLoginForm" class="email-form" novalidate>
+                <label for="emailInput">邮箱</label>
+                <div id="emailField" class="field-wrap"><span class="field-icon" aria-hidden="true">✉</span><input id="emailInput" name="email" type="email" autocomplete="email" placeholder="name@example.com" maxlength="254" required /></div>
+                <p id="emailError" class="field-error" role="alert"></p>
+                <button id="emailSubmitButton" class="button button-primary button-wide" type="submit">使用邮箱继续 <span aria-hidden="true">→</span></button>
+              </form>
+              <div class="login-divider"><span>或</span></div>
+              <div class="coming-soon-options">
+                <button class="coming-soon-button" type="button" data-coming-soon="手机号登录"><span class="option-icon">▯</span><strong>手机号登录</strong><span>即将开放</span></button>
+                <button class="coming-soon-button" type="button" data-coming-soon="微信登录"><span class="option-icon">◌</span><strong>微信登录</strong><span>即将开放</span></button>
+              </div>
+              <p id="loginStatus" class="login-status" role="status"></p>
+              <p class="login-privacy">本地开发版不发送邮件；邮箱只用于创建和恢复你的作品账户。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="libraryScreen" class="screen workspace-screen is-hidden" data-screen="library" aria-hidden="true">
+        <aside class="spine-nav" aria-label="作品空间导航">
+          <a class="spine-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
+          <nav class="spine-links"><a class="spine-link is-active" href="/library" data-route="/library"><span class="spine-icon">▥</span><strong>书架</strong></a></nav>
+          <div class="spine-bottom"><span class="spine-rule"></span><span class="mono">A / 01</span><button id="logoutButton" class="spine-logout" type="button">退出</button></div>
+        </aside>
+        <div class="workspace-main">
+          <header class="workspace-header">
+            <div><p class="kicker"><span class="kicker-line"></span>作品入口</p><h1>下午好，<em>继续你的故事</em></h1></div>
+            <div class="account-block"><div class="account-copy"><span>当前账户</span><strong id="accountEmail">—</strong></div><div class="credit-block"><span class="coin-mark">◉</span><div><span>创作积分</span><strong id="creditBalance">0</strong></div></div></div>
+          </header>
+          <section class="library-toolbar"><label class="search-field" for="librarySearch"><span aria-hidden="true">⌕</span><input id="librarySearch" type="search" placeholder="搜索作品" autocomplete="off" /><kbd>⌘ K</kbd></label><div class="library-toolbar-actions"><button class="notification-button" type="button" data-action="open-notifications"><span aria-hidden="true">⌁</span> 通知 <b data-notification-count>0</b></button><button id="newProjectButton" class="button button-primary" type="button"><span aria-hidden="true">＋</span> 新建作品</button></div></section>
+          <div id="libraryError" class="notice notice-red is-hidden" role="alert"></div>
+          <section id="libraryContent" class="library-content" aria-live="polite"></section>
+          <section id="readyContent" class="ready-content is-hidden" aria-live="polite"></section>
+        </div>
+      </section>
+
+      <section id="independentScreen" class="screen independent-screen is-hidden" data-screen="independent" aria-hidden="true" aria-labelledby="editorProjectTitle">
+        <aside class="editor-spine" aria-label="正文与章节导航">
+          <a class="spine-brand editor-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
+          <nav class="spine-links editor-spine-links">
+            <a class="spine-link is-active" href="#editor" data-action="show-editor"><span class="spine-icon">▤</span><strong>正文</strong></a>
+            <button class="spine-link" type="button" data-action="show-archive"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+          </nav>
+          <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">WORK / 02</span><button id="editorLogoutButton" class="spine-logout" type="button">退出</button></div>
+        </aside>
+        <div class="editor-main">
+          <header class="editor-header">
+            <div class="editor-heading"><p class="kicker"><span class="kicker-line"></span><span id="editorModeLabel">独立创作</span> / <span id="editorProjectTitle">—</span></p><h1 id="editorChapterHeading">开始你的第一章</h1></div>
+            <div class="editor-top-actions" aria-label="章节状态">
+              <span id="editorSaveState" class="editor-save-state">尚未开始</span>
+              <span id="editorWordCount" class="editor-word-count mono">0 字</span>
+              <button id="completeChapterButton" class="button button-primary" type="button" disabled>完成本章 <span aria-hidden="true">→</span></button>
+            </div>
+          </header>
+          <div id="editorNotice" class="notice editor-notice is-hidden" role="status"></div>
+          <section id="startWorkspaceContent" class="start-workspace-content is-hidden" aria-live="polite"></section>
+          <section id="editorWorkspaceContent" class="editor-workspace-content is-hidden" aria-live="polite">
+            <div class="editor-layout">
+              <aside class="chapter-column" aria-label="作品与章节目录">
+                <div class="chapter-column-head"><span class="eyebrow">作品章节</span><button id="addChapterButton" type="button" class="small-quiet-button">＋ 新章</button></div>
+                <div id="chapterList" class="chapter-list"></div>
+                <div class="chapter-column-foot"><button id="openVersionButton" type="button" class="quiet-link">查看稿本历史</button></div>
+              </aside>
+              <section class="writing-column" aria-label="正文编辑区">
+                <div class="writing-toolbar"><label for="chapterTitleInput">章节标题</label><span id="writingModeNote">独立创作 · 正式正文</span></div>
+                <input id="chapterTitleInput" class="chapter-title-input" type="text" maxlength="200" aria-label="章节标题" />
+                <textarea id="chapterEditor" class="chapter-editor" spellcheck="false" aria-label="中文正文" placeholder="从这里开始写下你的故事……"></textarea>
+                <div class="writing-footer"><span>正文会先留在本地短暂缓冲，再自动保存到服务端。</span><span id="editorRevisionLabel" class="mono">REV / 0</span></div>
+              </section>
+              <aside id="archiveDrawer" class="archive-drawer" aria-label="故事档案摘要">
+                <div class="archive-drawer-head"><div><span class="eyebrow">故事档案</span><strong id="archiveDrawerTitle">最新状态</strong></div><button id="toggleArchiveButton" class="drawer-toggle" type="button" data-action="toggle-archive" aria-expanded="true">收起</button></div>
+                <div class="archive-drawer-body">
+                  <label class="archive-select-label" for="archiveSnapshotSelect">查看章节快照</label>
+                  <select id="archiveSnapshotSelect" class="archive-snapshot-select"><option value="">最新状态</option></select>
+                  <div id="archiveSummary" class="archive-summary"></div>
+                  <p class="analysis-label" id="analysisLabel">确定性演示分析（未配置模型 Key）</p>
+                </div>
+              </aside>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="archiveScreen" class="screen archive-screen is-hidden" data-screen="archive" aria-hidden="true" aria-labelledby="archivePageTitle">
+        <aside class="archive-spine" aria-label="故事档案导航">
+          <a class="spine-brand archive-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
+          <nav class="spine-links archive-spine-links">
+            <button class="spine-link" type="button" data-action="archive-open-editor"><span class="spine-icon">▤</span><strong>正文</strong></button>
+            <button class="spine-link is-active" type="button" data-action="archive-open-self"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+            <button id="archiveAiLink" class="spine-link is-hidden" type="button" data-action="archive-open-ai"><span class="spine-icon">✦</span><strong>创作室</strong></button>
+          </nav>
+          <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">ARCH / 03</span><button id="archiveLogoutButton" class="spine-logout" type="button">退出</button></div>
+        </aside>
+        <main class="archive-main">
+          <header class="archive-page-header">
+            <div><p class="kicker"><span class="kicker-line"></span><span id="archiveModeLabel">作品档案</span> / <span id="archivePageProjectTitle">—</span></p><h1 id="archivePageTitle">故事档案</h1></div>
+            <div class="archive-page-actions"><span id="archivePageStatus" class="archive-current-status">当前状态</span><label class="archive-page-snapshot-label" for="archivePageSnapshotSelect">回看章节</label><select id="archivePageSnapshotSelect" class="archive-page-snapshot"><option value="">最新状态</option></select></div>
+          </header>
+          <div id="archivePageNotice" class="notice archive-page-notice is-hidden" role="status"></div>
+          <section id="archivePageContent" class="archive-page-content" aria-live="polite"></section>
+        </main>
+      </section>
+
+      <section id="aiStudioScreen" class="screen ai-studio-screen is-hidden" data-screen="aiStudio" aria-hidden="true" aria-labelledby="aiStudioTitle">
+        <aside class="ai-spine" aria-label="AI 作品导航">
+          <a class="spine-brand ai-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
+          <nav class="spine-links ai-spine-links">
+            <button class="spine-link is-active" type="button" data-action="ai-open-studio"><span class="spine-icon">✦</span><strong>创作室</strong></button>
+            <button class="spine-link" type="button" data-action="ai-open-director"><span class="spine-icon">◈</span><strong>导演台</strong></button>
+            <button class="spine-link" type="button" data-action="ai-open-editor"><span class="spine-icon">▤</span><strong>编辑正文</strong></button>
+            <button class="spine-link" type="button" data-action="ai-open-archive"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+          </nav>
+          <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">AI / 03</span><button id="aiStudioLogoutButton" class="spine-logout" type="button">退出</button></div>
+        </aside>
+        <main class="ai-studio-main">
+          <header class="ai-workspace-header"><div><p class="kicker"><span class="kicker-line"></span>AI 辅助写作 / <span id="aiStudioProjectTitle">—</span></p><h1 id="aiStudioTitle">先把故事说给主编听</h1></div><div class="ai-header-meta"><span id="aiStudioModelLabel" class="ai-demo-label">演示推演 · 未配置模型 Key · 不消耗创作积分</span><span id="aiStudioBlueprintState" class="ai-state-pill">蓝图草稿</span></div></header>
+          <div id="aiStudioNotice" class="notice ai-studio-notice is-hidden" role="status"></div>
+          <div class="ai-studio-layout">
+            <section class="ai-conversation-panel" aria-label="主编对话">
+              <div class="ai-panel-heading"><div><span class="eyebrow">唯一对话入口</span><strong>你 ↔ 主编</strong></div><span id="aiConversationCount" class="mono">0 轮</span></div>
+              <div id="aiConversation" class="ai-conversation" aria-live="polite"></div>
+              <form id="aiMessageForm" class="ai-message-form"><label class="visually-hidden" for="aiMessageInput">告诉主编你的想法</label><textarea id="aiMessageInput" rows="3" maxlength="4000" placeholder="告诉主编你想写什么，或继续补充一个决定……"></textarea><div class="ai-message-footer"><span>主编会把影响方向的内容整理进右侧蓝图。</span><button id="aiMessageButton" class="button button-primary" type="submit">发送给主编 <span aria-hidden="true">→</span></button></div></form>
+            </section>
+            <aside class="blueprint-panel" aria-label="故事蓝图">
+              <div class="blueprint-heading"><div><span class="eyebrow">作品方向 / 可直接编辑</span><h2>创作蓝图</h2></div><span id="blueprintRevision" class="blueprint-revision mono">V / 0</span></div>
+              <p id="blueprintHint" class="blueprint-hint">先和主编聊一轮，蓝图会从你的话里长出来。</p>
+              <form id="blueprintForm" class="blueprint-form">
+                <label>核心命题<textarea id="blueprintCorePremise" data-blueprint-field="core_premise" rows="2"></textarea></label>
+                <label>主冲突<textarea id="blueprintCoreConflict" data-blueprint-field="core_conflict" rows="2"></textarea></label>
+                <div class="blueprint-two-col"><label>主角<input id="blueprintProtagonist" data-blueprint-field="protagonist" type="text" /></label><label>预期体量<input id="blueprintTargetLength" data-blueprint-field="target_length" type="text" /></label></div>
+                <label>主角及动机<textarea id="blueprintMotivation" data-blueprint-field="protagonist_motivation" rows="2"></textarea></label>
+                <label>关键人物关系<textarea id="blueprintRelationships" data-blueprint-field="key_relationships" rows="2"></textarea></label>
+                <label>世界规则<textarea id="blueprintWorldRules" data-blueprint-field="world_rules" rows="2"></textarea></label>
+                <label>结局方向<textarea id="blueprintEnding" data-blueprint-field="ending_direction" rows="2"></textarea></label>
+                <label>分卷 / 阶段大纲<textarea id="blueprintOutline" data-blueprint-field="volume_outline" rows="3" placeholder="每行一个阶段"></textarea></label>
+                <div id="blueprintMissing" class="blueprint-missing" aria-live="polite"></div>
+                <button id="saveBlueprintButton" class="button button-outline button-wide" type="submit">保存蓝图字段</button>
+                <button id="confirmBlueprintButton" class="button button-primary button-wide" type="button" disabled>确认蓝图并开始创作 <span aria-hidden="true">→</span></button>
+              </form>
+              <div class="professional-status-block"><div class="ai-panel-heading"><div><span class="eyebrow">后台专业角色</span><strong>协作状态</strong></div></div><div id="professionalRoleStatus" class="professional-role-status"></div></div>
+            </aside>
+          </div>
+        </main>
+      </section>
+
+      <section id="aiDirectorScreen" class="screen ai-director-screen is-hidden" data-screen="aiDirector" aria-hidden="true" aria-labelledby="aiDirectorTitle">
+        <aside class="ai-spine director-spine" aria-label="AI 导演台导航">
+          <a class="spine-brand ai-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
+          <nav class="spine-links ai-spine-links">
+            <button class="spine-link" type="button" data-action="ai-open-studio"><span class="spine-icon">✦</span><strong>创作室</strong></button>
+            <button class="spine-link is-active" type="button" data-action="ai-open-director"><span class="spine-icon">◈</span><strong>导演台</strong></button>
+            <button class="spine-link" type="button" data-action="ai-open-editor"><span class="spine-icon">▤</span><strong>编辑正文</strong></button>
+            <button class="spine-link" type="button" data-action="ai-open-archive"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+          </nav>
+          <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">DIR / 03</span><button id="aiDirectorLogoutButton" class="spine-logout" type="button">退出</button></div>
+        </aside>
+        <main class="ai-director-main">
+          <header class="director-header"><div><p class="kicker"><span class="kicker-line"></span>AI 辅助写作 / <span id="aiDirectorProjectTitle">—</span></p><h1 id="aiDirectorTitle">AI 导演台</h1></div><div class="director-header-actions"><span id="aiDirectorModelLabel" class="ai-demo-label">演示推演 · 未配置模型 Key · 不消耗创作积分</span><div class="director-credit-box"><span>创作积分</span><strong id="directorCreditsUsed">0</strong><small id="directorCreditsUsedNote">演示不消耗</small></div><div class="director-credit-box"><span>本次预算</span><strong id="directorCreditsEstimate">0</strong><small id="directorCreditsEstimateNote">演示免费</small></div><button id="directorPauseButton" class="button button-outline" type="button">暂停创作</button></div></header>
+          <div id="aiDirectorNotice" class="notice ai-director-notice is-hidden" role="status"></div>
+          <section id="directorStageTrack" class="director-stage-track" aria-label="导演台后台轮转"></section>
+          <section id="directorPageContent" class="director-page-content" aria-live="polite"></section>
+        </main>
+      </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <dialog id="newProjectDialog" class="new-project-dialog" aria-labelledby="newProjectTitle">
+      <form method="dialog" class="dialog-shell" id="newProjectForm">
+        <button class="dialog-close" value="cancel" type="submit" aria-label="关闭新建作品">×</button>
+        <p class="kicker"><span class="kicker-line"></span>新建作品</p>
+        <h2 id="newProjectTitle">先选一种创作方式</h2>
+        <p class="dialog-intro">作品模式创建后会固定。你可以随时回来继续，下一阶段再进入具体工作区。</p>
+        <div class="mode-options">
+          <button class="mode-option" type="button" data-mode="independent"><span class="mode-icon mode-icon-paper">▤</span><span><strong>独立创作</strong><small>上传旧稿或从空白章节开始</small></span><span class="mode-chevron">→</span></button>
+          <button class="mode-option mode-option-ai" type="button" data-mode="ai_assisted"><span class="mode-icon mode-icon-ai">✦</span><span><strong>AI 辅助写作</strong><small>先与主编聊清蓝图，再由导演台持续创作</small></span><span class="mode-chevron">→</span></button>
+        </div>
+        <div id="projectDetails" class="project-details is-hidden">
+          <div class="selected-mode-line"><span id="selectedModeLabel">—</span><button id="changeModeButton" type="button">重新选择</button></div>
+          <label for="projectTitleInput">作品标题</label><input id="projectTitleInput" type="text" maxlength="120" placeholder="例如：雾港来信" autocomplete="off" />
+          <label for="projectBriefInput">一句话简介 <span>可选</span></label><textarea id="projectBriefInput" rows="3" maxlength="1000" placeholder="这部故事从哪里开始？"></textarea>
+          <p id="projectError" class="field-error" role="alert"></p>
+          <button id="createProjectButton" class="button button-primary button-wide" type="submit">保存作品并进入下一阶段 <span aria-hidden="true">→</span></button>
+        </div>
+        <button class="dialog-cancel" value="cancel" type="submit">取消</button>
+      </form>
+    </dialog>
+
+    <dialog id="notificationsDialog" class="review-dialog notifications-dialog" aria-labelledby="notificationsTitle">
+      <div class="review-dialog-shell">
+        <button id="closeNotificationsButton" class="dialog-close" type="button" aria-label="关闭通知">×</button>
+        <p class="kicker"><span class="kicker-line"></span>作品通知</p>
+        <h2 id="notificationsTitle">最近发生的事</h2>
+        <p class="dialog-intro">只显示你自己作品的保存、分析和后台状态，通知会跟着账户保留。</p>
+        <div id="notificationsList" class="notifications-list" aria-live="polite"></div>
+      </div>
+    </dialog>
+
+    <dialog id="pendingChangesDialog" class="review-dialog" aria-labelledby="pendingChangesTitle">
+      <div class="review-dialog-shell">
+        <button id="closePendingChangesButton" class="dialog-close" type="button" aria-label="关闭修改确认">×</button>
+        <p class="kicker"><span class="kicker-line"></span>旧章修改确认</p>
+        <h2 id="pendingChangesTitle">确认全部修改</h2>
+        <p class="dialog-intro">这些旧章已经逐字保存，但暂时没有替换正式档案。请确认影响范围，再决定是否重建。</p>
+        <div id="pendingChangesContent" class="review-content"></div>
+        <div class="review-actions"><button id="ignoreChangesButton" class="button button-outline" type="button">忽略轻微措辞并继续</button><button id="rebuildChangesButton" class="button button-primary" type="button">根据当前全文重建档案</button></div>
+      </div>
+    </dialog>
+
+    <dialog id="versionHistoryDialog" class="review-dialog" aria-labelledby="versionHistoryTitle">
+      <div class="review-dialog-shell version-dialog-shell">
+        <button id="closeVersionHistoryButton" class="dialog-close" type="button" aria-label="关闭稿本历史">×</button>
+        <p class="kicker"><span class="kicker-line"></span>稿本历史</p>
+        <h2 id="versionHistoryTitle">历史版本与恢复</h2>
+        <p class="dialog-intro">历史稿本只读。恢复会创建新的当前稿本，不改写这条历史记录。</p>
+        <div id="versionHistoryContent" class="version-history-content"></div>
+        <div id="versionPreviewContent" class="version-preview-content is-hidden"></div>
+      </div>
+    </dialog>
+
+    <dialog id="trialDialog" class="review-dialog" aria-labelledby="trialDialogTitle">
+      <div class="review-dialog-shell trial-dialog-shell">
+        <button id="closeTrialButton" class="dialog-close" type="button" aria-label="关闭角色试绘">×</button>
+        <p class="kicker"><span class="kicker-line"></span>角色试绘</p>
+        <h2 id="trialDialogTitle">只为一个角色试绘</h2>
+        <p class="dialog-intro">先选画风并确认预计积分；不会自动为全员生成。</p>
+        <label for="trialStyleSelect">画风</label><select id="trialStyleSelect" class="trial-style-select"><option>水墨线稿</option><option>铅笔速写</option><option>版画剪影</option></select>
+        <p id="trialEstimate" class="trial-estimate">预计 12 积分 · 未配置图片服务</p>
+        <button id="confirmTrialButton" class="button button-primary button-wide" type="button">确认并按需触发</button>
+      </div>
+    </dialog>
+
+    <script src="/static/app.js?v=stage22-20260811" defer></script>
   </body>
 </html>

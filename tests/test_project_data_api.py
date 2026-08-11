@@ -8,7 +8,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import main
-from app import novel_routes
+from app import entry_routes, novel_routes
+from app.core.account_store import AccountStore
 from app.agents import novel_nodes
 from app.core import novel_graph
 from app.core.project_store import JsonProjectStore
@@ -28,6 +29,20 @@ from app.models import (
 
 
 class ProjectDataApiTest(unittest.TestCase):
+    @staticmethod
+    def _login_and_link(client: TestClient, accounts: AccountStore, project_id: str) -> None:
+        response = client.post(
+            "/api/auth/email",
+            json={"email": f"legacy-{project_id}@example.com"},
+        )
+        if response.status_code != 200:
+            raise AssertionError(response.text)
+        accounts.link_project(
+            response.json()["account"]["account_id"],
+            project_id,
+            "legacy",
+        )
+
     def test_writer_receives_batch_temporary_context_in_previous_summary(self) -> None:
         captured: dict[str, str] = {}
         beat = PlotBeat(order=1, summary="主角转入城南档案馆。")
@@ -274,8 +289,13 @@ class ProjectDataApiTest(unittest.TestCase):
                 store=JsonProjectStore(Path(tmp_dir))
             )
             client = TestClient(main.app)
+            accounts = AccountStore(Path(tmp_dir) / "account_data" / "accounts.json")
 
-            with patch.object(novel_routes, "novel_workflow_service", service):
+            with (
+                patch.object(novel_routes, "novel_workflow_service", service),
+                patch.object(entry_routes, "account_store", accounts),
+            ):
+                self._login_and_link(client, accounts, "route-project")
                 create_response = client.post(
                     "/novel/projects",
                     json={
@@ -349,8 +369,13 @@ class ProjectDataApiTest(unittest.TestCase):
             )
             service._save_project(project)  # noqa: SLF001 - 构造 codex 聚合数据。
             client = TestClient(main.app)
+            accounts = AccountStore(Path(tmp_dir) / "account_data" / "accounts.json")
 
-            with patch.object(novel_routes, "novel_workflow_service", service):
+            with (
+                patch.object(novel_routes, "novel_workflow_service", service),
+                patch.object(entry_routes, "account_store", accounts),
+            ):
+                self._login_and_link(client, accounts, "codex-project")
                 response = client.get("/novel/projects/codex-project/codex")
 
             payload = response.json()
@@ -647,6 +672,7 @@ class ProjectDataApiTest(unittest.TestCase):
             )
             service._save_project(project)  # noqa: SLF001 - 构造已有章节冲突数据。
             client = TestClient(main.app)
+            accounts = AccountStore(Path(tmp_dir) / "account_data" / "accounts.json")
 
             def fake_writer_agent(state: NovelState) -> dict:
                 chapter_number = state["current_chapter_number"]
@@ -666,7 +692,9 @@ class ProjectDataApiTest(unittest.TestCase):
             with (
                 patch.object(novel_routes, "novel_workflow_service", service),
                 patch.object(novel_graph, "writer_agent", fake_writer_agent),
+                patch.object(entry_routes, "account_store", accounts),
             ):
+                self._login_and_link(client, accounts, "route-conflict-project")
                 blocked_response = client.post(
                     "/novel/projects/route-conflict-project/batch/generate",
                     json={
@@ -714,6 +742,7 @@ class ProjectDataApiTest(unittest.TestCase):
                 ],
             )
             client = TestClient(main.app)
+            accounts = AccountStore(Path(tmp_dir) / "account_data" / "accounts.json")
 
             def fake_planner_agent(_: NovelState) -> dict:
                 return {
@@ -725,7 +754,11 @@ class ProjectDataApiTest(unittest.TestCase):
                     "error_message": None,
                 }
 
-            with patch.object(novel_routes, "novel_workflow_service", service):
+            with (
+                patch.object(novel_routes, "novel_workflow_service", service),
+                patch.object(entry_routes, "account_store", accounts),
+            ):
+                self._login_and_link(client, accounts, "preview-project")
                 missing_response = client.get("/novel/projects/preview-project/chapters/1")
                 with patch.object(novel_graph, "planner_agent", fake_planner_agent):
                     service.plan_chapter(

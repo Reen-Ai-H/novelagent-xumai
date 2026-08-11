@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import uuid4
 
@@ -109,7 +109,7 @@ class NovelWorkflowService:
         return project
 
     def _save_project(self, project: NovelProject) -> NovelProject:
-        project.updated_at = datetime.utcnow()
+        project.updated_at = datetime.now(timezone.utc)
         saved_project = self._project_store.save_project(project)
         self._projects[saved_project.project_id] = saved_project
         return saved_project
@@ -221,7 +221,7 @@ class NovelWorkflowService:
             record.review_status = None
         record.can_accept = record.status in {"reviewed", "needs_revision", "approved"}
         record.can_revise = record.status == "needs_revision"
-        record.updated_at = datetime.utcnow()
+        record.updated_at = datetime.now(timezone.utc)
 
         if existing is None:
             project.chapters.append(record)
@@ -251,7 +251,7 @@ class NovelWorkflowService:
         plan = existing or ChapterPlan(chapter_number=chapter_number)
         plan.summary = summary or plan.summary
         plan.plot_beats = plot_beats
-        plan.updated_at = datetime.utcnow()
+        plan.updated_at = datetime.now(timezone.utc)
         if existing is None:
             project.chapter_plans.append(plan)
         project.chapter_plans.sort(key=lambda plan_item: plan_item.chapter_number)
@@ -508,7 +508,7 @@ class NovelWorkflowService:
         """人工保存全文规划、分卷规划和章节规划。"""
 
         project = self._ensure_project(project_id)
-        project.full_plan = full_plan.model_copy(update={"updated_at": datetime.utcnow()})
+        project.full_plan = full_plan.model_copy(update={"updated_at": datetime.now(timezone.utc)})
         if volumes is not None:
             project.volumes = sorted(volumes, key=lambda volume: volume.volume_number)
         if chapter_plans is not None:
@@ -768,7 +768,7 @@ class NovelWorkflowService:
                 chapter.draft,
                 candidate_draft,
             )
-            chapter.updated_at = datetime.utcnow()
+            chapter.updated_at = datetime.now(timezone.utc)
 
     def _merge_temporary_context(
         self,
@@ -913,7 +913,7 @@ class NovelWorkflowService:
             task.message = "批量章节规划失败。"
             raise
         finally:
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             self._save_project(project)
 
         return task
@@ -1028,7 +1028,7 @@ class NovelWorkflowService:
             task.message = "批量草稿生成失败。"
             raise
         finally:
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             self._save_project(project)
 
         return task

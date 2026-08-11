@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>叙脉 · 三套视觉原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        background: #eef2f6;
+        color: #111827;
+      }
+
+      * { box-sizing: border-box; }
+
+      body { margin: 0; }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px 28px;
+        border-bottom: 1px solid rgba(17, 24, 39, 0.12);
+        background: rgba(248, 250, 252, 0.92);
+        backdrop-filter: blur(16px);
+      }
+
+      h1, h2, p { margin: 0; }
+      h1 { font-size: 20px; }
+      header p { color: #667085; font-size: 13px; }
+
+      nav { display: flex; gap: 8px; }
+      nav a {
+        border-radius: 999px;
+        padding: 8px 12px;
+        color: inherit;
+        background: #fff;
+        text-decoration: none;
+      }
+
+      main { width: min(1500px, calc(100% - 32px)); margin: 0 auto; padding: 34px 0 72px; }
+
+      section { scroll-margin-top: 88px; margin-bottom: 72px; }
+      .section-head { display: grid; gap: 6px; margin-bottom: 18px; }
+      .section-head p { color: #667085; }
+
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      figure {
+        margin: 0;
+        overflow: hidden;
+        border: 1px solid rgba(17, 24, 39, 0.12);
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: 0 14px 38px rgba(27, 39, 57, 0.09);
+      }
+      figure:first-child { grid-column: 1 / -1; }
+      img { display: block; width: 100%; height: auto; background: #fff; }
+      figcaption { padding: 11px 14px; color: #475467; font-size: 13px; }
+
+      @media (max-width: 820px) {
+        header { align-items: flex-start; gap: 12px; }
+        header p, nav { display: none; }
+        main { width: min(100% - 20px, 1500px); }
+        .grid { grid-template-columns: 1fr; }
+        figure:first-child { grid-column: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>叙脉 · 三套完整视觉原型</h1>
+        <p>相同功能与文案，仅比较视觉系统</p>
+      </div>
+      <nav aria-label="版本导航">
+        <a href="#style-a">A 故事档案室</a>
+        <a href="#style-b">B 夜航排演室</a>
+        <a href="#style-c">C 未来活字</a>
+      </nav>
+    </header>
+    <main>
+      <section id="style-a">
+        <div class="section-head"><h2>A · 故事档案室</h2><p>冷静、可靠、精密，以可回溯的故事线为视觉签名。</p></div>
+        <div class="grid">
+          <figure><img src="style-a-archive/01-landing.png" alt="版本 A 产品介绍首页" /><figcaption>01 · 产品介绍首页</figcaption></figure>
+          <figure><img src="style-a-archive/02-login.png" alt="版本 A 登录页" /><figcaption>02 · 邮箱登录页</figcaption></figure>
+          <figure><img src="style-a-archive/03-library-new-project.png" alt="版本 A 书架与新建作品" /><figcaption>03 · 书架首页 + 新建作品</figcaption></figure>
+          <figure><img src="style-a-archive/04-independent-editor.png" alt="版本 A 独立创作编辑器" /><figcaption>04 · 独立创作编辑器</figcaption></figure>
+          <figure><img src="style-a-archive/05-story-archive.png" alt="版本 A 故事档案" /><figcaption>05 · 故事档案</figcaption></figure>
+          <figure><img src="style-a-archive/06-ai-blueprint-chat.png" alt="版本 A AI 蓝图对话" /><figcaption>06 · AI 创作蓝图对话</figcaption></figure>
+          <figure><img src="style-a-archive/07-ai-director.png" alt="版本 A AI 导演台" /><figcaption>07 · AI 导演台</figcaption></figure>
+        </div>
+      </section>
+
+      <section id="style-b">
+        <div class="section-head"><h2>B · 夜航排演室</h2><p>沉浸、电影感、克制，以导演光轨为视觉签名。</p></div>
+        <div class="grid">
+          <figure><img src="style-b-nocturne/01-landing.png" alt="版本 B 产品介绍首页" /><figcaption>01 · 产品介绍首页</figcaption></figure>
+          <figure><img src="style-b-nocturne/02-login.png" alt="版本 B 登录页" /><figcaption>02 · 邮箱登录页</figcaption></figure>
+          <figure><img src="style-b-nocturne/03-library-new-project.png" alt="版本 B 书架与新建作品" /><figcaption>03 · 书架首页 + 新建作品</figcaption></figure>
+          <figure><img src="style-b-nocturne/04-independent-editor.png" alt="版本 B 独立创作编辑器" /><figcaption>04 · 独立创作编辑器</figcaption></figure>
+          <figure><img src="style-b-nocturne/05-story-archive.png" alt="版本 B 故事档案" /><figcaption>05 · 故事档案</figcaption></figure>
+          <figure><img src="style-b-nocturne/06-ai-blueprint-chat.png" alt="版本 B AI 蓝图对话" /><figcaption>06 · AI 创作蓝图对话</figcaption></figure>
+          <figure><img src="style-b-nocturne/07-ai-director.png" alt="版本 B AI 导演台" /><figcaption>07 · AI 导演台</figcaption></figure>
+        </div>
+      </section>
+
+      <section id="style-c">
+        <div class="section-head"><h2>C · 未来活字</h2><p>明亮、年轻、有节奏，以会重排的活字轨道为视觉签名。</p></div>
+        <div class="grid">
+          <figure><img src="style-c-type/01-landing.png" alt="版本 C 产品介绍首页" /><figcaption>01 · 产品介绍首页</figcaption></figure>
+          <figure><img src="style-c-type/02-login.png" alt="版本 C 登录页" /><figcaption>02 · 邮箱登录页</figcaption></figure>
+          <figure><img src="style-c-type/03-library-new-project.png" alt="版本 C 书架与新建作品" /><figcaption>03 · 书架首页 + 新建作品</figcaption></figure>
+          <figure><img src="style-c-type/04-independent-editor.png" alt="版本 C 独立创作编辑器" /><figcaption>04 · 独立创作编辑器</figcaption></figure>
+          <figure><img src="style-c-type/05-story-archive.png" alt="版本 C 故事档案" /><figcaption>05 · 故事档案</figcaption></figure>
+          <figure><img src="style-c-type/06-ai-blueprint-chat.png" alt="版本 C AI 蓝图对话" /><figcaption>06 · AI 创作蓝图对话</figcaption></figure>
+          <figure><img src="style-c-type/07-ai-director.png" alt="版本 C AI 导演台" /><figcaption>07 · AI 导演台</figcaption></figure>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from uuid import uuid4
 
@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.chapter import ChapterDraft, PlotBeat
 from app.models.character import CharacterCard
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 ChapterRecordStatus = Literal[
@@ -54,7 +58,7 @@ class FullNovelPlan(BaseModel):
         description="目标章节数",
     )
     notes: list[str] = Field(default_factory=list, description="全文规划备注")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="最近更新时间")
+    updated_at: datetime = Field(default_factory=_utc_now, description="最近更新时间")
 
 
 class ChapterOutline(BaseModel):
@@ -68,7 +72,7 @@ class ChapterOutline(BaseModel):
     summary: str = Field(default="", description="章节规划摘要")
     purpose: str | None = Field(default=None, description="章节叙事目的")
     plot_beats: list[PlotBeat] = Field(default_factory=list, description="本章剧情节点")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="最近更新时间")
+    updated_at: datetime = Field(default_factory=_utc_now, description="最近更新时间")
 
 
 ChapterPlan = ChapterOutline
@@ -101,7 +105,7 @@ class NextChapterSeed(BaseModel):
     characters: list[CharacterCard] = Field(default_factory=list, description="预填人物卡片")
     source_chapter_number: int | None = Field(default=None, ge=1, description="承接的上一章号")
     chapter_plan: ChapterOutline | None = Field(default=None, description="命中的章节规划")
-    prepared_at: datetime = Field(default_factory=datetime.utcnow, description="准备时间")
+    prepared_at: datetime = Field(default_factory=_utc_now, description="准备时间")
 
 
 NextChapterInputSnapshot = NextChapterSeed
@@ -148,8 +152,8 @@ class BatchGenerationRun(BaseModel):
     )
     message: str = Field(default="", description="任务状态说明")
     error_message: str | None = Field(default=None, description="失败原因")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="更新时间")
+    created_at: datetime = Field(default_factory=_utc_now, description="创建时间")
+    updated_at: datetime = Field(default_factory=_utc_now, description="更新时间")
 
 
 BatchTaskRecord = BatchGenerationRun
@@ -174,7 +178,7 @@ class ChapterRecord(BaseModel):
     can_revise: bool = Field(default=False, description="是否可修订章节")
     candidate_draft: ChapterDraft | None = Field(default=None, description="重新生成候选草稿")
     draft_comparison_summary: str | None = Field(default=None, description="原稿与候选稿对比摘要")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="最近更新时间")
+    updated_at: datetime = Field(default_factory=_utc_now, description="最近更新时间")
 
 
 class NovelProject(BaseModel):
@@ -205,5 +209,5 @@ class NovelProject(BaseModel):
     current_chapter_number: int = Field(default=1, ge=1, description="当前工作章节")
     latest_session_id: str | None = Field(default=None, description="最近一次章节工作流会话")
     total_word_count: int = Field(default=0, ge=0, description="已完成章节总字数")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="最近更新时间")
+    created_at: datetime = Field(default_factory=_utc_now, description="创建时间")
+    updated_at: datetime = Field(default_factory=_utc_now, description="最近更新时间")

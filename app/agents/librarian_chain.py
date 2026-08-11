@@ -3,19 +3,9 @@
 from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
+from app.agents.llm_runtime import build_chat_model
 from app.models import CharacterCard, ChapterDraft, LibrarianOutput
-from core.config import settings
-
-
-librarian_llm = ChatOpenAI(
-    model=settings.llm_model,
-    api_key=settings.openai_api_key,
-    base_url=settings.openai_base_url,
-    temperature=0.2,
-    streaming=False,
-)
 
 librarian_prompt = ChatPromptTemplate.from_messages(
     [
@@ -44,7 +34,12 @@ librarian_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-librarian_chain = librarian_prompt | librarian_llm.with_structured_output(LibrarianOutput)
+librarian_llm = build_chat_model(temperature=0.2)
+librarian_chain = (
+    librarian_prompt | librarian_llm.with_structured_output(LibrarianOutput)
+    if librarian_llm
+    else None
+)
 
 
 def extract_lore_with_llm(
@@ -54,6 +49,9 @@ def extract_lore_with_llm(
     draft: ChapterDraft,
 ) -> LibrarianOutput:
     """调用 LLM 从章节草稿中抽取设定增量。"""
+
+    if librarian_chain is None:
+        raise RuntimeError("未配置模型密钥，无法执行 Librarian；当前请求可使用确定性降级路径。")
 
     return librarian_chain.invoke(
         {

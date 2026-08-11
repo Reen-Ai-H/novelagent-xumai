@@ -3,20 +3,10 @@
 from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
+from app.agents.llm_runtime import build_chat_model
 from app.core.retriever import format_retrieved_context
 from app.models import CharacterCard, ChapterDraft, RetrievalContext, ReviewerOutput
-from core.config import settings
-
-
-reviewer_llm = ChatOpenAI(
-    model=settings.llm_model,
-    api_key=settings.openai_api_key,
-    base_url=settings.openai_base_url,
-    temperature=0.2,
-    streaming=False,
-)
 
 reviewer_prompt = ChatPromptTemplate.from_messages(
     [
@@ -50,7 +40,12 @@ reviewer_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-reviewer_chain = reviewer_prompt | reviewer_llm.with_structured_output(ReviewerOutput)
+reviewer_llm = build_chat_model(temperature=0.2)
+reviewer_chain = (
+    reviewer_prompt | reviewer_llm.with_structured_output(ReviewerOutput)
+    if reviewer_llm
+    else None
+)
 
 
 def review_chapter_with_llm(
@@ -62,6 +57,9 @@ def review_chapter_with_llm(
     retrieved_context: list[RetrievalContext] | None = None,
 ) -> ReviewerOutput:
     """调用 LLM 审查章节草稿。"""
+
+    if reviewer_chain is None:
+        raise RuntimeError("未配置模型密钥，无法执行 Reviewer；当前请求可使用确定性降级路径。")
 
     return reviewer_chain.invoke(
         {

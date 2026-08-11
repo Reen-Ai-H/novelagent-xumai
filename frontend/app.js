@@ -1,2406 +1,1907 @@
-const stageOrder = [
-  "planning",
-  "awaiting_human_review",
-  "writing",
-  "awaiting_review",
-  "reviewing",
-  "awaiting_revision_decision",
-  "revising",
-  "awaiting_chapter_acceptance",
-  "extracting_lore",
-  "completed",
-];
-
-const stageText = {
-  planning: "规划中",
-  awaiting_human_review: "等待人工审核",
-  writing: "正文生成中",
-  awaiting_review: "等待审查",
-  extracting_lore: "设定抽取中",
-  reviewing: "审查中",
-  awaiting_revision_decision: "等待修稿确认",
-  revising: "修稿中",
-  awaiting_chapter_acceptance: "待接受入库",
-  completed: "已完成入库",
-  failed: "失败",
-};
-
-const stageStepIndex = {
-  planning: 0,
-  awaiting_human_review: 1,
-  writing: 2,
-  awaiting_review: 2,
-  reviewing: 3,
-  awaiting_revision_decision: 3,
-  revising: 2,
-  awaiting_chapter_acceptance: 3,
-  extracting_lore: 4,
-  completed: 4,
-};
-
-const appState = {
-  projectId: "default",
-  project: null,
-  sessionId: "",
-  plotBeats: [],
-  activeBeatIndex: 0,
-  reviewDecision: "approved",
-  draft: null,
-  runLoreUpdates: {},
-  runCharacterUpdates: {},
-  characters: [],
-  stage: "planning",
-  agentTimer: null,
-  typeTimer: null,
-  revisionTimer: null,
-  revisionCountdown: 10,
-  stageSidebarCollapsed: false,
-  projects: [],
-  nextSnapshot: null,
-  previewChapterNumber: 1,
-  latestBatchTask: null,
-  latestBatchResults: [],
-  projectCodex: null,
-};
-
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => [...document.querySelectorAll(selector)];
-
-const characterRoleOptions = [
-  { value: "protagonist", label: "主角" },
-  { value: "supporting", label: "重要配角" },
-  { value: "antagonist", label: "反派" },
-  { value: "minor", label: "次要人物" },
-  { value: "unknown", label: "暂未确定" },
-];
-
-const elements = {
-  appShell: $("#appShell"),
-  homeBtn: $("#homeBtn"),
-  sidebarToggle: $("#sidebarToggle"),
-  projectTitle: $("#projectTitleInput"),
-  worldview: $("#worldviewInput"),
-  chapter: $("#chapterInput"),
-  session: $("#sessionInput"),
-  summary: $("#summaryInput"),
-  instruction: $("#instructionInput"),
-  charactersBuilder: $("#charactersBuilder"),
-  addCharacterBtn: $("#addCharacterBtn"),
-  feedback: $("#feedbackInput"),
-  planBtn: $("#planBtn"),
-  approveBtn: $("#approveBtn"),
-  approveDecisionBtn: $("#approveDecisionBtn"),
-  rejectDecisionBtn: $("#rejectDecisionBtn"),
-  refreshBtn: $("#refreshBtn"),
-  fillExampleBtn: $("#fillExampleBtn"),
-  beatsContainer: $("#beatsContainer"),
-  sessionBadge: $("#sessionBadge"),
-  draftOutput: $("#draftOutput"),
-  metaOutput: $("#metaOutput"),
-  characterCards: $("#characterCards"),
-  loreCodex: $("#loreCodex"),
-  stageLabel: $("#stageLabel"),
-  agentEyebrow: $("#agentEyebrow"),
-  agentTitle: $("#agentTitle"),
-  agentStream: $("#agentStream"),
-  toast: $("#toast"),
-  wordCountStat: $("#wordCountStat"),
-  projectStat: $("#projectStat"),
-  chapterStat: $("#chapterStat"),
-  sessionStat: $("#sessionStat"),
-  progressStat: $("#progressStat"),
-  beatsStat: $("#beatsStat"),
-  reviewStat: $("#reviewStat"),
-  previewTitle: $("#previewTitle"),
-  previewContent: $("#previewContent"),
-  chapterCatalog: $("#chapterCatalog"),
-  continueNextBtn: $("#continueNextBtn"),
-  chapterDecisionPanel: $("#chapterDecisionPanel"),
-  decisionTitle: $("#decisionTitle"),
-  decisionMessage: $("#decisionMessage"),
-  revisionCountdown: $("#revisionCountdown"),
-  acceptChapterBtn: $("#acceptChapterBtn"),
-  reviseNowBtn: $("#reviseNowBtn"),
-  waitRevisionBtn: $("#waitRevisionBtn"),
-  confirmReviseBtn: $("#confirmReviseBtn"),
-  newBookTitle: $("#newBookTitleInput"),
-  newBookGenre: $("#newBookGenreInput"),
-  newBookWorldview: $("#newBookWorldviewInput"),
-  newBookHero: $("#newBookHeroInput"),
-  showNewBookBtn: $("#showNewBookBtn"),
-  cancelNewBookBtn: $("#cancelNewBookBtn"),
-  createBookBtn: $("#createBookBtn"),
-  newBookDraftPanel: $("#newBookDraftPanel"),
-  draftTitle: $("#draftTitleInput"),
-  draftPremise: $("#draftPremiseInput"),
-  draftWorldview: $("#draftWorldviewInput"),
-  draftHero: $("#draftHeroInput"),
-  confirmSettingDraftBtn: $("#confirmSettingDraftBtn"),
-  refreshHomeProjectsBtn: $("#refreshHomeProjectsBtn"),
-  newBookPanel: $("#newBookPanel"),
-  homeProjectGrid: $("#homeProjectGrid"),
-  homeProjectCount: $("#homeProjectCount"),
-  premise: $("#premiseInput"),
-  coreConflict: $("#coreConflictInput"),
-  ending: $("#endingInput"),
-  themes: $("#themesInput"),
-  planNotes: $("#planNotesInput"),
-  targetChapterCount: $("#targetChapterCountInput"),
-  volumes: $("#volumesInput"),
-  chapterPlanTable: $("#chapterPlanTable"),
-  generateFullPlanBtn: $("#generateFullPlanBtn"),
-  saveFullPlanBtn: $("#saveFullPlanBtn"),
-  enterFirstChapterBtn: $("#enterFirstChapterBtn"),
-  batchStart: $("#batchStartInput"),
-  batchCount: $("#batchCountSelect"),
-  batchInstruction: $("#batchInstructionInput"),
-  batchPlanBtn: $("#batchPlanBtn"),
-  batchGenerateBtn: $("#batchGenerateBtn"),
-  batchStatusPanel: $("#batchStatusPanel"),
-  batchQueuePanel: $("#batchQueuePanel"),
-  batchOutlineTable: $("#batchOutlineTable"),
-  nextSeedPanel: $("#nextSeedPanel"),
-  readerCatalog: $("#readerCatalog"),
-  previewStatus: $("#previewStatus"),
-  prevChapterBtn: $("#prevChapterBtn"),
-  nextChapterBtn: $("#nextChapterBtn"),
-};
-
-function showToast(message) {
-  elements.toast.textContent = message;
-  elements.toast.classList.add("show");
-  window.setTimeout(() => elements.toast.classList.remove("show"), 2600);
-}
-
-function setAgentBanner({ eyebrow, title, message, running = false }) {
-  if (eyebrow) {
-    elements.agentEyebrow.textContent = eyebrow;
-  }
-  if (title) {
-    elements.agentTitle.textContent = title;
-  }
-  elements.agentStream.classList.toggle("running", running);
-  if (message !== undefined) {
-    typeAgentMessage(message, running);
-  }
-}
-
-function typeAgentMessage(message, running = false) {
-  window.clearInterval(appState.typeTimer);
-  elements.agentStream.textContent = "";
-  const text = String(message || "");
-  let index = 0;
-
-  appState.typeTimer = window.setInterval(() => {
-    elements.agentStream.textContent = text.slice(0, index);
-    index += 1;
-    if (index > text.length) {
-      window.clearInterval(appState.typeTimer);
-      if (!running) {
-        elements.agentStream.classList.remove("running");
-      }
-    }
-  }, 22);
-}
-
-function startAgentRun({ agent, stage, title, messages }) {
-  window.clearInterval(appState.agentTimer);
-  window.clearInterval(appState.typeTimer);
-  updateStage(stage);
-
-  let index = 0;
-  setAgentBanner({
-    eyebrow: `${agent} Agent 运行中`,
-    title,
-    message: messages[index],
-    running: true,
-  });
-
-  appState.agentTimer = window.setInterval(() => {
-    index = (index + 1) % messages.length;
-    setAgentBanner({
-      eyebrow: `${agent} Agent 运行中`,
-      title,
-      message: messages[index],
-      running: true,
-    });
-  }, 2600);
-}
-
-function finishAgentRun({ agent, stage, title, message }) {
-  window.clearInterval(appState.agentTimer);
-  updateStage(stage);
-  setAgentBanner({
-    eyebrow: `${agent} Agent 已完成`,
-    title,
-    message,
-    running: false,
-  });
-}
-
-function failAgentRun({ agent, title, message }) {
-  window.clearInterval(appState.agentTimer);
-  setAgentBanner({
-    eyebrow: `${agent} Agent 提醒`,
-    title,
-    message,
-    running: false,
-  });
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function setLoading(button, isLoading, text) {
-  if (!button.dataset.idleText) {
-    button.dataset.idleText = button.textContent;
-  }
-  button.disabled = isLoading;
-  button.textContent = isLoading ? text : button.dataset.idleText;
-}
-
-function autoResizeTextarea(textarea) {
-  textarea.style.height = "auto";
-  textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
-}
-
-function bindAutoResize(scope = document) {
-  scope.querySelectorAll("textarea").forEach((textarea) => {
-    autoResizeTextarea(textarea);
-    textarea.addEventListener("input", () => autoResizeTextarea(textarea));
-  });
-}
-
-function switchView(viewName) {
-  const isHome = viewName === "home";
-  elements.appShell.classList.toggle("home-mode", isHome);
-  $$(".view").forEach((view) => {
-    view.classList.toggle("active", view.id === `${viewName}View`);
-  });
-
-  $$(".nav-card, .sub-nav-card, .stage-nav-card").forEach((button) => {
-    button.classList.toggle("active", button.dataset.view === viewName);
-  });
-
-  if (!isHome && !appState.project) {
-    showToast("请先从首页选择或创建作品。");
-    switchView("home");
-    return;
-  }
-}
-
-function toggleSidebar() {
-  const collapsed = elements.appShell.classList.toggle("sidebar-collapsed");
-  elements.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
-  elements.sidebarToggle.setAttribute("aria-label", collapsed ? "展开侧边栏" : "折叠侧边栏");
-}
-
-function setStageSidebarCollapsed(collapsed) {
-  appState.stageSidebarCollapsed = collapsed;
-  $$(".stage-sidebar").forEach((sidebar) => {
-    sidebar.classList.toggle("collapsed", collapsed);
-  });
-  $$(".stage-collapse-btn").forEach((button) => {
-    button.setAttribute("aria-expanded", String(!collapsed));
-    button.setAttribute("aria-label", collapsed ? "展开创作阶段导航" : "折叠创作阶段导航");
-  });
-}
-
-function toggleStageSidebar() {
-  setStageSidebarCollapsed(!appState.stageSidebarCollapsed);
-}
-
-function setReviewDecision(decision) {
-  appState.reviewDecision = decision;
-  elements.approveDecisionBtn.classList.toggle("active", decision === "approved");
-  elements.rejectDecisionBtn.classList.toggle("active", decision === "rejected");
-  elements.approveBtn.textContent = decision === "approved" ? "提交审核并继续生成" : "打回并保留修改意见";
-}
-
-function countChineseWords(text) {
-  const compact = String(text || "").replace(/\s/g, "");
-  return compact.length;
-}
-
-function splitListText(text) {
-  return String(text || "")
-    .split(/[,，\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function getProjectChapters() {
-  return [...(appState.project?.chapters || [])].sort((a, b) => a.chapter_number - b.chapter_number);
-}
-
-function getChapterPlans() {
-  return [...(appState.project?.chapter_plans || [])].sort((a, b) => a.chapter_number - b.chapter_number);
-}
-
-function getReadableChapters() {
-  return getProjectChapters().filter((chapter) => chapter.draft?.content);
-}
-
-function normalizeFullPlan() {
-  return {
-    premise: elements.premise.value.trim(),
-    core_conflict: elements.coreConflict.value.trim(),
-    ending_direction: elements.ending.value.trim(),
-    themes: splitListText(elements.themes.value),
-    target_chapter_count: Number(elements.targetChapterCount.value || 10),
-    notes: splitListText(elements.planNotes.value),
-  };
-}
-
-function parseJsonEditor(text, fallback, label) {
-  const raw = String(text || "").trim();
-  if (!raw) {
-    return fallback;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`${label} JSON 格式不正确：${error.message}`);
-  }
-}
-
-function getStatusLabel(status) {
-  return {
-    planned: "已规划",
-    drafted: "草稿，不会进入长期记忆",
-    awaiting_review: "待审查",
-    reviewed: "AI 已审查，待人工确认",
-    needs_revision: "建议修订",
-    awaiting_revision_decision: "建议修订",
-    awaiting_acceptance: "待接受入库",
-    approved: "待接受入库",
-    awaiting_chapter_acceptance: "待接受入库",
-    completed: "已完成入库",
-    failed: "失败",
-  }[status] || stageText[status] || status || "未开始";
-}
-
-function getNextGeneratedChapterNumber(project = appState.project) {
-  const chapters = project?.chapters || [];
-  const usedNumbers = chapters
-    .filter((chapter) => chapter.draft || chapter.session_id || chapter.status === "completed")
-    .map((chapter) => Number(chapter.chapter_number || 0));
-  const plannedNumbers = project?.chapter_plans?.map((plan) => Number(plan.chapter_number || 0)) || [];
-  return Math.max(0, ...usedNumbers, ...plannedNumbers.filter((number) => number < 1)) + 1;
-}
-
-function hasExistingDraftInRange(start, end) {
-  return getProjectChapters().some((chapter) =>
-    chapter.chapter_number >= start &&
-    chapter.chapter_number <= end &&
-    (chapter.draft || chapter.session_id),
-  );
-}
-
-function getFirstExistingDraftInRange(start, end) {
-  return getProjectChapters().find((chapter) =>
-    chapter.chapter_number >= start &&
-    chapter.chapter_number <= end &&
-    (chapter.draft || chapter.session_id),
-  );
-}
-
-function getProjectBrief(project) {
-  return project?.project_brief
-    || project?.full_plan?.premise
-    || project?.global_worldview
-    || "还没有写下作品简介。";
-}
-
-function getProjectLatestChapter(project) {
-  if (!project?.latest_chapter_number) {
-    return null;
-  }
-  return {
-    chapter_number: project.latest_chapter_number,
-    title: project.latest_chapter_title,
-    status: project.latest_chapter_status,
-    session_id: project.latest_session_id,
-  };
-}
-
-function renderHomeProjectGrid() {
-  const projects = appState.projects;
-  elements.homeProjectCount.textContent = `${projects.length} 部作品`;
-  if (!projects.length) {
-    elements.homeProjectGrid.className = "home-project-empty";
-    elements.homeProjectGrid.textContent = "暂无作品。点击“新建作品”开始第一本书。";
-    return;
-  }
-
-  elements.homeProjectGrid.className = "home-project-grid";
-  elements.homeProjectGrid.innerHTML = projects
-    .map((project, index) => {
-      const latestChapter = getProjectLatestChapter(project);
-      const latestStatus = getStatusLabel(project.latest_chapter_status);
-      const chapterCount = Number(project.chapter_count || 0);
-      const completedCount = Number(project.completed_chapter_count || 0);
-      const progress = chapterCount ? Math.round((completedCount / chapterCount) * 100) : 0;
-      const updatedAt = project.updated_at ? new Date(project.updated_at).toLocaleString("zh-CN") : "未记录";
-      return `
-        <article class="project-card" data-project-id="${escapeHtml(project.project_id)}" style="--cover-index: ${index % 5}">
-          <button class="project-card-main" type="button" data-project-action="open" data-project-id="${escapeHtml(project.project_id)}">
-            <div class="project-cover">
-              <span>${escapeHtml((project.title || "书").slice(0, 1))}</span>
-            </div>
-            <div class="project-card-body">
-              <p class="eyebrow">Project</p>
-              <h3>${escapeHtml(project.title || "未命名作品")}</h3>
-              <p>${escapeHtml(getProjectBrief(project)).slice(0, 92)}</p>
-              <div class="project-meta">
-                <span>${project.total_word_count || 0} 字</span>
-                <span>${chapterCount} 章 / 完成 ${completedCount}</span>
-                <span>${escapeHtml(latestStatus)}</span>
-              </div>
-              <div class="project-progress" aria-label="完成进度">
-                <i style="width: ${progress}%"></i>
-              </div>
-              <small>最近：${latestChapter ? `第 ${latestChapter.chapter_number} 章 · ${escapeHtml(latestChapter.title || "未命名章节")}` : "暂无章节"}</small>
-              <small>更新：${escapeHtml(updatedAt)}</small>
-            </div>
-          </button>
-          <div class="project-card-actions">
-            <button class="primary-btn compact" type="button" data-project-action="continue" data-project-id="${escapeHtml(project.project_id)}">继续创作</button>
-            <button class="ghost-btn compact" type="button" data-project-action="preview" data-project-id="${escapeHtml(project.project_id)}">小说预览</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function renderFullPlanForm() {
-  const fullPlan = appState.project?.full_plan || {};
-  elements.premise.value = fullPlan.premise || "";
-  elements.coreConflict.value = fullPlan.core_conflict || "";
-  elements.ending.value = fullPlan.ending_direction || "";
-  elements.themes.value = (fullPlan.themes || []).join(", ");
-  elements.targetChapterCount.value = fullPlan.target_chapter_count || appState.project?.chapter_plans?.length || 10;
-  elements.planNotes.value = (fullPlan.notes || []).join("\n");
-  elements.volumes.value = JSON.stringify(appState.project?.volumes || [], null, 2);
-  renderChapterPlanTable(elements.chapterPlanTable, getChapterPlans(), { editable: true });
-  bindAutoResize(document);
-}
-
-function renderChapterPlanTable(container, plans, { editable = false } = {}) {
-  if (!plans.length) {
-    container.className = "chapter-plan-empty";
-    container.textContent = "暂无章节规划。可以生成全文规划骨架，或到“多章节任务”里先规划 3 / 5 / 10 章。";
-    return;
-  }
-
-  container.className = "chapter-plan-table";
-  container.innerHTML = `
-    <div class="chapter-plan-head">
-      <span>章节</span>
-      <span>标题</span>
-      <span>摘要</span>
-      <span>叙事目的</span>
-    </div>
-    ${plans
-      .map(
-        (plan, index) => `
-          <div class="chapter-plan-row" data-plan-index="${index}" data-chapter-number="${plan.chapter_number}">
-            <strong>第 ${plan.chapter_number} 章</strong>
-            ${
-              editable
-                ? `<input data-plan-field="title" value="${escapeHtml(plan.title || "")}" placeholder="章节标题" />`
-                : `<span>${escapeHtml(plan.title || "未命名章节")}</span>`
-            }
-            ${
-              editable
-                ? `<textarea data-plan-field="summary" rows="2">${escapeHtml(plan.summary || "")}</textarea>`
-                : `<p>${escapeHtml(plan.summary || "暂无摘要。")}</p>`
-            }
-            ${
-              editable
-                ? `<textarea data-plan-field="purpose" rows="2">${escapeHtml(plan.purpose || "")}</textarea>`
-                : `<p>${escapeHtml(plan.purpose || "暂无目的。")}</p>`
-            }
-          </div>
-        `,
-      )
-      .join("")}
-  `;
-  bindAutoResize(container);
-}
-
-function collectChapterPlansFromTable(selector = "#chapterPlanTable") {
-  const existing = getChapterPlans();
-  return $$(`${selector} .chapter-plan-row`).map((row) => {
-    const index = Number(row.dataset.planIndex || 0);
-    const chapterNumber = Number(row.dataset.chapterNumber || index + 1);
-    const base = existing.find((plan) => plan.chapter_number === chapterNumber) || { chapter_number: chapterNumber };
-    return {
-      ...base,
-      title: row.querySelector('[data-plan-field="title"]')?.value.trim() || null,
-      summary: row.querySelector('[data-plan-field="summary"]')?.value.trim() || "",
-      purpose: row.querySelector('[data-plan-field="purpose"]')?.value.trim() || null,
-    };
-  });
-}
-
-function renderBatchStatus(task) {
-  if (!task) {
-    elements.batchStatusPanel.className = "batch-status-empty";
-    elements.batchStatusPanel.textContent = "先生成章节级大纲，确认章节规划表后再批量生成草稿。";
-    elements.batchQueuePanel.className = "batch-queue-empty";
-    elements.batchQueuePanel.textContent = "批量生成后，这里会按章节展示待审查、需修订、待接受入库等状态。";
-    renderChapterPlanTable(elements.batchOutlineTable, [], { editable: false });
-    return;
-  }
-
-  elements.batchStatusPanel.className = "batch-status";
-  elements.batchStatusPanel.innerHTML = `
-    <strong>${task.kind === "plan" ? "多章节规划" : "批量生成草稿"} · ${escapeHtml(task.status)}</strong>
-    <span>${escapeHtml(task.message || "任务已返回。")}</span>
-    <small>章节：${(task.chapter_numbers || []).join(", ") || "未记录"}</small>
-  `;
-
-  const results = appState.latestBatchResults.length ? appState.latestBatchResults : task.chapter_results || [];
-  const numbers = new Set(results.length ? results.map((result) => result.chapter_number) : task.chapter_numbers || []);
-  const planned = getChapterPlans().filter((plan) => numbers.has(plan.chapter_number));
-  renderChapterPlanTable(elements.batchOutlineTable, planned, { editable: true });
-  renderBatchQueue(results);
-}
-
-function renderBatchQueue(chapterResults) {
-  const plansByNumber = new Map(getChapterPlans().map((plan) => [plan.chapter_number, plan]));
-  const results = (chapterResults || []).length
-    ? chapterResults
-    : (appState.latestBatchTask?.chapter_numbers || []).map((chapterNumber) => ({
-        chapter_number: chapterNumber,
-        status: "pending",
-        can_review: false,
-        can_accept: false,
-        can_revise: false,
-        conflict_type: null,
-      }));
-  if (!results.length) {
-    elements.batchQueuePanel.className = "batch-queue-empty";
-    elements.batchQueuePanel.textContent = "批量生成后，这里会按章节展示待审查、需修订、待接受入库等状态。";
-    return;
-  }
-
-  elements.batchQueuePanel.className = "batch-queue";
-  elements.batchQueuePanel.innerHTML = results
-    .map((result) => {
-      const number = result.chapter_number;
-      const plan = plansByNumber.get(number);
-      const status = getBatchChapterStatusLabel(result);
-      const canView = Boolean(result.session_id || result.draft_status || result.status === "generated");
-      const conflict = result.conflict_type ? ` · ${escapeHtml(localizeConflictType(result.conflict_type))}` : "";
-      return `
-        <article class="batch-queue-row ${result.conflict_type ? "has-conflict" : ""}" data-batch-chapter="${number}">
-          <div>
-            <strong>第 ${number} 章：${escapeHtml(status)}${conflict}</strong>
-            <p>${escapeHtml(plan?.title || "未命名章节")} · ${escapeHtml(plan?.summary || localizeBatchDetail(result) || "暂无摘要")}</p>
-          </div>
-          <div class="batch-row-actions">
-            <button class="ghost-btn compact" type="button" data-batch-action="view" data-chapter-number="${number}" ${canView ? "" : "disabled"}>查看草稿</button>
-            <button class="ghost-btn compact" type="button" data-batch-action="review" data-chapter-number="${number}" ${result.can_review ? "" : "disabled"}>AI 审查</button>
-            <button class="ghost-btn compact" type="button" data-batch-action="revise" data-chapter-number="${number}" ${result.can_revise ? "" : "disabled"}>同意修订</button>
-            <button class="ghost-btn compact" type="button" data-batch-action="accept" data-chapter-number="${number}" ${result.can_accept ? "" : "disabled"}>接受入库</button>
-            <button class="ghost-btn compact" type="button" data-batch-action="compare" data-chapter-number="${number}" ${result.conflict_type ? "" : "disabled"}>对比替换</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function getBatchChapterStatusLabel(result) {
-  if (result.conflict_type) {
-    return "已有章节冲突";
-  }
-  if (result.can_accept) {
-    return "待接受入库";
-  }
-  if (result.can_revise) {
-    return "建议修订";
-  }
-  if (result.can_review) {
-    return "待审查";
-  }
-  if (result.review_status) {
-    return "AI 已审查，待人工确认";
-  }
-  if (result.draft_status) {
-    return "草稿，不会进入长期记忆";
-  }
-  return {
-    pending: "排队中",
-    planned: "已规划",
-    generated: "草稿，不会进入长期记忆",
-    reviewed: "AI 已审查，待人工确认",
-    skipped: "已跳过",
-    conflict: "已有章节冲突",
-    failed: "失败",
-  }[result.status] || getStatusLabel(result.status);
-}
-
-function localizeConflictType(conflictType) {
-  return {
-    existing_draft: "已有草稿",
-    existing_completed: "已入库章节",
-    existing_chapter: "已有章节",
-    overwrite: "覆盖风险",
-  }[conflictType] || conflictType;
-}
-
-function localizeBatchDetail(result) {
-  if (result.review_status === "needs_revision") {
-    return "AI 建议修订";
-  }
-  if (result.review_status) {
-    return "AI 已审查，等待人工处理";
-  }
-  if (result.draft_status) {
-    return "草稿已生成，尚未进入长期记忆";
-  }
-  if (result.conflict_type) {
-    return `检测到${localizeConflictType(result.conflict_type)}，请走对比替换流程`;
-  }
-  return "";
-}
-
-function renderReaderCatalog() {
-  const chapters = getProjectChapters();
-  if (!chapters.length) {
-    elements.readerCatalog.className = "reader-catalog-empty";
-    elements.readerCatalog.textContent = "暂无章节目录。";
-    return;
-  }
-
-  elements.readerCatalog.className = "reader-catalog-list";
-  elements.readerCatalog.innerHTML = chapters
-    .map((chapter) => {
-      const active = chapter.chapter_number === appState.previewChapterNumber;
-      const readable = Boolean(chapter.draft?.content);
-      const status = {
-        planned: "未成稿",
-        drafted: "草稿，不会进入长期记忆",
-        reviewed: "AI 已审查，待人工确认",
-        needs_revision: "建议修订",
-        approved: "待接受入库",
-        completed: "已完成入库",
-        failed: "失败",
-      }[chapter.status] || chapter.status;
-      return `
-        <button class="reader-chapter ${active ? "active" : ""} ${readable ? "" : "locked"}" type="button" data-preview-chapter="${chapter.chapter_number}">
-          <span>第 ${chapter.chapter_number} 章</span>
-          <strong>${escapeHtml(chapter.title || "未命名章节")}</strong>
-          <small>${escapeHtml(status)}</small>
-        </button>
-      `;
-    })
-    .join("");
-}
-
-function renderPreviewChapter(chapter) {
-  if (!chapter) {
-    elements.previewTitle.textContent = "暂无章节";
-    elements.previewStatus.textContent = "未开始";
-    elements.previewContent.textContent = "这里会像正式小说阅读页一样展示已经生成的正文。完成一次章节生成后，内容会自动同步到这里。";
-    return;
-  }
-
-  const normalized = normalizePreviewChapter(chapter);
-  appState.previewChapterNumber = normalized.chapter_number;
-  elements.previewTitle.textContent = normalized.title || `第 ${normalized.chapter_number} 章`;
-  elements.previewStatus.textContent = normalized.hasBody
-    ? `第 ${normalized.chapter_number} 章 · ${getStatusLabel(normalized.status)} · ${normalized.wordCount} 字`
-    : `第 ${normalized.chapter_number} 章 · ${getStatusLabel(normalized.status)}`;
-  if (normalized.hasBody) {
-    elements.previewContent.textContent = normalized.content;
-  } else {
-    elements.previewContent.innerHTML = `
-      <div class="reader-status-panel">
-        <strong>本章尚未形成可阅读正文</strong>
-        <p>${escapeHtml(normalized.message || `当前状态：${getStatusLabel(normalized.status)}。你可以进入章节工作区继续处理本章。`)}</p>
-        <button class="primary-btn secondary compact" type="button" data-preview-action="process" data-chapter-number="${normalized.chapter_number}">去处理本章</button>
-      </div>
-    `;
-  }
-  renderReaderCatalog();
-}
-
-function normalizePreviewChapter(payload) {
-  const rawChapter = payload.chapter || payload;
-  const content = payload.content || rawChapter.draft?.content || rawChapter.content || "";
-  const chapterNumber = payload.chapter_number || rawChapter.chapter_number || 1;
-  return {
-    chapter_number: chapterNumber,
-    title: payload.title || rawChapter.title || `第 ${chapterNumber} 章`,
-    status: payload.status || rawChapter.status || "missing",
-    content,
-    hasBody: Boolean(payload.has_body ?? content),
-    wordCount: payload.word_count || rawChapter.word_count || countChineseWords(content),
-    message: payload.message,
-  };
-}
-
-function renderNextSeedPanel(snapshot) {
-  if (!snapshot) {
-    elements.nextSeedPanel.classList.add("is-hidden");
-    elements.nextSeedPanel.innerHTML = "";
-    return;
-  }
-
-  const source = snapshot.source_chapter_number ? `第 ${snapshot.source_chapter_number} 章` : "作品设定";
-  elements.nextSeedPanel.classList.remove("is-hidden");
-  elements.nextSeedPanel.innerHTML = `
-    <div class="seed-head">
-      <div>
-        <p class="eyebrow">Next Chapter Seed</p>
-        <h3>根据${source}和作品设定预填</h3>
-      </div>
-      <span>准备第 ${snapshot.chapter_number} 章</span>
-    </div>
-    <div class="seed-grid">
-      <div><strong>上一章钩子</strong><p>${escapeHtml(snapshot.last_chapter_hook || "暂无记录")}</p></div>
-      <div><strong>未解决伏笔</strong><p>${escapeHtml((snapshot.unresolved_foreshadowing || []).join("；") || "暂无记录")}</p></div>
-      <div><strong>推荐方向</strong><p>${escapeHtml((snapshot.recommended_next_directions || []).join("；") || "暂无推荐")}</p></div>
-      <div><strong>命中章节规划</strong><p>${escapeHtml(snapshot.chapter_plan?.summary || "暂无命中规划")}</p></div>
-    </div>
-  `;
-}
-
-function syncProject(project) {
-  appState.project = project || appState.project;
-  if (!appState.project) {
-    return;
-  }
-  appState.projectId = appState.project.project_id || "default";
-  if (appState.project.title && appState.project.title !== "未命名作品" && !elements.projectTitle.value) {
-    elements.projectTitle.value = appState.project.title;
-  }
-  if (appState.project.global_worldview && !elements.worldview.value) {
-    elements.worldview.value = appState.project.global_worldview;
-  }
-  appState.nextSnapshot = appState.project.next_chapter_input_snapshot || null;
-  elements.batchStart.value = String(getNextGeneratedChapterNumber(appState.project));
-  renderChapterCatalog();
-  renderReaderCatalog();
-  renderFullPlanForm();
-  renderBatchStatus(appState.latestBatchTask);
-  renderNextSeedPanel(appState.nextSnapshot);
-  updateOverview();
-}
-
-function updateOverview() {
-  const draftContent = appState.draft?.content || "";
-  const chapterNumber = Number(elements.chapter.value || appState.draft?.chapter_number || 1);
-  const wordCount = appState.project?.total_word_count || countChineseWords(draftContent);
-
-  elements.wordCountStat.textContent = String(wordCount);
-  elements.projectStat.textContent = appState.project?.title || "默认作品";
-  elements.chapterStat.textContent = `第 ${chapterNumber} 章`;
-  elements.sessionStat.textContent = appState.sessionId
-    ? `Session: ${appState.sessionId.slice(0, 8)}...`
-    : "尚未创建会话";
-  elements.progressStat.textContent = stageText[appState.stage] || "未开始";
-  elements.beatsStat.textContent = `${appState.plotBeats.length} 个剧情节点`;
-  elements.reviewStat.textContent = appState.draft?.status ? getStatusLabel(appState.draft.status) : "待生成";
-
-  if (appState.draft && appState.draft.chapter_number === appState.previewChapterNumber) {
-    renderPreviewChapter({
-      chapter_number: appState.draft.chapter_number || chapterNumber,
-      title: appState.draft.title,
-      status: appState.draft.status,
-      word_count: countChineseWords(draftContent),
-      draft: appState.draft,
-    });
-  } else if (!appState.project?.chapters?.length) {
-    renderPreviewChapter(null);
-  }
-}
-
-function renderChapterCatalog() {
-  const chapters = appState.project?.chapters || [];
-  if (!chapters.length) {
-    elements.chapterCatalog.className = "chapter-catalog-empty";
-    elements.chapterCatalog.textContent =
-      "接受章节后，这里会形成作品目录。你可以切换已生成章节，也可以从上一章摘要继续规划下一章。";
-    return;
-  }
-
-  elements.chapterCatalog.className = "chapter-catalog";
-  elements.chapterCatalog.innerHTML = chapters
-    .map((chapter) => {
-      const isActive = Number(elements.chapter.value || 1) === chapter.chapter_number;
-      const status = getStatusLabel(chapter.status);
-      const canProcess = Boolean(chapter.session_id || chapter.status !== "completed");
-      return `
-        <article class="chapter-record ${isActive ? "active" : ""}" data-chapter-number="${chapter.chapter_number}">
-          <button class="chapter-record-main" type="button" data-chapter-action="preview" data-chapter-number="${chapter.chapter_number}">
-            <span>第 ${chapter.chapter_number} 章</span>
-            <strong>${escapeHtml(chapter.title || "未命名章节")}</strong>
-            <small>${escapeHtml(status)} · ${chapter.word_count || 0} 字</small>
-          </button>
-          <div class="chapter-record-actions">
-            <button class="ghost-btn compact" type="button" data-chapter-action="preview" data-chapter-number="${chapter.chapter_number}">查看正文</button>
-            <button class="ghost-btn compact" type="button" data-chapter-action="process" data-chapter-number="${chapter.chapter_number}" ${canProcess ? "" : "disabled"}>继续处理</button>
-            <button class="ghost-btn compact" type="button" data-chapter-action="review" data-chapter-number="${chapter.chapter_number}" ${chapter.session_id ? "" : "disabled"}>审查/接受</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function chapterStatusToStage(status) {
-  return {
-    planned: "awaiting_human_review",
-    drafted: "awaiting_review",
-    reviewed: "awaiting_chapter_acceptance",
-    needs_revision: "awaiting_revision_decision",
-    approved: "awaiting_chapter_acceptance",
-    completed: "completed",
-    failed: "failed",
-  }[status] || "planning";
-}
-
-function renderMemoryPanels() {
-  renderCharacterCards(appState.projectCodex?.character_codex || []);
-  renderLoreCodex(appState.projectCodex?.lore_codex || {});
-}
-
-function localizeLoreKey(key) {
-  const rawKey = String(key || "").trim();
-  if (!rawKey) {
-    return "未命名设定";
-  }
-
-  const chapterSummary = rawKey.match(/^chapter[_-]?(\d+)[_-]?summary$/i);
-  if (chapterSummary) {
-    return `第 ${chapterSummary[1]} 章摘要`;
-  }
-
-  const dictionaries = {
-    global: "全局",
-    lore: "设定",
-    worldview: "世界观",
-    chapter: "章节",
-    summary: "摘要",
-    item: "道具",
-    prop: "道具",
-    object: "物品",
-    location: "地点",
-    place: "地点",
-    scene: "场景",
-    city: "城市",
-    school: "学校",
-    classroom: "教室",
-    home: "家",
-    house: "宅邸",
-    old: "旧",
-    family: "家族",
-    study: "书房",
-    room: "房间",
-    forbidden: "禁区",
-    zone: "区域",
-    coordinate: "坐标",
-    coordinates: "坐标",
-    clue: "线索",
-    foreshadow: "伏笔",
-    secret: "秘密",
-    relation: "关系",
-    relationship: "关系",
-    character: "人物",
-    bronze: "青铜",
-    key: "钥匙",
-    letter: "信件",
-    moonlight: "月光",
-    father: "父亲",
-    spirit: "灵气",
-    revival: "复苏",
-    night: "夜晚",
-    forest: "森林",
-    gate: "门",
+/* 叙脉阶段 1/2/3 应用壳：所有工作区真相来自服务端。 */
+(function () {
+  "use strict";
+
+  const state = {
+    screen: "landing",
+    account: null,
+    projects: [],
+    notifications: [],
+    unreadNotifications: 0,
+    query: "",
+    selectedMode: null,
+    readyProject: null,
+    sessionExpired: false,
+    loadingLibrary: false,
+    workspace: null,
+    editorProjectId: null,
+    editorMode: "independent",
+    activeChapterId: null,
+    editorBuffer: "",
+    editorTitleBuffer: "",
+    editorRevision: 0,
+    editorDirty: false,
+    editorSaving: false,
+    editorConflict: null,
+    editorChangeToken: 0,
+    editorReadOnly: false,
+    saveTimer: null,
+    savePromise: null,
+    activeArchive: null,
+    trialCharacterId: null,
+    archiveProjectId: null,
+    archiveMode: "independent",
+    archiveWorkspace: null,
+    aiProjectId: null,
+    aiWorkspace: null,
+    aiRunId: null,
+    aiLoadToken: 0,
+    directorPollTimer: null,
+    aiSaving: false,
+    archiveAnchorObserver: null,
+    archiveAnchorIntent: null,
+    archiveAnchorUnlockTimer: null,
+    archiveScrollSpyCleanup: null,
+    dialogFocus: new WeakMap(),
   };
 
-  const normalized = rawKey
-    .replace(/([a-z])([A-Z])/g, "$1_$2")
-    .replace(/[^a-zA-Z0-9\u4e00-\u9fa5]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toLowerCase();
-  const parts = normalized.split("_").filter(Boolean);
-  if (!parts.length) {
-    return rawKey;
-  }
-
-  const translated = parts.map((part) => dictionaries[part] || part).join("");
-  if (/^[a-z0-9_ -]+$/i.test(rawKey)) {
-    return translated;
-  }
-  return rawKey;
-}
-
-function renderCharacterCards(characters) {
-  const entries = Array.isArray(characters) ? characters : Object.values(characters || {});
-  if (!entries.length) {
-    elements.characterCards.className = "character-empty";
-    elements.characterCards.textContent = "项目级人物设定库暂无记录。接受章节入库后会在这里聚合。";
-    return;
-  }
-
-  elements.characterCards.className = "character-grid";
-  elements.characterCards.innerHTML = entries
-    .map((character) => {
-      const name = character.name || "未命名角色";
-      const avatar = escapeHtml(name.slice(0, 1));
-      return `
-        <article class="character-card">
-          <div class="character-avatar">${avatar}</div>
-          <h3>${escapeHtml(name)}</h3>
-          <span class="character-role">${escapeHtml(character.role || "unknown")}</span>
-          <p class="character-profile">${escapeHtml(character.profile || "暂无角色简介。")}</p>
-          <div class="character-state">
-            <span>心理状态：${escapeHtml(character.current_psychological_state || "未记录")}</span>
-            <span>物理状态：${escapeHtml(character.current_physical_state || "未记录")}</span>
-            <span>当前位置：${escapeHtml(character.current_location || "未记录")}</span>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function renderLoreCodex(loreCodex) {
-  const entries = Object.entries(loreCodex || {});
-  if (!entries.length) {
-    elements.loreCodex.className = "lore-codex-empty";
-    elements.loreCodex.textContent = "项目级设定库暂无记录。全文规划、章节摘要和入库设定会汇总到这里。";
-    return;
-  }
-
-  elements.loreCodex.className = "lore-codex";
-  elements.loreCodex.innerHTML = `
-    <div class="lore-codex-grid">
-      ${entries
-        .filter(([key]) => !/^chapter[_-]?\d+/i.test(key))
-        .map(
-          ([key, value]) => `
-            <article class="lore-codex-card">
-              <span>设定</span>
-              <h3>${escapeHtml(localizeLoreKey(key))}</h3>
-              <p>${escapeHtml(value)}</p>
-            </article>
-          `,
-        )
-        .join("")}
-    </div>
-    <div class="lore-timeline">
-      ${entries
-        .filter(([key]) => /^chapter[_-]?\d+/i.test(key))
-        .map(
-          ([key, value], index) => `
-            <article class="lore-timeline-item">
-              <strong>${index + 1}</strong>
-              <div>
-                <h3>${escapeHtml(localizeLoreKey(key))}</h3>
-                <p>${escapeHtml(value)}</p>
-              </div>
-            </article>
-          `,
-        )
-        .join("") || '<div class="lore-codex-empty">暂无章节时间线。</div>'}
-    </div>
-  `;
-}
-
-function updateStage(stage) {
-  const normalized = stage || "planning";
-  const activeIndex = stageStepIndex[normalized] ?? stageOrder.indexOf(normalized);
-
-  appState.stage = normalized;
-  elements.stageLabel.textContent = stageText[normalized] || normalized || "未开始";
-  document.querySelector(".status-dot").classList.toggle("done", normalized === "completed");
-
-  $$(".step").forEach((step, index) => {
-    step.classList.remove("active", "done");
-    if (activeIndex === -1) {
-      return;
-    }
-    if (index < activeIndex) {
-      step.classList.add("done");
-    }
-    if (index === activeIndex) {
-      step.classList.add("active");
-    }
-  });
-
-  updateOverview();
-}
-
-function clearRevisionCountdown() {
-  window.clearInterval(appState.revisionTimer);
-  appState.revisionTimer = null;
-  appState.revisionCountdown = 10;
-  elements.revisionCountdown.classList.add("is-hidden");
-}
-
-function setDecisionPanel(mode) {
-  clearRevisionCountdown();
-  elements.chapterDecisionPanel.classList.toggle("is-hidden", !mode);
-  elements.acceptChapterBtn.classList.add("is-hidden");
-  elements.reviseNowBtn.classList.add("is-hidden");
-  elements.waitRevisionBtn.classList.add("is-hidden");
-  elements.confirmReviseBtn.classList.add("is-hidden");
-
-  if (!mode) {
-    return;
-  }
-
-  if (mode === "accept") {
-    elements.decisionTitle.textContent = "AI 已审查，待人工确认";
-    elements.decisionMessage.textContent = "草稿暂不会进入长期记忆。人工确认后，才能接受入库并交给 Librarian 抽取稳定设定。";
-    elements.acceptChapterBtn.classList.remove("is-hidden");
-    return;
-  }
-
-  elements.decisionTitle.textContent = "建议修订";
-  elements.decisionMessage.textContent = "AI 建议先修订草稿。你可以立即同意修订、暂停等待，或人工判断后接受入库。";
-  elements.acceptChapterBtn.classList.remove("is-hidden");
-  elements.reviseNowBtn.classList.remove("is-hidden");
-  elements.waitRevisionBtn.classList.remove("is-hidden");
-  startRevisionCountdown();
-}
-
-function holdRevisionDecision() {
-  clearRevisionCountdown();
-  elements.decisionTitle.textContent = "已暂停自动修改";
-  elements.decisionMessage.textContent = "当前章节停在 AI 审查结果处。你可以接受入库，或重新确认打回 Writer 修订。";
-  elements.acceptChapterBtn.classList.remove("is-hidden");
-  elements.reviseNowBtn.classList.add("is-hidden");
-  elements.waitRevisionBtn.classList.add("is-hidden");
-  elements.confirmReviseBtn.classList.remove("is-hidden");
-}
-
-function startRevisionCountdown() {
-  clearRevisionCountdown();
-  appState.revisionCountdown = 10;
-  elements.revisionCountdown.classList.remove("is-hidden");
-  elements.revisionCountdown.textContent = `${appState.revisionCountdown} 秒后自动同意修改`;
-
-  appState.revisionTimer = window.setInterval(() => {
-    appState.revisionCountdown -= 1;
-    elements.revisionCountdown.textContent = `${appState.revisionCountdown} 秒后自动同意修改`;
-    if (appState.revisionCountdown <= 0) {
-      clearRevisionCountdown();
-      reviseDraft("倒计时结束，自动同意 Writer 按 Reviewer 意见修订。");
-    }
-  }, 1000);
-}
-
-function getRoleLabel(role) {
-  return characterRoleOptions.find((option) => option.value === role)?.label || "暂未确定";
-}
-
-function createEmptyCharacter() {
-  return {
-    name: "",
-    role: "unknown",
-    profile: "",
-    motivation: "",
-    current_psychological_state: "",
-    current_physical_state: "",
-    current_location: "",
+  const $ = (selector) => document.querySelector(selector);
+  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const elements = {
+    landingScreen: $("#landingScreen"),
+    loginScreen: $("#loginScreen"),
+    libraryScreen: $("#libraryScreen"),
+    independentScreen: $("#independentScreen"),
+    archiveScreen: $("#archiveScreen"),
+    aiStudioScreen: $("#aiStudioScreen"),
+    aiDirectorScreen: $("#aiDirectorScreen"),
+    emailForm: $("#emailLoginForm"),
+    emailInput: $("#emailInput"),
+    emailField: $("#emailField"),
+    emailError: $("#emailError"),
+    emailSubmitButton: $("#emailSubmitButton"),
+    loginStatus: $("#loginStatus"),
+    sessionExpiredNotice: $("#sessionExpiredNotice"),
+    librarySearch: $("#librarySearch"),
+    libraryContent: $("#libraryContent"),
+    readyContent: $("#readyContent"),
+    libraryError: $("#libraryError"),
+    accountEmail: $("#accountEmail"),
+    creditBalance: $("#creditBalance"),
+    dialog: $("#newProjectDialog"),
+    notificationsDialog: $("#notificationsDialog"),
+    notificationsList: $("#notificationsList"),
+    newProjectForm: $("#newProjectForm"),
+    projectDetails: $("#projectDetails"),
+    selectedModeLabel: $("#selectedModeLabel"),
+    projectTitleInput: $("#projectTitleInput"),
+    projectBriefInput: $("#projectBriefInput"),
+    projectError: $("#projectError"),
+    createProjectButton: $("#createProjectButton"),
+    modeOptions: $$(".mode-option"),
+    toastRegion: $("#toastRegion"),
+    editorProjectTitle: $("#editorProjectTitle"),
+    editorModeLabel: $("#editorModeLabel"),
+    writingModeNote: $("#writingModeNote"),
+    editorChapterHeading: $("#editorChapterHeading"),
+    editorSaveState: $("#editorSaveState"),
+    editorWordCount: $("#editorWordCount"),
+    completeChapterButton: $("#completeChapterButton"),
+    editorNotice: $("#editorNotice"),
+    startWorkspaceContent: $("#startWorkspaceContent"),
+    editorWorkspaceContent: $("#editorWorkspaceContent"),
+    chapterList: $("#chapterList"),
+    chapterTitleInput: $("#chapterTitleInput"),
+    chapterEditor: $("#chapterEditor"),
+    editorRevisionLabel: $("#editorRevisionLabel"),
+    archiveDrawer: $("#archiveDrawer"),
+    archiveDrawerTitle: $("#archiveDrawerTitle"),
+    archiveSummary: $("#archiveSummary"),
+    archiveSnapshotSelect: $("#archiveSnapshotSelect"),
+    analysisLabel: $("#analysisLabel"),
+    importFileInput: null,
+    pendingChangesDialog: $("#pendingChangesDialog"),
+    pendingChangesContent: $("#pendingChangesContent"),
+    ignoreChangesButton: $("#ignoreChangesButton"),
+    rebuildChangesButton: $("#rebuildChangesButton"),
+    versionHistoryDialog: $("#versionHistoryDialog"),
+    versionHistoryContent: $("#versionHistoryContent"),
+    versionPreviewContent: $("#versionPreviewContent"),
+    trialDialog: $("#trialDialog"),
+    trialStyleSelect: $("#trialStyleSelect"),
+    trialEstimate: $("#trialEstimate"),
+    confirmTrialButton: $("#confirmTrialButton"),
+    archivePageProjectTitle: $("#archivePageProjectTitle"),
+    archiveModeLabel: $("#archiveModeLabel"),
+    archivePageStatus: $("#archivePageStatus"),
+    archivePageSnapshotSelect: $("#archivePageSnapshotSelect"),
+    archivePageContent: $("#archivePageContent"),
+    archivePageNotice: $("#archivePageNotice"),
+    archiveAiLink: $("#archiveAiLink"),
+    aiStudioProjectTitle: $("#aiStudioProjectTitle"),
+    aiStudioModelLabel: $("#aiStudioModelLabel"),
+    aiStudioBlueprintState: $("#aiStudioBlueprintState"),
+    aiStudioNotice: $("#aiStudioNotice"),
+    aiConversation: $("#aiConversation"),
+    aiConversationCount: $("#aiConversationCount"),
+    aiMessageForm: $("#aiMessageForm"),
+    aiMessageInput: $("#aiMessageInput"),
+    aiMessageButton: $("#aiMessageButton"),
+    blueprintForm: $("#blueprintForm"),
+    blueprintRevision: $("#blueprintRevision"),
+    blueprintHint: $("#blueprintHint"),
+    blueprintMissing: $("#blueprintMissing"),
+    saveBlueprintButton: $("#saveBlueprintButton"),
+    confirmBlueprintButton: $("#confirmBlueprintButton"),
+    professionalRoleStatus: $("#professionalRoleStatus"),
+    directorProjectTitle: $("#aiDirectorProjectTitle"),
+    aiDirectorNotice: $("#aiDirectorNotice"),
+    directorStageTrack: $("#directorStageTrack"),
+    directorPageContent: $("#directorPageContent"),
+    directorCreditsUsed: $("#directorCreditsUsed"),
+    directorCreditsEstimate: $("#directorCreditsEstimate"),
+    aiDirectorModelLabel: $("#aiDirectorModelLabel"),
+    directorCreditsUsedNote: $("#directorCreditsUsedNote"),
+    directorCreditsEstimateNote: $("#directorCreditsEstimateNote"),
+    directorPauseButton: $("#directorPauseButton"),
   };
-}
 
-function syncCharacterForms() {
-  $$(".character-form-card").forEach((card) => {
-    const index = Number(card.dataset.index || 0);
-    const read = (field) => card.querySelector(`[data-character-field="${field}"]`)?.value.trim() || "";
-    appState.characters[index] = {
-      ...appState.characters[index],
-      name: read("name"),
-      role: read("role") || "unknown",
-      profile: read("profile"),
-      motivation: read("motivation"),
-      current_psychological_state: read("current_psychological_state"),
-      current_physical_state: read("current_physical_state"),
-      current_location: read("current_location"),
-    };
-  });
-}
-
-function renderCharacterForms() {
-  if (!appState.characters.length) {
-    elements.charactersBuilder.innerHTML = `
-      <div class="form-empty">
-        暂未添加人物。可以直接生成剧情，也可以先添加主角、配角或反派来约束人设。
-      </div>
-    `;
-    return;
-  }
-
-  elements.charactersBuilder.innerHTML = appState.characters
-    .map((character, index) => {
-      const roleOptions = characterRoleOptions
-        .map(
-          (option) => `
-            <option value="${option.value}" ${character.role === option.value ? "selected" : ""}>
-              ${option.label}
-            </option>
-          `,
-        )
-        .join("");
-
-      return `
-        <article class="character-form-card" data-index="${index}">
-          <div class="character-form-head">
-            <span class="character-form-index">${index + 1}</span>
-            <div>
-              <strong>${escapeHtml(character.name || `人物 ${index + 1}`)}</strong>
-              <small>${escapeHtml(getRoleLabel(character.role))}</small>
-            </div>
-            <button class="ghost-btn compact remove-character-btn" type="button" data-index="${index}">删除</button>
-          </div>
-          <div class="two-col">
-            <label>
-              角色姓名
-              <input data-character-field="name" type="text" value="${escapeHtml(character.name)}" placeholder="例如：林澈" />
-            </label>
-            <label>
-              叙事定位
-              <select data-character-field="role">${roleOptions}</select>
-            </label>
-          </div>
-          <label>
-            角色简介
-            <textarea data-character-field="profile" rows="2" placeholder="例如：隐忍、敏锐，习惯先观察再行动。">${escapeHtml(character.profile)}</textarea>
-          </label>
-          <label>
-            当前动机
-            <textarea data-character-field="motivation" rows="2" placeholder="例如：查清父亲失踪真相。">${escapeHtml(character.motivation)}</textarea>
-          </label>
-          <div class="two-col">
-            <label>
-              心理状态
-              <input data-character-field="current_psychological_state" type="text" value="${escapeHtml(character.current_psychological_state)}" placeholder="例如：怀疑、警惕" />
-            </label>
-            <label>
-              身体状态
-              <input data-character-field="current_physical_state" type="text" value="${escapeHtml(character.current_physical_state)}" placeholder="例如：疲惫、轻伤" />
-            </label>
-          </div>
-          <label>
-            当前位置
-            <input data-character-field="current_location" type="text" value="${escapeHtml(character.current_location)}" placeholder="例如：旧宅书房" />
-          </label>
-        </article>
-      `;
-    })
-    .join("");
-
-  bindAutoResize(elements.charactersBuilder);
-}
-
-function collectCharacters() {
-  syncCharacterForms();
-  return appState.characters
-    .map((character) => ({
-      name: character.name,
-      role: character.role || "unknown",
-      profile: character.profile,
-      motivation: character.motivation || null,
-      current_psychological_state: character.current_psychological_state || "未记录",
-      current_physical_state: character.current_physical_state || "未记录",
-      current_location: character.current_location || null,
-    }))
-    .filter((character) => {
-      const hasAnyInput = [
-        character.name,
-        character.profile,
-        character.motivation,
-        character.current_location,
-      ].some(Boolean);
-      if (!hasAnyInput) {
-        return false;
-      }
-      if (!character.name || !character.profile) {
-        throw new Error("人物卡片至少需要填写“角色姓名”和“角色简介”。");
-      }
-      return true;
-    });
-}
-
-function addCharacter(character = createEmptyCharacter()) {
-  syncCharacterForms();
-  appState.characters.push(character);
-  renderCharacterForms();
-}
-
-function removeCharacter(index) {
-  syncCharacterForms();
-  appState.characters.splice(index, 1);
-  renderCharacterForms();
-}
-
-function renderMetaMessage(message) {
-  elements.metaOutput.className = "output-box meta-panel";
-  elements.metaOutput.innerHTML = `
-    <div class="form-empty">${escapeHtml(message || "设定管理员与审稿人的结果会显示在这里。")}</div>
-  `;
-}
-
-function renderListBlock(title, items, emptyText) {
-  const list = (items || []).filter(Boolean);
-  return `
-    <section class="meta-card">
-      <h3>${escapeHtml(title)}</h3>
-      ${
-        list.length
-          ? `<ul>${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
-          : `<p>${escapeHtml(emptyText)}</p>`
-      }
-    </section>
-  `;
-}
-
-function renderKeyValueBlock(title, entries, emptyText, options = {}) {
-  const formatKey = options.formatKey || ((key) => key);
-  return `
-    <section class="meta-card">
-      <h3>${escapeHtml(title)}</h3>
-      ${
-        entries.length
-          ? `<div class="meta-kv-list">${entries
-              .map(
-                ([key, value]) => `
-                  <div class="meta-kv">
-                    <strong>${escapeHtml(formatKey(key))}</strong>
-                    <span>${escapeHtml(value)}</span>
-                  </div>
-                `,
-              )
-              .join("")}</div>`
-          : `<p>${escapeHtml(emptyText)}</p>`
-      }
-    </section>
-  `;
-}
-
-function renderMetaPanel(data) {
-  const draft = data.draft || {};
-  const loreEntries = Object.entries(data.extracted_lore_updates || {});
-  const characterEntries = Object.values(data.extracted_character_updates || {}).map((character) => [
-    character.name || "未命名角色",
-    character.profile || "暂无角色简介。",
-  ]);
-
-  elements.metaOutput.className = "output-box meta-panel";
-  elements.metaOutput.innerHTML = `
-    <section class="meta-summary">
-      <div>
-        <span>草稿状态</span>
-        <strong>${escapeHtml(stageText[data.current_stage] || data.current_stage || "未知")}</strong>
-      </div>
-      <div>
-        <span>章节评分</span>
-        <strong>${draft.quality_score ?? "待评分"}</strong>
-      </div>
-      <div>
-        <span>审查结论</span>
-        <strong>${escapeHtml(draft.status === "needs_revision" ? "建议修订" : "AI 已审查，待人工确认")}</strong>
-      </div>
-    </section>
-    ${renderListBlock("Reviewer 审查意见", data.review_feedback, "未发现明显问题。")}
-    ${renderListBlock("修改建议", draft.revision_notes, "暂无修改建议。")}
-    ${renderKeyValueBlock("Librarian 设定增量", loreEntries, "暂无新的世界观、道具、地点或伏笔。", {
-      formatKey: localizeLoreKey,
-    })}
-    ${renderKeyValueBlock("人物状态更新", characterEntries, "暂无人物卡片更新。")}
-  `;
-}
-
-async function requestJson(url, options = {}) {
-  const response = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
+  const modeText = {
+    independent: {
+      label: "独立创作",
+      next: "下一阶段：进入独立创作编辑器",
+      description: "你写正文，叙脉负责保存作品记忆。",
     },
-    ...options,
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = data.detail || `请求失败：${response.status}`;
-    throw new Error(Array.isArray(detail) ? JSON.stringify(detail, null, 2) : detail);
-  }
-  return data;
-}
-
-async function loadProject(projectId = appState.projectId) {
-  const endpoint = projectId && projectId !== "default" ? `/novel/projects/${projectId}` : "/novel/projects/current";
-  const data = await requestJson(endpoint);
-  syncProject(data.project);
-  return data.project;
-}
-
-async function loadProjectCodex(projectId = appState.projectId) {
-  if (!projectId) {
-    return null;
-  }
-  const data = await requestJson(`/novel/projects/${projectId}/codex`);
-  appState.projectCodex = data;
-  renderMemoryPanels();
-  return data;
-}
-
-async function loadProjects() {
-  const data = await requestJson("/novel/projects");
-  appState.projects = data.projects || [];
-  renderHomeProjectGrid();
-  return appState.projects;
-}
-
-async function selectProject(projectId) {
-  if (!projectId) {
-    return null;
-  }
-  appState.projectId = projectId;
-  const project = await loadProject(projectId);
-  await loadProjectCodex(project.project_id);
-  appState.previewChapterNumber = project.latest_edited_chapter_number || project.current_chapter_number || 1;
-  const previewChapter = getProjectChapters().find((chapter) => chapter.chapter_number === appState.previewChapterNumber)
-    || getProjectChapters()[0];
-  renderPreviewChapter(previewChapter || null);
-  return project;
-}
-
-async function createNewBook() {
-  const title = elements.newBookTitle.value.trim();
-  const genre = elements.newBookGenre.value.trim();
-  const worldview = elements.newBookWorldview.value.trim();
-  const hero = elements.newBookHero.value.trim();
-  if (![title, genre, worldview, hero].some(Boolean)) {
-    showToast("作品名、题材、世界观、主角设定任填一项即可启动。");
-    return;
-  }
-
-  try {
-    setLoading(elements.createBookBtn, true, "生成草案中...");
-    const draftTitle = title || `${genre || "未命名题材"}新作`;
-    const draftPremise = [
-      genre ? `题材方向：${genre}` : "题材方向：由 AI 根据已有信息补完。",
-      hero ? `主角驱动：${hero}` : "主角驱动：待补完主角欲望、缺陷与初始困境。",
-      "叙事目标：建立清晰卖点、可连续推进的主线冲突，以及适合长篇连载的悬念结构。",
-    ].join("\n");
-    const draftWorldview = worldview || [
-      "世界观草案：围绕主角目标搭建一套可持续制造冲突的规则。",
-      "需要补完：时代背景、力量/职业体系、核心秘密、主要势力、第一卷舞台。",
-    ].join("\n");
-    const draftHero = hero || [
-      "主角草案：拥有明确欲望和一个会制造麻烦的缺陷。",
-      "需要补完：身份、动机、初始资源、关系压力、第一章触发事件。",
-    ].join("\n");
-
-    elements.draftTitle.value = draftTitle;
-    elements.draftPremise.value = draftPremise;
-    elements.draftWorldview.value = draftWorldview;
-    elements.draftHero.value = draftHero;
-    elements.newBookDraftPanel.classList.remove("is-hidden");
-    bindAutoResize(elements.newBookDraftPanel);
-    showToast("作品设定草案已生成，可编辑确认后再生成全文规划。");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setLoading(elements.createBookBtn, false);
-  }
-}
-
-async function confirmSettingDraft() {
-  const title = elements.draftTitle.value.trim();
-  const premise = elements.draftPremise.value.trim();
-  const worldview = elements.draftWorldview.value.trim();
-  const hero = elements.draftHero.value.trim();
-  if (![title, premise, worldview, hero].some(Boolean)) {
-    showToast("请至少保留一项作品设定草案。");
-    return;
-  }
-
-  const finalTitle = title || elements.newBookTitle.value.trim() || "未命名作品";
-  const globalWorldview = [
-    premise ? `作品定位：${premise}` : "",
-    worldview ? `世界观：${worldview}` : "",
-    hero ? `主角设定：${hero}` : "",
-  ].filter(Boolean).join("\n\n");
-
-  try {
-    setLoading(elements.confirmSettingDraftBtn, true, "生成全文规划中...");
-    const created = await requestJson("/novel/projects", {
-      method: "POST",
-      body: JSON.stringify({
-        title: finalTitle,
-        global_worldview: globalWorldview,
-      }),
-    });
-    syncProject(created.project);
-    elements.projectTitle.value = created.project.title;
-    elements.worldview.value = created.project.global_worldview;
-    elements.premise.value = premise;
-    elements.planNotes.value = hero;
-
-    await generateFullPlan({ silent: true });
-    await loadProjects();
-    elements.newBookPanel.classList.add("is-hidden");
-    switchView("fullPlan");
-    showToast("全文规划草案已生成，请确认或继续让 AI 补完。");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setLoading(elements.confirmSettingDraftBtn, false);
-  }
-}
-
-async function generateFullPlan({ silent = false } = {}) {
-  if (!appState.projectId) {
-    showToast("请先选择或创建作品。");
-    return;
-  }
-
-  try {
-    setLoading(elements.generateFullPlanBtn, true, "生成中...");
-    const data = await requestJson(`/novel/projects/${appState.projectId}/full-plan`, {
-      method: "POST",
-      body: JSON.stringify({
-        target_chapter_count: Number(elements.targetChapterCount.value || 10),
-      }),
-    });
-    syncProject(data.project);
-    if (!silent) {
-      showToast("全文规划骨架已生成。");
-    }
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setLoading(elements.generateFullPlanBtn, false);
-  }
-}
-
-async function saveFullPlan() {
-  if (!appState.projectId) {
-    showToast("请先选择或创建作品。");
-    return;
-  }
-
-  try {
-    setLoading(elements.saveFullPlanBtn, true, "保存中...");
-    const data = await requestJson(`/novel/projects/${appState.projectId}/full-plan`, {
-      method: "PUT",
-      body: JSON.stringify({
-        full_plan: normalizeFullPlan(),
-        volumes: parseJsonEditor(elements.volumes.value, [], "分卷规划"),
-        chapter_plans: collectChapterPlansFromTable(),
-      }),
-    });
-    syncProject(data.project);
-    showToast("全文规划已保存。");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setLoading(elements.saveFullPlanBtn, false);
-  }
-}
-
-function enterFirstChapter() {
-  elements.chapter.value = "1";
-  elements.session.value = "";
-  updateSession("");
-  elements.projectTitle.value = appState.project?.title || elements.projectTitle.value;
-  elements.worldview.value = appState.project?.global_worldview || elements.worldview.value;
-  const firstPlan = getChapterPlans().find((plan) => plan.chapter_number === 1);
-  elements.summary.value = "";
-  elements.instruction.value = firstPlan
-    ? [firstPlan.summary, firstPlan.purpose].filter(Boolean).join("\n")
-    : "生成第一章，建立主角处境、作品基调和核心悬念。";
-  appState.nextSnapshot = null;
-  renderNextSeedPanel(null);
-  renderBeats([]);
-  switchView("studioPlan");
-  showToast("已进入第一章 Planner 输入区。");
-}
-
-function getBatchRange() {
-  const start = Number(elements.batchStart.value || appState.project?.current_chapter_number || 1);
-  const count = Number(elements.batchCount.value || 5);
-  return {
-    start,
-    end: start + count - 1,
+    ai_assisted: {
+      label: "AI 辅助写作",
+      next: "下一阶段：进入 AI 创作室",
+      description: "先和主编聊清蓝图，再由导演台持续创作。",
+    },
   };
-}
 
-function confirmBatchOverwriteIfNeeded(start, end) {
-  const existing = getFirstExistingDraftInRange(start, end);
-  if (!existing) {
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function formatDate(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return new Intl.DateTimeFormat("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date).replaceAll("/", "-");
+  }
+
+  function showToast(message, variant = "") {
+    const toast = document.createElement("div");
+    toast.className = `toast ${variant ? `toast-${variant}` : ""}`;
+    toast.textContent = message;
+    elements.toastRegion.appendChild(toast);
+    window.setTimeout(() => toast.remove(), 3600);
+  }
+
+  async function requestJson(url, options = {}) {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+    });
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      payload = null;
+    }
+    if (!response.ok) {
+      const detail = payload?.detail;
+      const apiError = new Error(
+        typeof detail === "object" ? detail.message : detail || "请求没有完成。",
+      );
+      apiError.status = response.status;
+      apiError.code = typeof detail === "object" ? detail.code : "request_failed";
+      apiError.data = typeof detail === "object" ? detail.data : null;
+      throw apiError;
+    }
+    return payload;
+  }
+
+  function routeFromLocation() {
+    if (window.location.pathname === "/login") return "login";
+    if (window.location.pathname === "/library") return "library";
+    if (/^\/archive\/[A-Za-z0-9_-]+$/.test(window.location.pathname)) return "archive";
+    if (/^\/ai\/[A-Za-z0-9_-]+\/director$/.test(window.location.pathname)) return "aiDirector";
+    if (/^\/ai\/[A-Za-z0-9_-]+$/.test(window.location.pathname)) return "aiStudio";
+    if (/^\/independent\/[A-Za-z0-9_-]+$/.test(window.location.pathname)) return "independent";
+    return "landing";
+  }
+
+  function independentProjectIdFromLocation() {
+    const match = window.location.pathname.match(/^\/independent\/([A-Za-z0-9_-]+)$/);
+    return match ? match[1] : null;
+  }
+
+  function aiProjectIdFromLocation() {
+    const match = window.location.pathname.match(/^\/ai\/([A-Za-z0-9_-]+)(?:\/director)?$/);
+    return match ? match[1] : null;
+  }
+
+  function archiveProjectIdFromLocation() {
+    const match = window.location.pathname.match(/^\/archive\/([A-Za-z0-9_-]+)$/);
+    return match ? match[1] : null;
+  }
+
+  function setActiveScreen(screen) {
+    if (state.screen === "archive" && screen !== "archive") state.archiveScrollSpyCleanup?.();
+    state.screen = screen;
+    const screens = {
+      landing: elements.landingScreen,
+      login: elements.loginScreen,
+      library: elements.libraryScreen,
+      independent: elements.independentScreen,
+      archive: elements.archiveScreen,
+      aiStudio: elements.aiStudioScreen,
+      aiDirector: elements.aiDirectorScreen,
+    };
+    Object.entries(screens).forEach(([name, node]) => {
+      if (!node) return;
+      const active = name === screen;
+      node.classList.toggle("is-hidden", !active);
+      node.setAttribute("aria-hidden", active ? "false" : "true");
+    });
+    document.body.classList.toggle("workspace-active", ["library", "independent", "archive", "aiStudio", "aiDirector"].includes(screen));
+    if (screen === "login") {
+      window.setTimeout(() => elements.emailInput?.focus(), 80);
+    }
+  }
+
+  async function navigate(path, { replace = false } = {}) {
+    const leavingEditor = state.screen === "independent"
+      && !path.startsWith(`/independent/${encodeURIComponent(state.editorProjectId || "")}`)
+      && (state.editorDirty || state.editorSaving);
+    if (leavingEditor && !(await flushPendingSave())) return false;
+    const method = replace ? "replaceState" : "pushState";
+    window.history[method]({}, "", path);
+    setActiveScreen(routeFromLocation());
+    if (state.screen === "login") {
+      renderLoginState();
+    } else if (state.screen === "library") {
+      if (state.account) {
+        loadLibrary(new URLSearchParams(window.location.search).get("q") || "");
+      } else {
+        restoreSession("library");
+      }
+    } else if (state.screen === "independent") {
+      const projectId = independentProjectIdFromLocation();
+      if (state.account && projectId) {
+        loadIndependentWorkspace(projectId);
+      } else if (projectId) {
+        restoreSession("independent");
+      }
+    } else if (state.screen === "archive") {
+      const projectId = archiveProjectIdFromLocation();
+      if (state.account && projectId) loadArchiveWorkspace(projectId);
+      else if (projectId) restoreSession("archive");
+    } else if (state.screen === "aiStudio" || state.screen === "aiDirector") {
+      const projectId = aiProjectIdFromLocation();
+      if (state.account && projectId) loadAIWorkspace(projectId, state.screen === "aiDirector");
+      else if (projectId) restoreSession(state.screen);
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return true;
   }
-  return window.confirm(`第 ${existing.chapter_number} 章已有草稿，是否对比生成？`);
-}
 
-async function runBatchPlan() {
-  const { start, end } = getBatchRange();
-  if (!confirmBatchOverwriteIfNeeded(start, end)) {
-    return;
+  function renderLoginState() {
+    elements.sessionExpiredNotice.classList.toggle("is-hidden", !state.sessionExpired);
+    elements.emailError.textContent = "";
+    elements.emailField.classList.remove("has-error");
+    elements.loginStatus.textContent = "";
+    elements.loginStatus.classList.remove("is-error");
   }
-  try {
-    setLoading(elements.batchPlanBtn, true, "规划中...");
-    const data = await requestJson(`/novel/projects/${appState.projectId}/batch/plan`, {
-      method: "POST",
-      body: JSON.stringify({
-        start_chapter: start,
-        end_chapter: end,
-        user_instruction: elements.batchInstruction.value.trim() || null,
-        characters: collectCharacters(),
-        overwrite_policy: hasExistingDraftInRange(start, end) ? "compare" : "block",
-      }),
-    });
-    appState.latestBatchTask = data.task;
-    appState.latestBatchResults = data.chapter_results || [];
-    if (data.suggested_batch_start_chapter) {
-      elements.batchStart.value = String(data.suggested_batch_start_chapter);
+
+  function setEmailError(message) {
+    elements.emailError.textContent = message;
+    elements.emailField.classList.toggle("has-error", Boolean(message));
+  }
+
+  function showLoginFailure(message) {
+    elements.loginStatus.textContent = message;
+    elements.loginStatus.classList.add("is-error");
+  }
+
+  function validEmail(email) {
+    return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+  }
+
+  function setLoginSubmitting(submitting) {
+    elements.emailSubmitButton.disabled = submitting;
+    elements.emailSubmitButton.innerHTML = submitting
+      ? "正在保存会话…"
+      : '使用邮箱继续 <span aria-hidden="true">→</span>';
+  }
+
+  async function submitEmail(event) {
+    event.preventDefault();
+    const email = elements.emailInput.value.trim();
+    setEmailError("");
+    elements.loginStatus.textContent = "";
+    elements.loginStatus.classList.remove("is-error");
+    if (!validEmail(email)) {
+      setEmailError("请填写有效的邮箱地址，例如 name@example.com");
+      elements.emailInput.focus();
+      return;
     }
-    await loadProject();
-    renderBatchStatus(data.task);
-    switchView("batchStudio");
-    showToast("多章节规划已生成，请确认章节规划表。");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setLoading(elements.batchPlanBtn, false);
-  }
-}
 
-async function runBatchGenerate() {
-  const { start, end } = getBatchRange();
-  if (!confirmBatchOverwriteIfNeeded(start, end)) {
-    return;
+    setLoginSubmitting(true);
+    try {
+      const payload = await requestJson("/api/auth/email", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      state.account = payload.account;
+      state.sessionExpired = false;
+      navigate("/library", { replace: true });
+      await loadLibrary();
+    } catch (error) {
+      if (error.code === "invalid_email") {
+        setEmailError(error.message);
+      } else if (error.status) {
+        showLoginFailure(error.message || "登录没有完成，请稍后重试。");
+      } else {
+        showLoginFailure("暂时无法连接叙脉服务，请确认本地服务正在运行后重试。");
+      }
+    } finally {
+      setLoginSubmitting(false);
+    }
   }
-  try {
-    setLoading(elements.batchGenerateBtn, true, "生成中...");
-    const editedBatchPlans = collectChapterPlansFromTable("#batchOutlineTable");
-    if (editedBatchPlans.length) {
-      const byNumber = new Map(getChapterPlans().map((plan) => [plan.chapter_number, plan]));
-      editedBatchPlans.forEach((plan) => byNumber.set(plan.chapter_number, plan));
-      await requestJson(`/novel/projects/${appState.projectId}/full-plan`, {
-        method: "PUT",
+
+  function renderLibraryHeader() {
+    const account = state.account || {};
+    elements.accountEmail.textContent = account.email || "—";
+    elements.creditBalance.textContent = Number(account.credit_balance || 0).toLocaleString("zh-CN");
+    elements.librarySearch.value = state.query;
+  }
+
+  function updateNotificationCount() {
+    $$('[data-notification-count]').forEach((node) => {
+      node.textContent = String(state.unreadNotifications || 0);
+      node.classList.toggle("is-hidden", !state.unreadNotifications);
+    });
+  }
+
+  function renderNotifications() {
+    const items = state.notifications || [];
+    elements.notificationsList.innerHTML = items.length ? items.map((item) => `
+      <article class="notification-item ${item.read ? "is-read" : "is-unread"}">
+        <button type="button" data-action="open-notification-target" data-notification-id="${escapeHtml(item.notification_id)}" data-notification-project="${escapeHtml(item.project_id)}" data-notification-target="${escapeHtml(item.target_path)}">
+          <span class="notification-dot" aria-hidden="true"></span><span class="notification-copy"><strong>${escapeHtml(item.project_title)}</strong><span>${escapeHtml(item.message)}</span><small>${escapeHtml(formatDate(item.created_at))} · ${item.read ? "已读" : "未读"}</small></span><span class="notification-arrow" aria-hidden="true">→</span>
+        </button>
+      </article>`).join("") : `<div class="notifications-empty"><span class="empty-mark">⌁</span><p>还没有需要回看的作品通知。</p></div>`;
+  }
+
+  function notificationTargetPath(rawTarget) {
+    if (typeof rawTarget !== "string" || !rawTarget.trim()) return null;
+    const target = rawTarget.trim();
+    if (!target.startsWith("/") || target.startsWith("//")) return null;
+    let url;
+    try {
+      url = new URL(target, window.location.origin);
+    } catch (error) {
+      return null;
+    }
+    if (url.origin !== window.location.origin) return null;
+    const knownPath = /^\/library(?:[?#].*)?$|^\/(?:independent|archive)\/[A-Za-z0-9_-]+(?:[?#].*)?$|^\/ai\/[A-Za-z0-9_-]+(?:\/director)?(?:[?#].*)?$/;
+    if (!knownPath.test(target)) return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+
+  async function loadNotifications() {
+    if (!state.account) return false;
+    try {
+      const payload = await requestJson("/api/notifications");
+      state.notifications = payload.notifications || [];
+      state.unreadNotifications = Number(payload.unread_count || 0);
+      updateNotificationCount();
+      if (elements.notificationsDialog?.open) renderNotifications();
+      return true;
+    } catch (error) {
+      updateNotificationCount();
+      return false;
+    }
+  }
+
+  async function openNotifications() {
+    await loadNotifications();
+    renderNotifications();
+    rememberDialogFocus(elements.notificationsDialog);
+    if (typeof elements.notificationsDialog.showModal === "function") elements.notificationsDialog.showModal();
+    else elements.notificationsDialog.setAttribute("open", "");
+  }
+
+  async function openNotificationTarget(actionNode) {
+    const targetPath = notificationTargetPath(actionNode.dataset.notificationTarget);
+    if (!targetPath) {
+      showToast("通知目标不可用，已留在当前页面。", "red");
+      return;
+    }
+    try {
+      const payload = await requestJson(`/api/notifications/${encodeURIComponent(actionNode.dataset.notificationProject)}/${encodeURIComponent(actionNode.dataset.notificationId)}/read`, { method: "POST" });
+      state.notifications = payload.notifications || [];
+      state.unreadNotifications = Number(payload.unread_count || 0);
+      updateNotificationCount();
+      renderNotifications();
+      if (typeof elements.notificationsDialog.close === "function") elements.notificationsDialog.close();
+      else elements.notificationsDialog.removeAttribute("open");
+      const navigated = await navigate(targetPath);
+      if (!navigated) showToast("当前正文尚未保存，通知已读但暂未离开当前页面。", "red");
+    } catch (error) {
+      showToast(error.message || "通知没有打开，请稍后重试。", "red");
+    }
+  }
+
+  function renderLibraryLoading() {
+    elements.libraryContent.classList.remove("is-hidden");
+    elements.readyContent.classList.add("is-hidden");
+    elements.libraryContent.innerHTML = '<div class="library-state loading-state">正在从服务端读取作品…</div>';
+  }
+
+  function renderLibraryError(message) {
+    elements.libraryContent.innerHTML = `
+      <div class="library-state empty-state">
+        <div class="empty-mark">!</div>
+        <h2>书架暂时没有回应</h2>
+        <p>${escapeHtml(message)}</p>
+        <button class="button button-outline" type="button" data-action="retry-library">重新读取</button>
+      </div>`;
+  }
+
+  function renderEmptyLibrary() {
+    elements.libraryContent.innerHTML = `
+      <div class="library-state empty-state">
+        <div class="empty-mark">⌁</div>
+        <h2>还没有作品</h2>
+        <p>从一条想法开始。先选创作方式，作品会保存到你的账户书架。</p>
+        <button class="button button-primary" type="button" data-action="open-new-project">新建第一部作品 <span aria-hidden="true">→</span></button>
+      </div>`;
+  }
+
+  function projectCard(project, index) {
+    const ai = project.mode === "ai_assisted";
+    const target = project.target_chapter_count ? ` / ${project.target_chapter_count}` : "";
+    const statusClass = project.status.includes("失败") ? "status-failed" : project.status.includes("处理") ? "status-processing" : "";
+    return `
+      <article class="project-card" data-project-id="${escapeHtml(project.project_id)}">
+        <div class="project-cover">
+          <small>PROJECT / ${String(index + 1).padStart(2, "0")}</small>
+          <h3>${escapeHtml(project.title)}</h3>
+        </div>
+        <div class="project-body">
+          <div class="project-meta">
+            ${ai ? '<span class="mode-flag">AI 辅助写作</span>' : '<span class="mode-note">独立创作</span>'}
+            <button class="project-menu" type="button" aria-label="作品选项" disabled>···</button>
+          </div>
+          <h4>${escapeHtml(project.brief || modeText[project.mode]?.description || "作品基础已保存")}</h4>
+          <div class="project-stats"><span>${project.chapter_count} 章${target}</span><span>${Number(project.total_word_count || 0).toLocaleString("zh-CN")} 字</span>${ai ? `<span>创作积分 ${Number(project.credits_used || 0).toLocaleString("zh-CN")} · 暂不结算</span>` : ""}</div>
+          <div class="progress-line" aria-label="创作进度 ${project.progress_percent}%"><b style="width: ${project.progress_percent}%"></b></div>
+          <div class="project-footer"><span class="project-status ${statusClass}">${escapeHtml(project.status)}</span><button class="project-continue" type="button" data-action="open-project">查看作品 →</button></div>
+          <div class="project-footer"><span>最近编辑：${escapeHtml(formatDate(project.latest_edited_at))}</span><span class="mono">${project.progress_percent}%</span></div>
+        </div>
+      </article>`;
+  }
+
+  function renderProjects(projects) {
+    if (!projects.length) {
+      renderEmptyLibrary();
+      return;
+    }
+    elements.libraryContent.innerHTML = `<div class="project-grid">${projects.map(projectCard).join("")}</div>`;
+  }
+
+  function renderReady(project) {
+    state.readyProject = project;
+    elements.libraryContent.classList.add("is-hidden");
+    elements.readyContent.classList.remove("is-hidden");
+    const ai = project.mode === "ai_assisted";
+    elements.readyContent.innerHTML = `
+      <article class="ready-card ${ai ? "ai-ready" : ""}">
+        <span class="ready-overline">PROJECT SAVED / ${escapeHtml(project.project_id.slice(0, 8).toUpperCase())}</span>
+        <h2>作品已保存。</h2>
+        <p><strong>${escapeHtml(project.title)}</strong> 已经进入你的账户书架。${escapeHtml(modeText[project.mode]?.description || "")}</p>
+        <span class="ready-mode">${escapeHtml(project.mode_label)}</span>
+        <div class="ready-divider"></div>
+        <div class="ready-next"><div><span>当前阶段完成</span><strong>${escapeHtml(ai ? "下一阶段：进入 AI 创作室" : "下一阶段：进入独立创作编辑器")}</strong></div><button class="ready-back" type="button" data-action="back-library">回到书架 →</button></div>
+      </article>`;
+  }
+
+  async function loadLibrary(query = state.query) {
+    if (!state.account) return;
+    state.loadingLibrary = true;
+    state.query = query;
+    renderLibraryHeader();
+    renderLibraryLoading();
+    elements.libraryError.classList.add("is-hidden");
+    try {
+      const payload = await requestJson(`/api/library${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+      state.account = payload.account;
+      state.projects = payload.projects || [];
+      renderLibraryHeader();
+      const createdId = new URLSearchParams(window.location.search).get("created");
+      if (createdId) {
+        const created = state.projects.find((project) => project.project_id === createdId);
+        if (created) renderReady(created);
+        else renderProjects(state.projects);
+      } else {
+        renderProjects(state.projects);
+      }
+      await loadNotifications();
+    } catch (error) {
+      if (error.code === "session_expired" || error.status === 401) {
+        state.account = null;
+        state.sessionExpired = error.code === "session_expired";
+        navigate("/login", { replace: true });
+        renderLoginState();
+      } else {
+        renderLibraryError(error.message || "无法读取书架，请稍后重试。");
+        elements.libraryError.textContent = error.message || "无法读取书架，请稍后重试。";
+        elements.libraryError.classList.remove("is-hidden");
+      }
+    } finally {
+      state.loadingLibrary = false;
+    }
+  }
+
+  function openNewProject() {
+    resetProjectDialog();
+    rememberDialogFocus(elements.dialog);
+    if (typeof elements.dialog.showModal === "function") {
+      elements.dialog.showModal();
+    } else {
+      elements.dialog.setAttribute("open", "");
+    }
+  }
+
+  function rememberDialogFocus(dialog) {
+    if (dialog) state.dialogFocus.set(dialog, document.activeElement);
+  }
+
+  function restoreDialogFocus(dialog) {
+    const target = dialog ? state.dialogFocus.get(dialog) : null;
+    if (target && typeof target.focus === "function") window.setTimeout(() => target.focus(), 0);
+  }
+
+  function resetProjectDialog() {
+    state.selectedMode = null;
+    elements.modeOptions.forEach((option) => option.classList.remove("is-selected"));
+    elements.projectDetails.classList.add("is-hidden");
+    elements.selectedModeLabel.textContent = "—";
+    elements.projectTitleInput.value = "";
+    elements.projectBriefInput.value = "";
+    elements.projectError.textContent = "";
+    elements.createProjectButton.disabled = false;
+    elements.createProjectButton.innerHTML = '保存作品并进入下一阶段 <span aria-hidden="true">→</span>';
+  }
+
+  function chooseMode(mode) {
+    if (!modeText[mode]) return;
+    state.selectedMode = mode;
+    elements.modeOptions.forEach((option) => option.classList.toggle("is-selected", option.dataset.mode === mode));
+    elements.projectDetails.classList.remove("is-hidden");
+    elements.selectedModeLabel.textContent = `已选择：${modeText[mode].label}`;
+    elements.projectError.textContent = "";
+    window.setTimeout(() => elements.projectTitleInput.focus(), 50);
+  }
+
+  async function submitProject(event) {
+    if (event.submitter?.value === "cancel") return;
+    event.preventDefault();
+    if (!state.selectedMode) return;
+    const title = elements.projectTitleInput.value.trim();
+    if (!title) {
+      elements.projectError.textContent = "请先写一个作品标题。";
+      elements.projectTitleInput.focus();
+      return;
+    }
+    elements.projectError.textContent = "";
+    elements.createProjectButton.disabled = true;
+    elements.createProjectButton.textContent = "正在保存作品…";
+    try {
+      const payload = await requestJson("/api/library/projects", {
+        method: "POST",
         body: JSON.stringify({
-          full_plan: normalizeFullPlan(),
-          volumes: parseJsonEditor(elements.volumes.value, [], "分卷规划"),
-          chapter_plans: [...byNumber.values()].sort((a, b) => a.chapter_number - b.chapter_number),
+          title,
+          mode: state.selectedMode,
+          brief: elements.projectBriefInput.value.trim() || null,
         }),
       });
+      elements.dialog.close();
+      if (payload.project.mode === "independent") {
+        const nextPath = `/independent/${encodeURIComponent(payload.project.project_id)}`;
+        navigate(nextPath, { replace: true });
+        await loadIndependentWorkspace(payload.project.project_id);
+      } else {
+        const nextPath = `/ai/${encodeURIComponent(payload.project.project_id)}`;
+        navigate(nextPath, { replace: true });
+        await loadAIWorkspace(payload.project.project_id, false);
+      }
+      showToast("作品已保存到你的账户书架。");
+    } catch (error) {
+      elements.projectError.textContent = error.status === 401
+        ? "会话已失效，请重新登录后再保存。"
+        : error.message || "作品保存失败，请重试。";
+      elements.createProjectButton.disabled = false;
+      elements.createProjectButton.innerHTML = '保存作品并进入下一阶段 <span aria-hidden="true">→</span>';
     }
-    const data = await requestJson(`/novel/projects/${appState.projectId}/batch/generate`, {
-      method: "POST",
-      body: JSON.stringify({
-        start_chapter: start,
-        end_chapter: end,
-        user_instruction: elements.batchInstruction.value.trim() || null,
-        characters: collectCharacters(),
-        overwrite_policy: hasExistingDraftInRange(start, end) ? "compare" : "block",
-      }),
-    });
-    appState.latestBatchTask = data.task;
-    appState.latestBatchResults = data.chapter_results || [];
-    if (data.suggested_batch_start_chapter) {
-      elements.batchStart.value = String(data.suggested_batch_start_chapter);
+  }
+
+  async function logout() {
+    if (!(await flushPendingSave())) return;
+    try {
+      await requestJson("/api/auth/logout", { method: "POST", body: "{}" });
+    } catch (error) {
+      showToast("退出请求没有完成，请稍后重试。", "red");
+      return;
     }
-    await loadProject();
-    renderBatchStatus(data.task);
-    showToast("批量草稿任务已完成，章节进入待确认列表。");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setLoading(elements.batchGenerateBtn, false);
-  }
-}
-
-async function selectPreviewChapter(chapterNumber) {
-  const localChapter = getProjectChapters().find((chapter) => chapter.chapter_number === chapterNumber);
-  if (!localChapter) {
-    return;
+    state.account = null;
+    state.projects = [];
+    state.notifications = [];
+    state.unreadNotifications = 0;
+    updateNotificationCount();
+    state.readyProject = null;
+    state.sessionExpired = false;
+    navigate("/login", { replace: true });
+    showToast("已退出当前账户。");
   }
 
-  try {
-    const data = await requestJson(`/novel/projects/${appState.projectId}/chapters/${chapterNumber}`);
-    renderPreviewChapter(data);
-  } catch (error) {
-    renderPreviewChapter(localChapter);
-    showToast(error.message);
-  }
-}
-
-function movePreviewChapter(direction) {
-  const chapters = getProjectChapters();
-  if (!chapters.length) {
-    return;
-  }
-  const currentIndex = chapters.findIndex((chapter) => chapter.chapter_number === appState.previewChapterNumber);
-  const nextIndex = Math.min(Math.max((currentIndex === -1 ? 0 : currentIndex) + direction, 0), chapters.length - 1);
-  selectPreviewChapter(chapters[nextIndex].chapter_number);
-}
-
-function getChapterByNumber(chapterNumber) {
-  return getProjectChapters().find((chapter) => chapter.chapter_number === chapterNumber);
-}
-
-async function handleBatchChapterAction(action, chapterNumber) {
-  const chapter = getChapterByNumber(chapterNumber);
-  if (!chapter && action !== "compare") {
-    showToast("这一章还没有生成记录。");
-    return;
-  }
-
-  if (action === "view") {
-    await selectPreviewChapter(chapterNumber);
-    switchView("preview");
-    return;
-  }
-
-  if (action === "compare") {
-    if (chapter?.draft) {
-      selectChapter(chapterNumber);
-      renderMetaMessage("已进入当前草稿。对比替换需要后端提供候选稿后才能执行真正替换。");
-      switchView("studioDraft");
-    } else {
-      elements.batchStart.value = String(chapterNumber);
-      showToast(`第 ${chapterNumber} 章暂无草稿，可从该章开始对比生成。`);
+  async function restoreSession(preferredScreen = routeFromLocation()) {
+    try {
+      const payload = await requestJson("/api/auth/session");
+      if (payload.authenticated) {
+        state.account = payload.account;
+        state.sessionExpired = false;
+        if (preferredScreen === "library") {
+          setActiveScreen("library");
+          await loadLibrary();
+        } else if (preferredScreen === "independent") {
+          setActiveScreen("independent");
+          const projectId = independentProjectIdFromLocation();
+          if (projectId) await loadIndependentWorkspace(projectId);
+        } else if (preferredScreen === "archive") {
+          setActiveScreen("archive");
+          const projectId = archiveProjectIdFromLocation();
+          if (projectId) await loadArchiveWorkspace(projectId);
+        } else if (preferredScreen === "aiStudio" || preferredScreen === "aiDirector") {
+          setActiveScreen(preferredScreen);
+          const projectId = aiProjectIdFromLocation();
+          if (projectId) await loadAIWorkspace(projectId, preferredScreen === "aiDirector");
+        } else {
+          setActiveScreen("landing");
+        }
+        return;
+      }
+      state.account = null;
+      if (["library", "independent", "archive", "aiStudio", "aiDirector"].includes(preferredScreen)) {
+        navigate("/login", { replace: true });
+      } else {
+        setActiveScreen(preferredScreen);
+      }
+    } catch (error) {
+      if (["library", "independent", "archive", "aiStudio", "aiDirector"].includes(preferredScreen)) {
+        state.sessionExpired = error.code === "session_expired";
+        state.account = null;
+        navigate("/login", { replace: true });
+      } else {
+        setActiveScreen(preferredScreen);
+      }
     }
-    return;
   }
 
-  if (!chapter?.session_id) {
-    showToast("这一章缺少会话 ID，暂不能执行该操作。");
-    return;
+  function countEditorWords(value) {
+    return String(value || "").replace(/\s+/g, "").length;
   }
 
-  updateSession(chapter.session_id);
-  if (action === "review") {
-    await reviewDraft();
-  } else if (action === "revise") {
-    await reviseDraft(`批量队列中确认第 ${chapterNumber} 章按 AI 审查意见修订。`);
-  } else if (action === "accept") {
-    await acceptChapter();
-  }
-  await loadProject();
-  renderBatchStatus(appState.latestBatchTask);
-}
-
-function selectChapter(chapterNumber) {
-  const chapter = (appState.project?.chapters || []).find(
-    (item) => item.chapter_number === chapterNumber,
-  );
-  if (!chapter) {
-    return;
+  function setEditorSaveState(label, variant = "") {
+    elements.editorSaveState.textContent = label;
+    elements.editorSaveState.className = `editor-save-state ${variant ? `is-${variant}` : ""}`;
   }
 
-  elements.chapter.value = String(chapter.chapter_number);
-  elements.summary.value = chapter.summary || elements.summary.value;
-  if (chapter.session_id) {
-    updateSession(chapter.session_id);
-    elements.session.value = chapter.session_id;
-  }
-  if (chapter.draft) {
-    appState.draft = chapter.draft;
-    appState.plotBeats = chapter.draft.plot_beats || [];
-    elements.draftOutput.textContent = chapter.draft.content || "草稿为空。";
-    renderBeats(appState.plotBeats);
-    renderMetaMessage(`已切换到第 ${chapter.chapter_number} 章目录记录。`);
-  } else {
-    appState.draft = null;
-    appState.plotBeats = [];
-    elements.draftOutput.textContent = "本章尚未生成草稿。";
-    renderBeats(chapter.plot_beats || []);
-    renderMetaMessage(`第 ${chapter.chapter_number} 章当前状态：${chapter.status || "未开始"}。`);
-  }
-  renderPreviewChapter(chapter);
-  updateStage(chapterStatusToStage(chapter.status));
-  renderChapterCatalog();
-  updateOverview();
-  switchView(chapter.draft ? "studioDraft" : "studioPlan");
-}
-
-function renderBeats(beats) {
-  appState.plotBeats = beats || [];
-  appState.activeBeatIndex = 0;
-
-  if (!appState.plotBeats.length) {
-    elements.beatsContainer.className = "beats-empty";
-    elements.beatsContainer.textContent = "暂无剧情节点。请先生成 Planner 输出。";
-    elements.approveBtn.disabled = true;
-    updateOverview();
-    return;
+  function setEditorNotice(message, variant = "") {
+    elements.editorNotice.textContent = message || "";
+    elements.editorNotice.className = `notice editor-notice ${message ? "" : "is-hidden"} ${variant ? `notice-${variant}` : "notice-blue"}`;
   }
 
-  elements.beatsContainer.className = "";
-  renderActiveBeat();
-
-  elements.approveBtn.disabled = false;
-  updateOverview();
-}
-
-function renderActiveBeat() {
-  const beat = appState.plotBeats[appState.activeBeatIndex];
-  if (!beat) {
-    return;
+  function setEditorNoticeHtml(html, variant = "") {
+    elements.editorNotice.innerHTML = html || "";
+    elements.editorNotice.className = `notice editor-notice ${html ? "" : "is-hidden"} ${variant ? `notice-${variant}` : "notice-blue"}`;
   }
 
-  const tabs = appState.plotBeats
-    .map(
-      (item, index) => `
-        <button class="beat-tab ${index === appState.activeBeatIndex ? "active" : ""}" type="button" data-index="${index}">
-          节点 ${item.order || index + 1}
-        </button>
-      `,
-    )
-    .join("");
+  function activeEditorVersion() {
+    return state.workspace?.active_version || null;
+  }
 
-  elements.beatsContainer.innerHTML = `
-    <div class="beat-tabs">${tabs}</div>
-    <div class="beat-card" data-index="${appState.activeBeatIndex}">
-      <div class="beat-head">
-        <span class="beat-index">${beat.order || appState.activeBeatIndex + 1}</span>
-        <div>
-          <strong>剧情节点 ${beat.order || appState.activeBeatIndex + 1}</strong>
-          <p class="beat-summary-line">${escapeHtml((beat.summary || "").slice(0, 48))}${(beat.summary || "").length > 48 ? "..." : ""}</p>
+  function renderStartWorkspace(workspace) {
+    elements.editorWorkspaceContent.classList.add("is-hidden");
+    elements.startWorkspaceContent.classList.remove("is-hidden");
+    elements.completeChapterButton.disabled = true;
+    elements.editorProjectTitle.textContent = workspace.title || "—";
+    elements.editorModeLabel.textContent = workspace.mode === "ai_assisted" ? "AI 辅助写作" : "独立创作";
+    elements.writingModeNote.textContent = workspace.mode === "ai_assisted" ? "AI 辅助写作 · 唯一正式正文" : "独立创作 · 正式正文";
+    elements.editorChapterHeading.textContent = "先把故事带回来";
+    setEditorSaveState("等待开始");
+    elements.editorWordCount.textContent = "0 字";
+    elements.startWorkspaceContent.innerHTML = `
+      <article class="start-workspace-card paper-card">
+        <span class="ready-overline">INDEPENDENT / START</span>
+        <h2>把旧稿带回故事，<br /><em>或者从一张白纸开始。</em></h2>
+        <p>导入会先生成可检查的预览：标题、章节识别、字数和无法识别的片段。你确认之后，正文才会写入正式稿本。</p>
+        <div class="start-choice-grid">
+          <button class="start-choice" type="button" data-action="start-blank"><span class="start-choice-mark">Ⅰ</span><strong>从空白开始</strong><small>先写第一章，保存后再完成本章。</small><span class="text-link">打开空白稿本 →</span></button>
+          <button class="start-choice" type="button" data-action="open-import"><span class="start-choice-mark">Ⅱ</span><strong>导入旧稿</strong><small>支持 TXT、MD、DOCX，确认预览后正式写入。</small><span class="text-link">选择文件 →</span></button>
         </div>
-      </div>
-      <label>
-        节点摘要
-        <textarea data-field="summary" rows="3">${escapeHtml(beat.summary)}</textarea>
-      </label>
-      <label>
-        叙事目的
-        <textarea data-field="purpose" rows="2">${escapeHtml(beat.purpose)}</textarea>
-      </label>
-      <label>
-        冲突
-        <textarea data-field="conflict" rows="2">${escapeHtml(beat.conflict)}</textarea>
-      </label>
-      <label>
-        预期结果
-        <textarea data-field="expected_outcome" rows="2">${escapeHtml(beat.expected_outcome)}</textarea>
-      </label>
-      <div class="small-grid">
-        <label>
-          地点
-          <textarea data-field="location" rows="1">${escapeHtml(beat.location)}</textarea>
-        </label>
-        <label>
-          出场人物（逗号分隔）
-          <textarea data-field="involved_characters" rows="1">${escapeHtml((beat.involved_characters || []).join(", "))}</textarea>
-        </label>
-      </div>
-      <label>
-        连续性约束（逗号分隔）
-        <textarea data-field="continuity_constraints" rows="2">${escapeHtml((beat.continuity_constraints || []).join(", "))}</textarea>
-      </label>
-    </div>
-  `;
-
-  bindAutoResize(elements.beatsContainer);
-}
-
-function saveActiveBeatEdits() {
-  const card = elements.beatsContainer.querySelector(".beat-card");
-  const beat = appState.plotBeats[appState.activeBeatIndex];
-  if (!card || !beat) {
-    return;
+        <input id="importFileInput" class="visually-hidden" type="file" accept=".txt,.md,.docx,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        <div id="importPreviewRegion" class="import-preview-region"></div>
+        <p class="start-footnote"><span class="mono">LIMIT / 5 MB</span>　文件太大或格式不支持时，输入会保留并明确说明原因。</p>
+      </article>`;
+    elements.importFileInput = $("#importFileInput");
+    elements.importFileInput.addEventListener("change", (event) => {
+      const file = event.target.files?.[0];
+      if (file) previewImportFile(file);
+    });
+    const latestPreview = workspace.pending_imports?.[workspace.pending_imports.length - 1];
+    if (latestPreview) renderImportPreview(latestPreview);
   }
 
-  const read = (field) => card.querySelector(`[data-field="${field}"]`)?.value.trim() || "";
-  const readList = (field) =>
-    read(field)
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-  appState.plotBeats[appState.activeBeatIndex] = {
-    ...beat,
-    summary: read("summary"),
-    purpose: read("purpose") || null,
-    location: read("location") || null,
-    conflict: read("conflict") || null,
-    expected_outcome: read("expected_outcome") || null,
-    involved_characters: readList("involved_characters"),
-    continuity_constraints: readList("continuity_constraints"),
-  };
-}
-
-function collectEditedBeats() {
-  saveActiveBeatEdits();
-  return appState.plotBeats.map((beat, index) => {
-    return {
-      ...beat,
-      order: beat.order || index + 1,
-    };
-  });
-}
-
-function updateSession(sessionId) {
-  appState.sessionId = sessionId || "";
-  if (appState.sessionId) {
-    elements.session.value = appState.sessionId;
-  }
-  elements.sessionBadge.textContent = appState.sessionId
-    ? `Session: ${appState.sessionId}`
-    : "尚未创建会话";
-  updateOverview();
-}
-
-function renderRunResult(data) {
-  if (data.session_id) {
-    updateSession(data.session_id);
+  function renderImportPreview(preview) {
+    const region = $("#importPreviewRegion");
+    if (!region) return;
+    const failure = preview.status === "failed";
+    region.innerHTML = `
+      <div class="import-preview-card ${failure ? "is-failed" : ""}">
+        <div class="import-preview-head"><div><span class="eyebrow">${failure ? "导入失败，输入已保留" : "导入预览"}</span><strong>${escapeHtml(preview.filename)}</strong></div><span class="mono">${escapeHtml(preview.format || "未知格式")}</span></div>
+        ${failure ? `<p class="import-error-text">${escapeHtml(preview.error_message || "文件无法识别，请重新选择。")}</p>` : `
+          <div class="import-facts"><span><strong>${preview.chapter_count}</strong> 章</span><span><strong>${Number(preview.total_word_count || 0).toLocaleString("zh-CN")}</strong> 字</span><span><strong>${preview.unrecognized_fragments?.length || 0}</strong> 段待确认</span></div>
+          <div class="import-chapter-list">${(preview.chapters || []).map((chapter) => `<div><span class="mono">第 ${chapter.chapter_number} 章</span><strong>${escapeHtml(chapter.title)}</strong><span>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字</span></div>`).join("")}</div>
+          ${(preview.unrecognized_fragments || []).length ? `<div class="unrecognized-fragments"><strong>无法识别片段</strong>${preview.unrecognized_fragments.map((fragment) => `<p>${escapeHtml(fragment)}</p>`).join("")}</div>` : ""}
+          <button class="button button-primary" type="button" data-action="confirm-import" data-preview-id="${escapeHtml(preview.preview_id)}">确认预览并写入正式正文 <span aria-hidden="true">→</span></button>`}
+      </div>`;
   }
 
-  appState.draft = data.draft || appState.draft;
-  appState.runLoreUpdates = data.extracted_lore_updates || appState.runLoreUpdates || {};
-  appState.runCharacterUpdates = data.extracted_character_updates || appState.runCharacterUpdates || {};
-  updateStage(data.current_stage);
-
-  if (data.draft) {
-    elements.draftOutput.textContent = data.draft.content || "草稿为空。";
-    renderMetaPanel(data);
-  } else {
-    renderMetaMessage(data.message || "已读取当前会话状态。");
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = () => reject(new Error("文件读取失败，请保留原文件后重试。"));
+      reader.readAsDataURL(file);
+    });
   }
 
-  renderMemoryPanels();
-  if (data.current_stage === "awaiting_revision_decision") {
-    setDecisionPanel("revision");
-  } else if (data.current_stage === "awaiting_chapter_acceptance") {
-    setDecisionPanel("accept");
-  } else {
-    setDecisionPanel(null);
-  }
-  updateOverview();
-}
-
-async function planChapter() {
-  try {
-    setLoading(elements.planBtn, true, "Planner 生成中...");
-    startAgentRun({
-      agent: "Planner",
-      stage: "planning",
-      title: "Planner 正在推演本章剧情节点",
-      messages: [
-        "正在读取世界观、前文摘要和人物卡片，整理本章必须遵守的连续性约束。",
-        "正在拆解章节目标：开场承接、冲突升级、悬念收束。",
-        "正在生成可供人工审核的剧情节点，尽量避免角色 OOC 和逻辑跳跃。",
-      ],
-    });
-    const payload = {
-      session_id: elements.session.value.trim() || null,
-      project_id: appState.projectId,
-      project_title: elements.projectTitle.value.trim() || null,
-      global_worldview: elements.worldview.value.trim(),
-      chapter_number: Number(elements.chapter.value || 1),
-      previous_summary: elements.summary.value.trim() || null,
-      user_instruction: elements.instruction.value.trim() || null,
-      characters: collectCharacters(),
-    };
-
-    const data = await requestJson("/novel/chapters/plan", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-
-    appState.draft = null;
-    appState.runLoreUpdates = {};
-    appState.runCharacterUpdates = {};
-    setDecisionPanel(null);
-    updateSession(data.session_id);
-    updateStage(data.current_stage);
-    renderBeats(data.plot_beats);
-    elements.draftOutput.textContent = "剧情节点已生成。请审核并提交后继续生成正文。";
-    renderMetaMessage(data.message);
-    renderMemoryPanels();
-    await loadProject();
-    switchView("studioReview");
-    finishAgentRun({
-      agent: "Planner",
-      stage: data.current_stage,
-      title: "Planner 已完成剧情节点规划",
-      message: "剧情节点已生成。请在左侧审核每个节点，确认后交给 Writer 扩写正文。",
-    });
-    showToast("Planner 已生成剧情节点，等待人工审核。");
-  } catch (error) {
-    failAgentRun({
-      agent: "Planner",
-      title: "Planner 生成时遇到问题",
-      message: error.message,
-    });
-    showToast(error.message);
-  } finally {
-    setLoading(elements.planBtn, false);
-  }
-}
-
-async function approvePlan() {
-  if (!appState.sessionId) {
-    showToast("请先生成剧情节点。");
-    return;
-  }
-
-  if (appState.reviewDecision === "rejected") {
-    saveActiveBeatEdits();
-    renderMetaMessage(elements.feedback.value.trim() || "已打回剧情节点，请修改节点后再提交，或重新生成 Planner 输出。");
-    showToast("已打回剧情节点。请修改节点或重新生成 Planner 输出。");
-    return;
-  }
-
-  try {
-    setLoading(elements.approveBtn, true, "状态机流转中...");
-    startAgentRun({
-      agent: "Writer",
-      stage: "writing",
-      title: "Writer 正在扩写章节正文",
-      messages: [
-        "正在读取你确认后的剧情节点，把节点转成连续的正文段落。",
-        "正在保持人物动机、冲突推进和章节钩子，避免只复述大纲。",
-        "正文完成后会先展示到页面，再交给 Reviewer 单独审查。",
-      ],
-    });
-    const data = await requestJson(`/novel/chapters/${appState.sessionId}/approve`, {
-      method: "POST",
-      body: JSON.stringify({
-        plot_beats: collectEditedBeats(),
-        human_feedback: elements.feedback.value.trim() || "同意当前剧情节点。",
-      }),
-    });
-
-    renderRunResult(data);
-    switchView("studioDraft");
-    finishAgentRun({
-      agent: "Writer",
-      stage: data.current_stage,
-      title: "Writer 已生成章节正文",
-      message: "正文已先展示到页面。接下来 AI 审查会判断本章是否建议修订。",
-    });
-    showToast("Writer 已生成正文，开始 Reviewer 审查。");
-    await reviewDraft();
-  } catch (error) {
-    failAgentRun({
-      agent: "Writer",
-      title: "章节生成时遇到问题",
-      message: error.message,
-    });
-    showToast(error.message);
-  } finally {
-    setLoading(elements.approveBtn, false);
-  }
-}
-
-async function reviewDraft() {
-  if (!appState.sessionId) {
-    showToast("暂无可审查的会话。");
-    return;
-  }
-
-  try {
-    startAgentRun({
-      agent: "Reviewer",
-      stage: "reviewing",
-      title: "Reviewer 正在审查章节草稿",
-      messages: [
-        "正在检查人物行为是否 OOC，尤其关注动机和当前状态是否一致。",
-        "正在核对剧情节点、世界观设定和正文细节，寻找逻辑断裂或设定冲突。",
-        "正在整理可执行的修改建议，如果问题较轻也会允许你直接接受本章。",
-      ],
-    });
-
-    const data = await requestJson(`/novel/chapters/${appState.sessionId}/review`, {
-      method: "POST",
-    });
-    renderRunResult(data);
-    await loadProject();
-    await loadProjectCodex();
-    finishAgentRun({
-      agent: "Reviewer",
-      stage: data.current_stage,
-      title: data.current_stage === "awaiting_revision_decision" ? "建议修订" : "AI 已审查，待人工确认",
-      message: data.current_stage === "awaiting_revision_decision"
-        ? "审查发现需要处理的问题。你可以等待 10 秒自动同意修改，也可以手动选择下一步。"
-        : "草稿已完成 AI 审查，仍需人工确认。接受入库后，Librarian 才会抽取稳定设定。",
-    });
-  } catch (error) {
-    failAgentRun({
-      agent: "Reviewer",
-      title: "Reviewer 审查时遇到问题",
-      message: error.message,
-    });
-    showToast(error.message);
-  }
-}
-
-async function reviseDraft(reason = "用户同意 Writer 按 Reviewer 意见修订。") {
-  if (!appState.sessionId) {
-    showToast("暂无可修订的会话。");
-    return;
-  }
-
-  try {
-    clearRevisionCountdown();
-    setLoading(elements.reviseNowBtn, true, "修稿中...");
-    setLoading(elements.confirmReviseBtn, true, "修稿中...");
-    startAgentRun({
-      agent: "Writer",
-      stage: "revising",
-      title: "Writer 正在根据审查意见修订",
-      messages: [
-        "正在读取 Reviewer 的审查意见，保留通过的剧情结构。",
-        "正在修正人物动机、逻辑衔接和设定冲突。",
-        "修订版生成后会再次交给 Reviewer 审查。",
-      ],
-    });
-
-    const data = await requestJson(`/novel/chapters/${appState.sessionId}/revise`, {
-      method: "POST",
-      body: JSON.stringify({
-        human_feedback: reason,
-      }),
-    });
-    renderRunResult(data);
-    finishAgentRun({
-      agent: "Writer",
-      stage: data.current_stage,
-      title: "Writer 已生成修订版",
-      message: "修订版正文已更新到页面。接下来 Reviewer 会再次审查。",
-    });
-    await reviewDraft();
-  } catch (error) {
-    failAgentRun({
-      agent: "Writer",
-      title: "Writer 修稿时遇到问题",
-      message: error.message,
-    });
-    showToast(error.message);
-  } finally {
-    setLoading(elements.reviseNowBtn, false);
-    setLoading(elements.confirmReviseBtn, false);
-  }
-}
-
-async function acceptChapter() {
-  if (!appState.sessionId) {
-    showToast("暂无可接受的会话。");
-    return;
-  }
-
-  try {
-    clearRevisionCountdown();
-    setLoading(elements.acceptChapterBtn, true, "抽取设定中...");
-    startAgentRun({
-      agent: "Librarian",
-      stage: "extracting_lore",
-      title: "Librarian 正在抽取设定",
-      messages: [
-        "正在从你接受的章节中抽取稳定事实，而不是临时猜测。",
-        "正在整理人物状态、地点、道具、伏笔和章节摘要。",
-        "设定抽取完成后，本章节才会进入完成状态。",
-      ],
-    });
-
-    const data = await requestJson(`/novel/chapters/${appState.sessionId}/accept`, {
-      method: "POST",
-      body: JSON.stringify({
-        human_feedback: elements.feedback.value.trim() || "用户确认接受入库。",
-      }),
-    });
-    renderRunResult(data);
-    await loadProject();
-    await loadProjectCodex(appState.projectId);
-    finishAgentRun({
-      agent: "Librarian",
-      stage: data.current_stage,
-      title: "章节已完成",
-      message: "本章节已被接受，设定增量也已抽取到人物设定和剧情设定页面。",
-    });
-    showToast("章节已完成入库，并完成设定抽取。");
-  } catch (error) {
-    failAgentRun({
-      agent: "Librarian",
-      title: "设定抽取时遇到问题",
-      message: error.message,
-    });
-    showToast(error.message);
-  } finally {
-    setLoading(elements.acceptChapterBtn, false);
-  }
-}
-
-async function continueNextChapter() {
-  try {
-    syncCharacterForms();
-    setLoading(elements.continueNextBtn, true, "准备下一章...");
-
-    const data = await requestJson(`/novel/projects/${appState.projectId}/prepare-next`, {
-      method: "POST",
-      body: JSON.stringify({
-        user_instruction: elements.instruction.value.trim() || null,
-        characters: collectCharacters(),
-      }),
-    });
-    const snapshot = data.snapshot;
-
-    appState.nextSnapshot = snapshot;
-    appState.draft = null;
-    appState.runLoreUpdates = {};
-    appState.runCharacterUpdates = {};
-    appState.plotBeats = [];
-    elements.chapter.value = String(snapshot.chapter_number);
-    elements.worldview.value = snapshot.global_worldview || snapshot.confirmed_worldview || elements.worldview.value;
-    elements.summary.value = snapshot.previous_summary || "";
-    elements.instruction.value =
-      snapshot.user_instruction ||
-      (snapshot.recommended_next_directions || []).join("；") ||
-      elements.instruction.value;
-    const preparedCharacters = snapshot.characters?.length
-      ? snapshot.characters
-      : snapshot.current_character_state || [];
-    if (preparedCharacters.length) {
-      appState.characters = preparedCharacters;
-      renderCharacterForms();
+  async function previewImportFile(file) {
+    setEditorSaveState("正在读取导入…");
+    try {
+      const contentBase64 = await fileToBase64(file);
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/imports/preview`, {
+        method: "POST",
+        body: JSON.stringify({ filename: file.name, content_base64: contentBase64 }),
+      });
+      renderImportPreview(payload.preview);
+      setEditorSaveState(payload.preview.status === "failed" ? "导入失败" : "等待确认");
+    } catch (error) {
+      setEditorSaveState("导入失败", "error");
+      setEditorNotice(error.message || "文件预览失败，请保留输入后重试。", "red");
     }
-    renderNextSeedPanel(snapshot);
-    setDecisionPanel(null);
-    updateStage("planning");
-    renderBeats([]);
-    elements.draftOutput.textContent = "下一章输入已准备。确认左侧预填内容后，再点击 Planner 生成剧情节点。";
-    renderMetaMessage("已从后端读取下一章预填输入。请确认世界观、前文摘要和本章要求后再正式生成 Planner。");
-    renderMemoryPanels();
-    await loadProject();
-    switchView("studioPlan");
-    showToast("下一章输入已准备，请确认后再生成 Planner。");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setLoading(elements.continueNextBtn, false);
-  }
-}
-
-async function refreshState() {
-  if (!appState.sessionId) {
-    showToast("暂无可刷新的会话。");
-    return;
   }
 
-  try {
-    const data = await requestJson(`/novel/sessions/${appState.sessionId}`);
-    renderRunResult(data);
-    await loadProject();
-    showToast("状态已刷新。");
-  } catch (error) {
-    showToast(error.message);
-  }
-}
-
-function fillExample() {
-  elements.projectTitle.value = "月光禁区";
-  elements.worldview.value =
-    "玄幻都市，灵气复苏刚刚开始。主角林澈出身没落修行世家，家族旧宅里藏着一枚会回应月光的青铜钥匙。";
-  elements.chapter.value = "1";
-  elements.summary.value = "故事开篇前，林澈收到一封没有寄件人的信，信中提到父亲失踪当夜的禁区坐标。";
-  elements.instruction.value = "本章要突出神秘感，结尾让主角发现钥匙和禁区产生共鸣。";
-  appState.characters = [
-    {
-      name: "林澈",
-      role: "protagonist",
-      profile: "隐忍、敏锐，习惯先观察再行动的少年。",
-      motivation: "查清父亲失踪当夜的真相。",
-      current_psychological_state: "警惕但被好奇心推动",
-      current_physical_state: "普通高中生状态",
-      current_location: "家族旧宅",
-    },
-    {
-      name: "许知夏",
-      role: "supporting",
-      profile: "林澈的同学，表面活泼，实际知道部分禁区传闻。",
-      motivation: "阻止林澈贸然进入危险区域。",
-      current_psychological_state: "担心又有所隐瞒",
-      current_physical_state: "状态正常",
-      current_location: "学校附近",
-    },
-  ];
-  renderCharacterForms();
-  switchView("studioPlan");
-  updateOverview();
-  showToast("示例已填入。");
-}
-
-async function openProjectWorkbench(projectId, viewName = "overview") {
-  await selectProject(projectId);
-  switchView(viewName);
-}
-
-async function continueProject(projectId) {
-  await selectProject(projectId);
-  const chapters = getProjectChapters();
-  const latest = chapters.at(-1);
-  if (latest && latest.status !== "completed") {
-    selectChapter(latest.chapter_number);
-    switchView(latest.draft ? "studioDraft" : "studioPlan");
-    return;
-  }
-  if (latest) {
-    await continueNextChapter();
-    return;
-  }
-  switchView(appState.project?.full_plan ? "studioPlan" : "fullPlan");
-}
-
-$$(".nav-card, .sub-nav-card, .stage-nav-card").forEach((button) => {
-  button.addEventListener("click", () => {
-    switchView(button.dataset.view);
-    if (button.dataset.view === "characters" || button.dataset.view === "lore") {
-      loadProjectCodex().catch((error) => showToast(error.message));
+  async function startBlankWorkspace() {
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/start`, {
+        method: "POST",
+        body: JSON.stringify({ source: "blank" }),
+      });
+      await loadIndependentWorkspace(state.editorProjectId);
+      showToast("空白稿本已创建，可以开始写作。");
+    } catch (error) {
+      setEditorNotice(error.message || "空白稿本创建失败，请重试。", "red");
     }
-  });
-});
-
-elements.homeBtn.addEventListener("click", () => switchView("home"));
-elements.sidebarToggle.addEventListener("click", toggleSidebar);
-document.addEventListener("click", (event) => {
-  const quickViewButton = event.target.closest("[data-quick-view]");
-  if (quickViewButton) {
-    switchView(quickViewButton.dataset.quickView);
-    return;
   }
 
-  if (!event.target.closest(".stage-collapse-btn")) {
-    return;
+  async function confirmImport(previewId) {
+    const button = $(`[data-action="confirm-import"][data-preview-id="${CSS.escape(previewId)}"]`);
+    if (button) button.disabled = true;
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/imports/${encodeURIComponent(previewId)}/confirm`, {
+        method: "POST",
+      });
+      await loadIndependentWorkspace(state.editorProjectId);
+      showToast("导入已确认，正文已经写入正式稿本。");
+    } catch (error) {
+      if (button) button.disabled = false;
+      setEditorNotice(error.message || "导入确认失败，正文没有被覆盖。", "red");
+    }
   }
-  toggleStageSidebar();
-});
-elements.beatsContainer.addEventListener("click", (event) => {
-  const tab = event.target.closest(".beat-tab");
-  if (!tab) {
-    return;
-  }
-  saveActiveBeatEdits();
-  appState.activeBeatIndex = Number(tab.dataset.index || 0);
-  renderActiveBeat();
-});
-elements.chapterCatalog.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-chapter-action]");
-  if (!button) {
-    return;
-  }
-  const chapterNumber = Number(button.dataset.chapterNumber || 1);
-  const action = button.dataset.chapterAction;
-  if (action === "preview") {
-    selectPreviewChapter(chapterNumber);
-    switchView("preview");
-    return;
-  }
-  selectChapter(chapterNumber);
-  if (action === "review") {
-    switchView("studioDraft");
-  }
-});
-elements.approveDecisionBtn.addEventListener("click", () => setReviewDecision("approved"));
-elements.rejectDecisionBtn.addEventListener("click", () => setReviewDecision("rejected"));
-elements.addCharacterBtn.addEventListener("click", () => addCharacter());
-elements.charactersBuilder.addEventListener("click", (event) => {
-  const removeButton = event.target.closest(".remove-character-btn");
-  if (!removeButton) {
-    return;
-  }
-  removeCharacter(Number(removeButton.dataset.index || 0));
-});
-elements.planBtn.addEventListener("click", planChapter);
-elements.approveBtn.addEventListener("click", approvePlan);
-elements.refreshBtn.addEventListener("click", refreshState);
-elements.fillExampleBtn.addEventListener("click", fillExample);
-elements.continueNextBtn.addEventListener("click", continueNextChapter);
-elements.showNewBookBtn.addEventListener("click", () => {
-  elements.newBookPanel.classList.remove("is-hidden");
-  elements.newBookTitle.focus();
-});
-elements.cancelNewBookBtn.addEventListener("click", () => elements.newBookPanel.classList.add("is-hidden"));
-elements.createBookBtn.addEventListener("click", createNewBook);
-elements.confirmSettingDraftBtn.addEventListener("click", confirmSettingDraft);
-elements.refreshHomeProjectsBtn.addEventListener("click", () => loadProjects().then(() => showToast("作品列表已刷新。")).catch((error) => showToast(error.message)));
-elements.homeProjectGrid.addEventListener("click", (event) => {
-  const actionButton = event.target.closest("[data-project-action]");
-  if (!actionButton) {
-    return;
-  }
-  const projectId = actionButton.dataset.projectId;
-  const action = actionButton.dataset.projectAction;
-  if (action === "preview") {
-    openProjectWorkbench(projectId, "preview").catch((error) => showToast(error.message));
-    return;
-  }
-  if (action === "continue") {
-    continueProject(projectId).catch((error) => showToast(error.message));
-    return;
-  }
-  openProjectWorkbench(projectId, "overview").catch((error) => showToast(error.message));
-});
-elements.generateFullPlanBtn.addEventListener("click", () => generateFullPlan());
-elements.saveFullPlanBtn.addEventListener("click", saveFullPlan);
-elements.enterFirstChapterBtn.addEventListener("click", enterFirstChapter);
-elements.batchPlanBtn.addEventListener("click", runBatchPlan);
-elements.batchGenerateBtn.addEventListener("click", runBatchGenerate);
-elements.batchQueuePanel.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-batch-action]");
-  if (!button) {
-    return;
-  }
-  handleBatchChapterAction(button.dataset.batchAction, Number(button.dataset.chapterNumber || 1))
-    .catch((error) => showToast(error.message));
-});
-elements.readerCatalog.addEventListener("click", (event) => {
-  const button = event.target.closest(".reader-chapter");
-  if (!button) {
-    return;
-  }
-  selectPreviewChapter(Number(button.dataset.previewChapter || 1));
-});
-elements.previewContent.addEventListener("click", (event) => {
-  const button = event.target.closest('[data-preview-action="process"]');
-  if (!button) {
-    return;
-  }
-  selectChapter(Number(button.dataset.chapterNumber || appState.previewChapterNumber || 1));
-});
-elements.prevChapterBtn.addEventListener("click", () => movePreviewChapter(-1));
-elements.nextChapterBtn.addEventListener("click", () => movePreviewChapter(1));
-elements.acceptChapterBtn.addEventListener("click", acceptChapter);
-elements.reviseNowBtn.addEventListener("click", () => reviseDraft("用户立即同意 Writer 按 Reviewer 意见修订。"));
-elements.waitRevisionBtn.addEventListener("click", holdRevisionDecision);
-elements.confirmReviseBtn.addEventListener("click", () => reviseDraft("用户重新确认打回 Writer 修改。"));
 
-renderCharacterForms();
-renderMetaMessage();
-updateStage("planning");
-updateOverview();
-renderMemoryPanels();
-setReviewDecision("approved");
-bindAutoResize();
-loadProject()
-  .then((project) => {
-    appState.previewChapterNumber = project.latest_edited_chapter_number || project.current_chapter_number || 1;
-    const previewChapter = getProjectChapters().find((chapter) => chapter.chapter_number === appState.previewChapterNumber)
-      || getProjectChapters()[0];
-    renderPreviewChapter(previewChapter || null);
-    return loadProjectCodex(project.project_id).then(() => loadProjects());
-  })
-  .catch((error) => showToast(error.message));
+  async function loadIndependentWorkspace(projectId) {
+    if (!projectId) return;
+    state.editorProjectId = projectId;
+    setActiveScreen("independent");
+    elements.editorProjectTitle.textContent = "正在读取…";
+    try {
+      const workspace = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}`);
+      state.workspace = workspace;
+      state.editorMode = workspace.mode || state.editorMode || "independent";
+      state.activeArchive = workspace.archive;
+      state.editorConflict = null;
+      if (!workspace.initialized) {
+        renderStartWorkspace(workspace);
+      } else {
+        renderEditorWorkspace();
+      }
+      void loadNotifications();
+    } catch (error) {
+      if (error.status === 401) {
+        state.account = null;
+        state.sessionExpired = error.code === "session_expired";
+        navigate("/login", { replace: true });
+        return;
+      }
+      elements.editorProjectTitle.textContent = "读取失败";
+      elements.startWorkspaceContent.classList.remove("is-hidden");
+      elements.editorWorkspaceContent.classList.add("is-hidden");
+      setEditorNotice(error.message || "独立作品读取失败，请稍后重试。", "red");
+    }
+  }
+
+  function renderChapterList(version) {
+    elements.chapterList.innerHTML = version.chapters.map((chapter) => `
+      <button class="chapter-list-item ${chapter.chapter_id === state.activeChapterId ? "is-active" : ""} ${chapter.status === "failed" ? "is-failed" : ""}" type="button" data-action="select-chapter" data-chapter-id="${escapeHtml(chapter.chapter_id)}">
+        <span class="chapter-list-number mono">${String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapter.status === "ready" ? "已分析" : chapter.status === "analyzing" ? "分析中" : chapter.status === "failed" ? "分析失败" : "写作中")}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
+      </button>`).join("");
+  }
+
+  function renderArchiveSummary(archive, selectedChapterNumber = null) {
+    state.activeArchive = archive || { characters: [], storylines: [], foreshadowing: [], questions: [], snapshots: [] };
+    const characters = state.activeArchive.characters || [];
+    const storylines = state.activeArchive.storylines || [];
+    const foreshadowing = state.activeArchive.foreshadowing || [];
+    const questions = state.activeArchive.questions || [];
+    elements.archiveDrawerTitle.textContent = selectedChapterNumber ? `第 ${selectedChapterNumber} 章快照 · 只读` : "最新状态";
+    elements.analysisLabel.textContent = state.activeArchive.analysis_label || "确定性演示分析（未配置模型 Key）";
+    elements.archiveSummary.innerHTML = `
+      <section class="archive-summary-section"><div class="archive-summary-heading"><strong>人物</strong><span>${characters.length}</span></div>${characters.length ? characters.map((character) => `<article class="archive-character-card"><div class="character-glyph" aria-hidden="true"><span></span></div><div class="archive-character-copy"><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(character.role)} · 来源第 ${character.source_chapter_number} 章</small><p>${escapeHtml(character.profile)}</p><button type="button" class="text-link character-trial-link" data-action="open-trial" data-character-id="${escapeHtml(character.character_id)}">试绘这个角色</button></div></article>`).join("") : `<p class="archive-empty-note">完成本章后，人物会在这里留下来源。</p>`}</section>
+      <section class="archive-summary-section"><div class="archive-summary-heading"><strong>剧情线</strong><span>${storylines.length}</span></div>${storylines.length ? `<ul class="archive-list">${storylines.map((item) => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.summary)} · 第 ${item.source_chapter_number} 章</span></li>`).join("")}</ul>` : `<p class="archive-empty-note">还没有记录剧情线。</p>`}</section>
+      <section class="archive-summary-section"><div class="archive-summary-heading"><strong>伏笔</strong><span>${foreshadowing.length}</span></div>${foreshadowing.length ? `<ul class="archive-list compact-list">${foreshadowing.map((item) => `<li><strong>${escapeHtml(item.status === "open" ? "未解" : "已解")}</strong><span>${escapeHtml(item.text)} · 第 ${item.source_chapter_number} 章</span></li>`).join("")}</ul>` : `<p class="archive-empty-note">完成本章后，伏笔会按来源保留。</p>`}</section>
+      <section class="archive-summary-section"><div class="archive-summary-heading"><strong>疑问点</strong><span>${questions.length}</span></div>${questions.length ? `<ul class="archive-list compact-list question-list">${questions.map((item) => `<li><span>${escapeHtml(item.text)} · 来源第 ${item.source_chapter_number} 章</span></li>`).join("")}</ul>` : `<p class="archive-empty-note">暂无疑问点。</p>`}</section>`;
+    const snapshots = state.workspace?.active_version?.archive?.snapshots || [];
+    elements.archiveSnapshotSelect.innerHTML = `<option value="">最新状态</option>${snapshots.map((snapshot) => `<option value="${snapshot.chapter_number}" ${String(selectedChapterNumber) === String(snapshot.chapter_number) ? "selected" : ""}>第 ${snapshot.chapter_number} 章快照</option>`).join("")}`;
+  }
+
+  function renderEditorWorkspace() {
+    const workspace = state.workspace;
+    const version = activeEditorVersion();
+    if (!workspace || !version) return;
+    elements.startWorkspaceContent.classList.add("is-hidden");
+    elements.editorWorkspaceContent.classList.remove("is-hidden");
+    elements.editorProjectTitle.textContent = workspace.title || "—";
+    const aiEditor = workspace.mode === "ai_assisted" || state.editorMode === "ai_assisted";
+    elements.editorModeLabel.textContent = aiEditor ? "AI 辅助写作" : "独立创作";
+    elements.writingModeNote.textContent = aiEditor ? "AI 辅助写作 · 唯一正式正文" : "独立创作 · 正式正文";
+    if (!state.activeChapterId || !version.chapters.some((chapter) => chapter.chapter_id === state.activeChapterId)) {
+      state.activeChapterId = version.chapters[0]?.chapter_id || null;
+      state.editorDirty = false;
+      state.editorConflict = null;
+    }
+    const chapter = version.chapters.find((item) => item.chapter_id === state.activeChapterId);
+    if (!chapter) return;
+    if (!state.editorDirty) {
+      state.editorBuffer = chapter.content || "";
+      state.editorTitleBuffer = chapter.title || "";
+      state.editorRevision = chapter.server_revision || 0;
+    }
+    elements.editorChapterHeading.textContent = chapter.title || `第${chapter.chapter_number}章`;
+    elements.chapterTitleInput.value = state.editorTitleBuffer;
+    elements.chapterEditor.value = state.editorBuffer;
+    elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
+    elements.editorRevisionLabel.textContent = `REV / ${state.editorRevision}`;
+    elements.completeChapterButton.disabled = !state.editorBuffer.trim() || state.editorReadOnly;
+    renderChapterList(version);
+    renderArchiveSummary(state.activeArchive || workspace.archive);
+    if (workspace.pending_changes?.changes?.length) {
+      setEditorNoticeHtml(`<strong>有 ${workspace.pending_changes.changes.length} 章旧稿修改等待确认。</strong><button class="notice-action" type="button" data-action="review-changes">确认全部修改 →</button>`);
+    } else if (!state.editorConflict && !state.editorSaving) {
+      elements.editorNotice.classList.add("is-hidden");
+    }
+    const latestTask = (workspace.tasks || []).find((task) => task.version_id === version.version_id && ["queued", "running", "failed"].includes(task.status));
+    if (latestTask && latestTask.status === "failed") {
+      setEditorNoticeHtml(`<strong>后台分析失败。</strong> ${escapeHtml(latestTask.error_message || "可以修改正文后重试。")} <button class="notice-action" type="button" data-action="retry-task" data-task-id="${escapeHtml(latestTask.task_id)}">重试 →</button>`, "red");
+      setEditorSaveState("分析失败", "error");
+    } else if (latestTask && ["queued", "running"].includes(latestTask.status)) {
+      setEditorSaveState("后台分析中…", "saving");
+    } else if (!state.editorDirty && !state.editorSaving && !state.editorConflict) {
+      setEditorSaveState(chapter.status === "ready" ? "已保存" : "等待保存", chapter.status === "ready" ? "saved" : "");
+    }
+  }
+
+  function handleEditorInput() {
+    if (state.editorReadOnly) return;
+    state.editorBuffer = elements.chapterEditor.value;
+    state.editorTitleBuffer = elements.chapterTitleInput.value;
+    state.editorDirty = true;
+    state.editorChangeToken += 1;
+    state.editorConflict = null;
+    elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
+    elements.completeChapterButton.disabled = !state.editorBuffer.trim();
+    setEditorSaveState("本地缓冲");
+    window.clearTimeout(state.saveTimer);
+    state.saveTimer = window.setTimeout(() => { flushPendingSave(); }, 720);
+  }
+
+  function renderSaveConflict(error) {
+    state.editorConflict = error.data?.chapter || null;
+    setEditorSaveState("保存冲突", "error");
+    setEditorNoticeHtml(`<strong>另一端已经保存了这章。</strong> 当前草稿没有被静默覆盖。<button class="notice-action" type="button" data-action="reload-server">载入服务器版本</button><button class="notice-action" type="button" data-action="keep-local">保留当前草稿并重试</button>`, "red");
+  }
+
+  async function flushPendingSave({ keepalive = false } = {}) {
+    window.clearTimeout(state.saveTimer);
+    while (state.editorDirty || state.editorSaving) {
+      if (state.savePromise) {
+        const completed = await state.savePromise;
+        if (!completed) return false;
+        continue;
+      }
+      if (!state.editorDirty) return true;
+      const completed = await saveEditorDraft({ keepalive });
+      if (!completed) return false;
+    }
+    return true;
+  }
+
+  async function saveEditorDraft({ keepalive = false } = {}) {
+    const projectId = state.editorProjectId;
+    const chapterId = state.activeChapterId;
+    const localContent = state.editorBuffer;
+    const localTitle = state.editorTitleBuffer;
+    const expectedRevision = state.editorRevision;
+    const changeToken = state.editorChangeToken;
+    state.editorSaving = true;
+    setEditorSaveState("保存中…", "saving");
+    const promise = (async () => {
+      try {
+        const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}/chapters/${encodeURIComponent(chapterId)}/draft`, {
+          method: "PUT",
+          keepalive,
+          body: JSON.stringify({ content: localContent, title: localTitle, expected_revision: expectedRevision }),
+        });
+        state.workspace = payload.workspace;
+        state.activeArchive = payload.workspace.archive;
+        state.editorRevision = payload.chapter.server_revision;
+        state.editorConflict = null;
+        if (state.editorChangeToken === changeToken) {
+          state.editorDirty = false;
+          setEditorSaveState("已保存", "saved");
+        } else {
+          // 保存请求期间又有输入：只更新 revision，保留新缓冲并让 flush 再写一次。
+          state.editorDirty = true;
+          setEditorSaveState("本地缓冲", "");
+        }
+        renderEditorWorkspace();
+        return true;
+      } catch (error) {
+        if (error.code === "save_conflict") renderSaveConflict(error);
+        else setEditorNotice(error.message || "保存失败，可以稍后重试。", "red");
+        setEditorSaveState("保存失败", "error");
+        return false;
+      } finally {
+        state.editorSaving = false;
+        state.savePromise = null;
+      }
+    })();
+    state.savePromise = promise;
+    return promise;
+  }
+
+  async function completeCurrentChapter() {
+    if (state.editorReadOnly) return;
+    const saved = await flushPendingSave();
+    if (!saved || state.editorDirty) return;
+    const button = elements.completeChapterButton;
+    button.disabled = true;
+    setEditorSaveState("已保存，分析中…", "saving");
+    try {
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapters/${encodeURIComponent(state.activeChapterId)}/complete`, {
+        method: "POST",
+        body: JSON.stringify({ content: state.editorBuffer, expected_revision: state.editorRevision, idempotency_key: `browser-${state.activeChapterId}-${state.editorRevision}` }),
+      });
+      await pollIndependentTask(payload.task.task_id);
+    } catch (error) {
+      setEditorNotice(error.message || "完成本章没有提交成功，请确认正文已经保存。", "red");
+      setEditorSaveState("完成失败", "error");
+      button.disabled = !state.editorBuffer.trim();
+    }
+  }
+
+  function wait(milliseconds) {
+    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  }
+
+  async function pollIndependentTask(taskId) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/tasks/${encodeURIComponent(taskId)}`);
+      if (payload.task.status === "completed") {
+        await loadIndependentWorkspace(state.editorProjectId);
+        setEditorNotice("本章完成，故事档案已更新；来源章节已记录。", "blue");
+        showToast("本章已完成，档案快照已保存。");
+        return;
+      }
+      if (payload.task.status === "failed") {
+        await loadIndependentWorkspace(state.editorProjectId);
+        setEditorNoticeHtml(`<strong>后台分析失败。</strong> ${escapeHtml(payload.task.error_message || "可以修改正文后重试。")} <button class="notice-action" type="button" data-action="retry-task" data-task-id="${escapeHtml(taskId)}">重试 →</button>`, "red");
+        return;
+      }
+      await wait(260);
+    }
+    setEditorNotice("后台分析仍在运行，离开或刷新后会继续恢复。", "blue");
+  }
+
+  async function retryIndependentTask(taskId) {
+    try {
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+      if (payload.task.status === "completed") {
+        await loadIndependentWorkspace(state.editorProjectId);
+        setEditorNotice("分析重试完成，故事档案已更新。", "blue");
+      } else {
+        await pollIndependentTask(taskId);
+      }
+    } catch (error) {
+      setEditorNotice(error.message || "重试没有完成。", "red");
+    }
+  }
+
+  async function selectEditorChapter(chapterId) {
+    if (chapterId === state.activeChapterId) return;
+    if (state.editorDirty) {
+      const saved = await flushPendingSave();
+      if (!saved) return;
+    }
+    state.activeChapterId = chapterId;
+    state.editorDirty = false;
+    state.editorConflict = null;
+    renderEditorWorkspace();
+  }
+
+  async function addIndependentChapter() {
+    if (state.editorDirty && !(await flushPendingSave())) return;
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapters`, { method: "POST" });
+      await loadIndependentWorkspace(state.editorProjectId);
+      showToast("新章节已加入目录。");
+    } catch (error) {
+      setEditorNotice(error.message || "新章节创建失败。", "red");
+    }
+  }
+
+  function openPendingChangesDialog() {
+    const changes = state.workspace?.pending_changes?.changes || [];
+    elements.pendingChangesContent.innerHTML = changes.length ? `<div class="change-summary-list">${changes.map((change) => `<article><div><span class="mono">第 ${change.chapter_number} 章</span><strong>${escapeHtml(change.title)}</strong></div><p>${change.before_word_count} 字 → ${change.after_word_count} 字（${change.delta_word_count >= 0 ? "+" : ""}${change.delta_word_count}）</p><small>${escapeHtml(change.changed_ranges?.join("；") || "改动范围已记录")} · ${escapeHtml(change.recommendation)}</small></article>`).join("")}</div>` : `<p class="archive-empty-note">当前没有待确认的旧章修改。</p>`;
+    rememberDialogFocus(elements.pendingChangesDialog);
+    if (typeof elements.pendingChangesDialog.showModal === "function") elements.pendingChangesDialog.showModal();
+    else elements.pendingChangesDialog.setAttribute("open", "");
+  }
+
+  async function resolvePendingChanges(decision) {
+    elements.ignoreChangesButton.disabled = true;
+    elements.rebuildChangesButton.disabled = true;
+    try {
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/pending-changes/resolve`, { method: "POST", body: JSON.stringify({ decision }) });
+      elements.pendingChangesDialog.close();
+      state.workspace = payload.workspace;
+      state.activeArchive = payload.workspace.archive;
+      await loadIndependentWorkspace(state.editorProjectId);
+      showToast(decision === "ignore" ? "已保留现有档案并继续。" : "已创建新稿本，档案开始全文重建。");
+    } catch (error) {
+      setEditorNotice(error.message || "修改确认没有完成。", "red");
+    } finally {
+      elements.ignoreChangesButton.disabled = false;
+      elements.rebuildChangesButton.disabled = false;
+    }
+  }
+
+  function openVersionHistoryDialog() {
+    const versions = state.workspace?.versions || [];
+    elements.versionHistoryContent.innerHTML = versions.length ? versions.map((version) => `
+      <article class="version-history-item ${version.status === "active" ? "is-active" : ""}">
+        <div><span class="eyebrow">${escapeHtml(version.status === "active" ? "当前稿本" : "历史稿本")}</span><strong>${escapeHtml(version.label)}</strong><small>${version.chapter_count} 章 · ${Number(version.total_word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(formatDate(version.created_at))}</small></div>
+        <div class="version-actions"><button type="button" class="quiet-link" data-action="preview-version" data-version-id="${escapeHtml(version.version_id)}">只读预览</button>${version.status !== "active" ? `<button type="button" class="text-link" data-action="restore-version" data-version-id="${escapeHtml(version.version_id)}">恢复为当前稿本</button>` : ""}</div>
+      </article>`).join("") : `<p class="archive-empty-note">还没有历史稿本。</p>`;
+    elements.versionPreviewContent.classList.add("is-hidden");
+    rememberDialogFocus(elements.versionHistoryDialog);
+    if (typeof elements.versionHistoryDialog.showModal === "function") elements.versionHistoryDialog.showModal();
+    else elements.versionHistoryDialog.setAttribute("open", "");
+  }
+
+  async function previewVersion(versionId) {
+    try {
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/versions/${encodeURIComponent(versionId)}/preview`);
+      const version = payload.version;
+      const firstChapter = version.chapters?.[0];
+      elements.versionPreviewContent.classList.remove("is-hidden");
+      elements.versionPreviewContent.innerHTML = `<div class="version-preview-head"><span class="eyebrow">只读预览 / ${escapeHtml(version.label)}</span><strong>${version.chapters?.length || 0} 章 · ${Number(version.chapters?.reduce((sum, chapter) => sum + (chapter.word_count || 0), 0) || 0).toLocaleString("zh-CN")} 字</strong></div><p>${escapeHtml(firstChapter?.content?.slice(0, 260) || "这条历史稿本还没有正文片段。")} ${firstChapter?.content?.length > 260 ? "…" : ""}</p><small>历史正文不会被本次预览改写。恢复时会创建新的当前稿本。</small>`;
+    } catch (error) {
+      setEditorNotice(error.message || "历史稿本预览失败。", "red");
+    }
+  }
+
+  async function restoreVersion(versionId) {
+    const button = $(`[data-action="restore-version"][data-version-id="${CSS.escape(versionId)}"]`);
+    if (button) button.disabled = true;
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/versions/${encodeURIComponent(versionId)}/restore`, { method: "POST" });
+      elements.versionHistoryDialog.close();
+      await loadIndependentWorkspace(state.editorProjectId);
+      showToast("历史正文已恢复为新的当前稿本。");
+    } catch (error) {
+      if (button) button.disabled = false;
+      setEditorNotice(error.message || "历史稿本恢复失败。", "red");
+    }
+  }
+
+  async function selectArchiveSnapshot(chapterNumber) {
+    if (!chapterNumber) {
+      renderArchiveSummary(state.workspace?.archive || state.activeArchive);
+      return;
+    }
+    try {
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/archive?chapter_number=${encodeURIComponent(chapterNumber)}`);
+      renderArchiveSummary(payload.archive, payload.selected_chapter_number);
+    } catch (error) {
+      setEditorNotice(error.message || "档案快照读取失败。", "red");
+    }
+  }
+
+  function openTrialDialog(characterId) {
+    state.trialCharacterId = characterId;
+    elements.trialEstimate.textContent = "预计 12 积分 · 未配置图片服务";
+    rememberDialogFocus(elements.trialDialog);
+    if (typeof elements.trialDialog.showModal === "function") elements.trialDialog.showModal();
+    else elements.trialDialog.setAttribute("open", "");
+  }
+
+  async function confirmTrialSketch() {
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/characters/${encodeURIComponent(state.trialCharacterId)}/trial-sketch`, { method: "POST", body: JSON.stringify({ style: elements.trialStyleSelect.value, confirm: true }) });
+    } catch (error) {
+      if (error.code === "image_service_unconfigured") {
+        elements.trialDialog.close();
+        setEditorNotice(error.message || "未配置图片服务，试绘未触发，也未扣除积分。", "blue");
+        showToast("试绘未触发，没有扣除积分。");
+      } else {
+        setEditorNotice(error.message || "试绘请求没有完成。", "red");
+      }
+    }
+  }
+
+  function setWorkspaceNotice(element, message, variant = "") {
+    if (!element) return;
+    element.textContent = message || "";
+    element.className = `notice ${message ? "" : "is-hidden"} ${variant ? `notice-${variant}` : "notice-blue"}`;
+  }
+
+  function archiveModeLabel(mode) {
+    return mode === "ai_assisted" ? "AI 辅助写作" : "独立创作";
+  }
+
+  function archiveAnalysisLabel(value) {
+    const label = String(value || "").trim();
+    if (!label || label.includes("确定性演示分析") || label.includes("未配置模型 Key")) return "演示分析";
+    return label;
+  }
+
+  function renderArchivePage(data) {
+    state.archiveWorkspace = data;
+    state.archiveProjectId = data.project_id;
+    state.archiveMode = data.mode || "independent";
+    elements.archivePageProjectTitle.textContent = data.title || "—";
+    elements.archiveModeLabel.textContent = archiveModeLabel(data.mode);
+    const archive = data.archive || { characters: [], storylines: [], foreshadowing: [], questions: [], snapshots: [] };
+    const snapshots = data.available_snapshots || archive.snapshots || [];
+    const latestNumber = archive.latest_chapter_number || data.selected_chapter_number || 0;
+    if (data.mode === "ai_assisted") state.aiProjectId = data.project_id;
+    elements.archivePageStatus.textContent = data.read_only
+      ? `第 ${data.selected_chapter_number} 章快照 · 只读`
+      : `当前状态 · 截至第 ${latestNumber || "—"} 章`;
+    elements.archiveAiLink.classList.toggle("is-hidden", data.mode !== "ai_assisted");
+    elements.archivePageSnapshotSelect.innerHTML = `<option value="">最新状态</option>${snapshots.map((snapshot) => `<option value="${snapshot.chapter_number}" ${data.read_only && String(data.selected_chapter_number) === String(snapshot.chapter_number) ? "selected" : ""}>第 ${snapshot.chapter_number} 章快照</option>`).join("")}`;
+    if (!data.initialized) {
+      elements.archivePageContent.innerHTML = `<div class="archive-empty-page"><div><div class="empty-mark">⌁</div><h2>档案还在等第一条确定信息</h2><p>完成一个章节，或在 AI 导演台完成一轮正文后，人物、剧情线、伏笔和疑问点会按来源章节出现在这里。</p></div></div>`;
+      return;
+    }
+    const characters = archive.characters || [];
+    const storylines = archive.storylines || [];
+    const foreshadowing = archive.foreshadowing || [];
+    const questions = archive.questions || [];
+    const timelineNodes = snapshots.length ? snapshots.map((snapshot) => `
+      <div class="archive-timeline-node ${String(data.selected_chapter_number || "") === String(snapshot.chapter_number) || (!data.read_only && snapshot.chapter_number === latestNumber) ? "is-current" : ""}">
+        <button type="button" aria-label="查看第 ${snapshot.chapter_number} 章快照" data-action="archive-snapshot" data-chapter-number="${snapshot.chapter_number}"></button>
+        <strong>第 ${snapshot.chapter_number} 章</strong><small>${escapeHtml(archiveAnalysisLabel(snapshot.analysis_label))}</small>
+      </div>`).join("") : `<p class="archive-note">完成本章后，这里会出现可回看的时间节点。</p>`;
+    const empty = (label) => `<p class="archive-note">${label}还没有记录；完成后会在来源章节留下它。</p>`;
+    elements.archivePageContent.innerHTML = `
+      <section class="archive-timeline-card" aria-label="章节快照时间线">
+        <div class="archive-timeline-intro"><span class="eyebrow">故事脉络 / ${data.read_only ? "历史" : "最新"}</span><strong>${data.read_only ? `第 ${data.selected_chapter_number} 章` : "最新状态"}</strong><p>${data.read_only ? "历史快照不会改变当前档案。" : "默认显示当前稿本的最新分析。"}</p></div>
+        <div class="archive-timeline-track">${timelineNodes}</div>
+      </section>
+      <nav class="archive-section-nav" aria-label="档案分类"><a class="archive-section-link is-selected" href="#archive-characters" data-archive-anchor="archive-characters"><span>01</span>人物</a><a class="archive-section-link" href="#archive-storylines" data-archive-anchor="archive-storylines"><span>02</span>剧情线</a><a class="archive-section-link" href="#archive-foreshadowing" data-archive-anchor="archive-foreshadowing"><span>03</span>伏笔</a><a class="archive-section-link" href="#archive-questions" data-archive-anchor="archive-questions"><span>04</span>疑问点</a></nav>
+      <div class="archive-detail-grid">
+        <section id="archive-characters" class="archive-detail-panel" data-archive-section="archive-characters"><header><h2>人物</h2><span class="archive-count">${characters.length}</span></header><div class="archive-card-list">${characters.length ? characters.map((character) => `<article class="archive-full-character"><div class="character-glyph" aria-hidden="true"><span></span></div><div><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(character.role)} · 来源第 ${character.source_chapter_number} 章</small><p>${escapeHtml(character.profile)} ${escapeHtml(character.current_state || "")}</p><span class="archive-source">来源 / 第 ${character.source_chapter_number} 章</span></div></article>`).join("") : empty("人物")}</div></section>
+        <section id="archive-storylines" class="archive-detail-panel" data-archive-section="archive-storylines"><header><h2>剧情线</h2><span class="archive-count">${storylines.length}</span></header><div class="archive-card-list">${storylines.length ? storylines.map((item) => `<article class="archive-thread-item"><div class="archive-thread-line"><span></span></div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.summary)}</p><span class="archive-source">来源 / 第 ${item.source_chapter_number} 章</span></article>`).join("") : empty("剧情线")}</div></section>
+        <section id="archive-foreshadowing" class="archive-detail-panel" data-archive-section="archive-foreshadowing"><header><h2>伏笔</h2><span class="archive-count">${foreshadowing.length}</span></header><div class="archive-card-list">${foreshadowing.length ? foreshadowing.map((item) => `<article class="archive-thread-item"><strong>${escapeHtml(item.status === "open" ? "未解 · " : "已回收 · ")}${escapeHtml(item.text)}</strong><p>状态来自本次档案分析，作者可以继续观察它如何变化。</p><span class="archive-source">来源 / 第 ${item.source_chapter_number} 章</span></article>`).join("") : empty("伏笔")}</div></section>
+        <section id="archive-questions" class="archive-detail-panel questions-panel" data-archive-section="archive-questions"><header><h2>疑问点</h2><span class="archive-count">${questions.length}</span></header><div class="archive-card-list">${questions.length ? questions.map((item) => `<article class="archive-question"><strong>${escapeHtml(item.text)}</strong><small>来源 / 第 ${item.source_chapter_number} 章 · 这是需要回看的线索，不是阻断写作的错误。</small></article>`).join("") : empty("疑问点")}</div></section>
+      </div>
+      <div class="archive-footer-legend"><span><i></i>已按来源章节记录</span><span><i class="red"></i>温和疑问，保持可回看</span><span class="mono">${escapeHtml(archiveAnalysisLabel(archive.analysis_label))}</span></div>`;
+    bindArchiveAnchors();
+  }
+
+  function bindArchiveAnchors() {
+    const links = $$("[data-archive-anchor]", elements.archivePageContent);
+    const sections = $$("[data-archive-section]", elements.archivePageContent);
+    if (!links.length || !sections.length) return;
+    state.archiveScrollSpyCleanup?.();
+    state.archiveAnchorObserver?.disconnect?.();
+    state.archiveAnchorObserver = null;
+    state.archiveAnchorIntent = null;
+    window.clearTimeout(state.archiveAnchorUnlockTimer);
+    state.archiveAnchorUnlockTimer = null;
+    const activate = (id) => {
+      links.forEach((link) => {
+        const active = link.dataset.archiveAnchor === id;
+        link.classList.toggle("is-selected", active);
+        if (active) link.setAttribute("aria-current", "location");
+        else link.removeAttribute("aria-current");
+      });
+    };
+    const scheduleArchiveAnchorStability = () => {
+      window.clearTimeout(state.archiveAnchorUnlockTimer);
+      state.archiveAnchorUnlockTimer = window.setTimeout(() => {
+        state.archiveAnchorUnlockTimer = null;
+        if (state.archiveAnchorIntent) state.archiveAnchorIntent.programmatic = false;
+      }, 450);
+    };
+    const cancelArchiveAnchorIntent = () => {
+      if (!state.archiveAnchorIntent) return;
+      state.archiveAnchorIntent = null;
+      window.clearTimeout(state.archiveAnchorUnlockTimer);
+      state.archiveAnchorUnlockTimer = null;
+      update();
+    };
+    const update = () => {
+      if (state.archiveAnchorIntent) {
+        activate(state.archiveAnchorIntent.id);
+        if (state.archiveAnchorIntent.programmatic) scheduleArchiveAnchorStability();
+        return;
+      }
+      const scrollY = window.scrollY || window.pageYOffset || 0;
+      const maxScroll = Math.max(
+        0,
+        document.documentElement.scrollHeight - window.innerHeight,
+      );
+      let activeSection = sections[0];
+      const atDocumentBottom = maxScroll <= 0 || scrollY >= maxScroll - 4;
+      if (atDocumentBottom) {
+        activeSection = sections[sections.length - 1];
+      } else {
+        const focusLine = scrollY + Math.max(120, Math.min(window.innerHeight * 0.55, window.innerHeight - 160));
+        sections.forEach((section) => {
+          const rect = section.getBoundingClientRect();
+          if (rect.top <= focusLine - scrollY && rect.bottom >= 0) activeSection = section;
+        });
+      }
+      activate(activeSection.id);
+    };
+    const handleArchiveScrollEnd = () => {
+      if (state.archiveAnchorIntent) {
+        scheduleArchiveAnchorStability();
+        return;
+      }
+      update();
+    };
+    links.forEach((link) => link.addEventListener("click", (event) => {
+      const id = link.dataset.archiveAnchor;
+      const target = document.getElementById(id);
+      event.preventDefault();
+      if (target) {
+        state.archiveAnchorIntent = { id, programmatic: true };
+        activate(target.id);
+        scheduleArchiveAnchorStability();
+        target.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+          block: "center",
+        });
+      }
+      window.history.replaceState(null, "", `#${id}`);
+    }));
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    window.addEventListener("scrollend", handleArchiveScrollEnd);
+    window.addEventListener("wheel", cancelArchiveAnchorIntent, { capture: true, passive: true });
+    window.addEventListener("touchstart", cancelArchiveAnchorIntent, { capture: true, passive: true });
+    window.addEventListener("touchmove", cancelArchiveAnchorIntent, { capture: true, passive: true });
+    window.addEventListener("pointerdown", cancelArchiveAnchorIntent, { capture: true, passive: true });
+    window.addEventListener("pointermove", cancelArchiveAnchorIntent, { capture: true, passive: true });
+    const handleArchiveAnchorKeydown = (event) => {
+      const scrollKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", " ", "Spacebar"];
+      const target = event.target;
+      const isEditable = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+      if (!isEditable && scrollKeys.includes(event.key)) cancelArchiveAnchorIntent();
+    };
+    window.addEventListener("keydown", handleArchiveAnchorKeydown, { capture: true });
+    const cleanup = () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scrollend", handleArchiveScrollEnd);
+      window.removeEventListener("wheel", cancelArchiveAnchorIntent, true);
+      window.removeEventListener("touchstart", cancelArchiveAnchorIntent, true);
+      window.removeEventListener("touchmove", cancelArchiveAnchorIntent, true);
+      window.removeEventListener("pointerdown", cancelArchiveAnchorIntent, true);
+      window.removeEventListener("pointermove", cancelArchiveAnchorIntent, true);
+      window.removeEventListener("keydown", handleArchiveAnchorKeydown, true);
+      window.clearTimeout(state.archiveAnchorUnlockTimer);
+      state.archiveAnchorUnlockTimer = null;
+      state.archiveAnchorIntent = null;
+      if (state.archiveScrollSpyCleanup === cleanup) state.archiveScrollSpyCleanup = null;
+    };
+    state.archiveScrollSpyCleanup = cleanup;
+    update();
+  }
+
+  async function loadArchiveWorkspace(projectId, chapterNumber = null) {
+    if (!projectId) return;
+    state.archiveProjectId = projectId;
+    setActiveScreen("archive");
+    try {
+      const query = chapterNumber ? `?chapter_number=${encodeURIComponent(chapterNumber)}` : "";
+      const payload = await requestJson(`/api/archive/projects/${encodeURIComponent(projectId)}${query}`);
+      renderArchivePage(payload);
+      setWorkspaceNotice(elements.archivePageNotice, "");
+      void loadNotifications();
+    } catch (error) {
+      if (error.status === 401) {
+        state.account = null;
+        state.sessionExpired = error.code === "session_expired";
+        navigate("/login", { replace: true });
+        return;
+      }
+      setWorkspaceNotice(elements.archivePageNotice, error.message || "故事档案读取失败，请稍后重试。", "red");
+    }
+  }
+
+  function renderAIConversation(messages) {
+    const items = messages || [];
+    elements.aiConversationCount.textContent = `${items.filter((item) => item.role === "author").length} 轮`;
+    elements.aiConversation.innerHTML = items.length ? items.map((message) => `
+      <article class="ai-message ${message.role === "editor" ? "is-editor" : ""}"><div class="ai-message-mark" aria-hidden="true">${message.role === "editor" ? "编" : "你"}</div><div class="ai-message-content"><div class="ai-message-meta"><strong>${message.role === "editor" ? "主编" : "你"}</strong><span>${escapeHtml(formatDate(message.created_at))}</span></div><p>${escapeHtml(message.content)}</p></div></article>`).join("") : `<div class="ai-conversation-empty">把一条想法交给主编。<br />他会先整理方向，再把需要你决定的地方留下来。</div>`;
+    elements.aiConversation.scrollTop = elements.aiConversation.scrollHeight;
+  }
+
+  function blueprintFieldValue(blueprint, key) {
+    if (key === "volume_outline") return (blueprint?.[key] || []).join("\n");
+    return blueprint?.[key] || "";
+  }
+
+  function modelRuntimeLabel(workspace) {
+    if (workspace?.mode === "live" && workspace?.model_runtime?.status === "connected") {
+      return "模型已连接·开发测试，不结算创作积分";
+    }
+    if (workspace?.mode === "live" && workspace?.model_runtime?.status === "failed") {
+      return "模型调用失败，可重试；不消耗创作积分";
+    }
+    return "演示推演 · 未配置模型 Key · 不消耗创作积分";
+  }
+
+  function renderAIStudio(workspace) {
+    state.aiWorkspace = workspace;
+    state.aiProjectId = workspace.project_id;
+    state.aiRunId = workspace.active_run?.run_id || null;
+    elements.aiStudioProjectTitle.textContent = workspace.title || "—";
+    elements.aiStudioModelLabel.textContent = modelRuntimeLabel(workspace);
+    elements.aiStudioBlueprintState.textContent = workspace.blueprint_status === "ready_to_confirm" ? "字段已齐，待确认" : workspace.blueprint_status === "director_ready" ? "当前蓝图已确认" : "蓝图草稿";
+    elements.blueprintRevision.textContent = `V / ${workspace.blueprint_revision || 0}`;
+    renderAIConversation(workspace.messages);
+    const fields = ["core_premise", "core_conflict", "protagonist", "target_length", "protagonist_motivation", "key_relationships", "world_rules", "ending_direction", "volume_outline"];
+    fields.forEach((key) => {
+      const input = $(`[data-blueprint-field="${key}"]`);
+      if (input && document.activeElement !== input) input.value = blueprintFieldValue(workspace.blueprint, key);
+    });
+    const missingLabels = (workspace.missing_fields || []).map((item) => item.label);
+    elements.blueprintMissing.innerHTML = missingLabels.length ? `还需要决定：${missingLabels.map(escapeHtml).join("、")}` : "蓝图字段已齐，待作者确认。";
+    elements.blueprintMissing.classList.toggle("is-ready", !missingLabels.length);
+    elements.blueprintHint.textContent = missingLabels.length ? "字段未齐前，导演台不会开始生成正文；你可以继续对话，也可以直接编辑右侧字段。" : "字段已经齐全。确认后才会创建导演台任务，重复确认不会重复扣积分。";
+    elements.confirmBlueprintButton.disabled = !workspace.can_confirm || workspace.blueprint_status === "director_ready";
+    elements.confirmBlueprintButton.textContent = "确认蓝图并开始创作 →";
+    elements.professionalRoleStatus.innerHTML = (workspace.role_statuses || []).map((role) => `<article class="professional-role"><strong>${escapeHtml(role.label)}</strong><span>${escapeHtml(role.state)}</span><small>${escapeHtml(role.output || "等待主编整理")}</small></article>`).join("");
+  }
+
+  async function loadAIWorkspace(projectId, director = false) {
+    if (!projectId) return;
+    const loadToken = ++state.aiLoadToken;
+    state.aiProjectId = projectId;
+    setActiveScreen(director ? "aiDirector" : "aiStudio");
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(projectId)}`);
+      if (loadToken !== state.aiLoadToken || state.aiProjectId !== projectId) return;
+      state.aiWorkspace = workspace;
+      if (director) await renderAIDirector(workspace);
+      else renderAIStudio(workspace);
+      void loadNotifications();
+    } catch (error) {
+      if (loadToken !== state.aiLoadToken || state.aiProjectId !== projectId) return;
+      if (error.status === 401) {
+        state.account = null;
+        state.sessionExpired = error.code === "session_expired";
+        navigate("/login", { replace: true });
+        return;
+      }
+      setWorkspaceNotice(director ? elements.aiDirectorNotice : elements.aiStudioNotice, error.message || "AI 工作区读取失败，请稍后重试。", "red");
+    }
+  }
+
+  async function submitAIMessage(event) {
+    event.preventDefault();
+    const content = elements.aiMessageInput.value.trim();
+    if (!content || !state.aiProjectId) return;
+    elements.aiMessageButton.disabled = true;
+    elements.aiMessageButton.textContent = "主编整理中…";
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/messages`, { method: "POST", body: JSON.stringify({ content }) });
+      elements.aiMessageInput.value = "";
+      renderAIStudio(workspace);
+      setWorkspaceNotice(elements.aiStudioNotice, "主编已把这轮讨论写入服务端蓝图。", "blue");
+    } catch (error) {
+      setWorkspaceNotice(elements.aiStudioNotice, error.message || "主编暂时没有回应，请稍后重试。", "red");
+    } finally {
+      elements.aiMessageButton.disabled = false;
+      elements.aiMessageButton.innerHTML = '发送给主编 <span aria-hidden="true">→</span>';
+    }
+  }
+
+  function blueprintPayload() {
+    const payload = { expected_revision: state.aiWorkspace?.blueprint_revision || 0 };
+    document.querySelectorAll("[data-blueprint-field]").forEach((input) => {
+      const key = input.dataset.blueprintField;
+      payload[key] = key === "volume_outline" ? input.value.split("\n").map((item) => item.trim()).filter(Boolean) : input.value.trim();
+    });
+    return payload;
+  }
+
+  async function saveAIBlueprint(event) {
+    event.preventDefault();
+    if (!state.aiProjectId || !state.aiWorkspace) return;
+    elements.saveBlueprintButton.disabled = true;
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/blueprint`, { method: "PUT", body: JSON.stringify(blueprintPayload()) });
+      renderAIStudio(workspace);
+      setWorkspaceNotice(elements.aiStudioNotice, "蓝图字段已保存到服务端。", "blue");
+    } catch (error) {
+      setWorkspaceNotice(elements.aiStudioNotice, error.message || "蓝图保存失败，请重新载入后再试。", "red");
+    } finally {
+      elements.saveBlueprintButton.disabled = false;
+    }
+  }
+
+  async function confirmAIBlueprint() {
+    if (!state.aiProjectId || !state.aiWorkspace || !state.aiWorkspace.can_confirm) return;
+    elements.confirmBlueprintButton.disabled = true;
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/blueprint/confirm`, { method: "POST", body: JSON.stringify({ expected_revision: state.aiWorkspace.blueprint_revision, idempotency_key: `blueprint-${state.aiProjectId}-${state.aiWorkspace.blueprint_revision}` }) });
+      state.aiWorkspace = workspace;
+      showToast("蓝图已确认，导演台准备就绪。");
+      navigate(`/ai/${encodeURIComponent(state.aiProjectId)}/director`);
+      await loadAIWorkspace(state.aiProjectId, true);
+    } catch (error) {
+      setWorkspaceNotice(elements.aiStudioNotice, error.message || "蓝图还不能确认。", "red");
+      elements.confirmBlueprintButton.disabled = false;
+    }
+  }
+
+  const directorStages = ["排队", "角色推演", "等待关键节点选择", "正文生成", "审校", "更新档案", "完成"];
+
+  function renderDirectorStageTrack(run) {
+    const history = run?.stage_history || [];
+    const current = run?.current_stage || "排队";
+    const stages = run?.current_stage === "失败，可重试" && !directorStages.includes("失败，可重试") ? [...directorStages, "失败，可重试"] : directorStages;
+    elements.directorStageTrack.innerHTML = stages.map((stage, index) => {
+      const done = history.includes(stage) && stage !== current;
+      const currentClass = stage === current || (current === "完成" && stage === "更新档案") ? "is-current" : done ? "is-done" : "";
+      return `<div class="director-stage-node ${currentClass}"><b>${index + 1}</b><strong>${stage}</strong></div>`;
+    }).join("");
+  }
+
+  function renderDirectorRoles(workspace) {
+    const roles = workspace.role_statuses || [];
+    const characters = workspace.story_characters || [];
+    const professionalMarkup = `<section class="director-professional-block"><div class="director-layer-heading"><span class="eyebrow">专业角色层</span><small>读取职责所需的全局材料</small></div><div class="director-professional-grid">${roles.map((role) => {
+      return `<article class="director-professional-status"><strong>${escapeHtml(role.label)}</strong><span>${escapeHtml(role.state)}</span><small>${escapeHtml(role.output || "等待后台轮转")}</small></article>`;
+    }).join("")}</div></section>`;
+    const storyMarkup = `<section class="director-story-layer"><div class="director-layer-heading"><span class="eyebrow">故事人物层</span><small>只展示各自可知的目标、事实与情绪</small></div><div class="director-character-grid">${characters.map((character) => {
+      return `<article class="director-story-character"><div class="director-character-head"><span class="director-role-mark" aria-hidden="true">${escapeHtml(character.name.slice(0, 1))}</span><div><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(character.role || "故事人物")} · ${escapeHtml(character.current_scene || "当前场景")}</small></div></div><p><b>当前目标</b>${escapeHtml(character.goal || "待角色推演")}</p><p><b>角色可知</b>${escapeHtml((character.known_facts || []).join("；") || "暂无公开事实")}</p><p><b>情绪</b>${escapeHtml(character.emotional_state || "未定")}</p></article>`;
+    }).join("")}</div></section>`;
+    const shared = workspace.blueprint?.world_rules;
+    return `${professionalMarkup}${storyMarkup}${shared ? `<div class="director-shared-memory"><strong>共享世界规则 / 两层都可读取</strong><p>${escapeHtml(shared)}</p></div>` : ""}`;
+  }
+
+  function renderDirectorStart(workspace) {
+    return `<div class="director-workspace-grid"><section class="director-main-column"><div class="director-section-heading"><h2>后台轮转已经准备好</h2><span>确认后只维护一条正式正文</span></div><div class="director-preview"><div class="director-chapter-mark">第一章</div><div class="director-preview-copy"><strong>${escapeHtml(workspace.blueprint?.core_premise || "故事蓝图")}</strong><p>选择一种创作策略。全自动继续会自动走完安全节点；关键节点暂停会在三选一处等待作者决定。</p><small>排队 → 角色推演 → 正文生成 → 审校 → 更新档案</small></div></div><div class="director-completed-actions"><button class="button button-primary" type="button" data-action="start-ai-director" data-strategy="pause_at_key_nodes">关键节点暂停</button><button class="button button-outline" type="button" data-action="start-ai-director" data-strategy="full_auto">全自动继续</button></div></section><aside class="director-choice-panel"><span class="eyebrow">创作策略</span><h2>由谁在关键处做决定？</h2><p>后台专业角色会各自推演，但不会变成四个并列聊天窗口。</p><p class="director-selected-strategy">当前设置：${workspace.settings?.strategy === "full_auto" ? "全自动继续" : "关键节点暂停"}</p><div class="director-settings"><label for="directorRevealConsequences">提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label><small class="archive-note">默认关闭；开启只显示不确定的“可能后果”。</small></div></aside></div>`;
+  }
+
+  async function renderAIDirector(workspace) {
+    if (state.directorPollTimer) {
+      window.clearTimeout(state.directorPollTimer);
+      state.directorPollTimer = null;
+    }
+    state.aiWorkspace = workspace;
+    state.aiProjectId = workspace.project_id;
+    const run = workspace.active_run;
+    state.aiRunId = run?.run_id || null;
+    elements.directorProjectTitle.textContent = workspace.title || "—";
+    elements.aiDirectorModelLabel.textContent = modelRuntimeLabel(workspace);
+    elements.directorCreditsUsedNote.textContent = workspace.mode === "live" ? "开发测试不结算" : "演示不消耗";
+    elements.directorCreditsEstimateNote.textContent = workspace.mode === "live" ? "仅供开发观察" : "演示免费";
+    elements.directorCreditsUsed.textContent = Number(workspace.credits_used || 0).toLocaleString("zh-CN");
+    elements.directorCreditsEstimate.textContent = Number(run?.estimated_credits || 0).toLocaleString("zh-CN");
+    renderDirectorStageTrack(run);
+    if (!run) {
+      elements.directorPageContent.innerHTML = renderDirectorStart(workspace);
+      elements.directorPauseButton.classList.add("is-hidden");
+      bindDirectorSettings();
+      return;
+    }
+    const terminal = run.status === "completed" || run.status === "failed";
+    elements.directorPauseButton.classList.toggle("is-hidden", terminal);
+    elements.directorPauseButton.textContent = run.status === "paused" ? "继续创作" : run.status === "waiting_for_choice" ? "暂停等待" : "暂停创作";
+    const roleMarkup = renderDirectorRoles(workspace);
+    let rightPanel = "";
+    if (run.status === "waiting_for_choice") {
+      const leadName = escapeHtml(workspace.story_characters?.[0]?.name || "故事人物");
+      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">关键节点 / 只选一个</span><h2>${leadName}准备进入旧档案</h2><p>三个方向都只会留下一个继续结果。未选方案不会成为可切换正文。</p><div class="director-choice-list">${(run.choices || []).map((choice, index) => `<button class="director-choice" type="button" data-action="choose-ai-choice" data-choice-id="${escapeHtml(choice.choice_id)}"><span class="director-choice-number">${index + 1}</span><span><strong>${escapeHtml(choice.label)}</strong><small>${escapeHtml(choice.description)}${choice.possible_consequence ? `<br />${escapeHtml(choice.possible_consequence)}` : ""}</small></span><span>→</span></button>`).join("")}</div><div class="director-hidden-note">⌑ 可能后果默认隐藏</div><div class="director-settings"><label for="directorRevealConsequences">提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label></div></aside>`;
+    } else if (run.status === "completed") {
+      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">关键节点 / 已定稿</span><h2>唯一正文已经接上</h2><p>作者的选择已成为当前正式路线；未选方向没有被保存为分支。</p><div class="director-completed-actions"><button class="button button-primary" type="button" data-action="start-next-ai" data-strategy="pause_at_key_nodes">开始第 ${Number(workspace.next_chapter_number || run.chapter_number + 1)} 章 →</button><button class="button button-outline" type="button" data-action="ai-open-editor">进入正文编辑器</button><button class="button button-outline" type="button" data-action="ai-open-archive">查看故事档案</button></div><div class="director-settings"><label>提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label></div></aside>`;
+    } else if (run.status === "failed") {
+      rightPanel = `<aside class="director-choice-panel"><div class="director-failure"><strong>导演台没有完成这一轮</strong><p>${escapeHtml(run.error_message || "可以修正蓝图后重试；失败不会重复扣除演示积分。")}</p><button class="button button-outline" type="button" data-action="retry-ai-director">重试这一轮</button></div></aside>`;
+    } else if (run.status === "paused") {
+      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">后台轮转</span><h2>创作已暂停</h2><p>暂停发生在安全节点，当前正文没有被伪装成完成。</p><button class="button button-primary button-wide" type="button" data-action="resume-ai-director">继续创作</button></aside>`;
+    } else if (run.status === "character_simulation") {
+      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">后台轮转 / 运行中</span><h2>角色正在推演</h2><p>专业角色正在读取全局材料，故事人物只读取自己的经历与角色可知事实。你可以离开页面，服务端会自动推进。</p></aside>`;
+    } else {
+      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">后台轮转</span><h2>${escapeHtml(run.current_stage || "正在创作")}</h2><p>关闭页面也不会丢失任务。导演台会从服务端状态继续。</p><div class="director-hidden-note">${workspace.mode === "live" ? "模型正在开发测试中，暂不展示未确认的选择后果。" : "演示推演正在进行，暂不展示未确认的选择后果。"}</div></aside>`;
+    }
+    elements.directorPageContent.innerHTML = `<div class="director-workspace-grid"><section class="director-main-column"><div class="director-section-heading"><h2>第 ${run.chapter_number} 章 · ${escapeHtml(run.current_stage || "后台轮转")}</h2><span>${escapeHtml(run.status === "completed" ? "已完成" : run.status === "waiting_for_choice" ? "等待作者选择" : run.status === "failed" ? "需要处理" : "可离页恢复")}</span></div><div class="director-preview"><div class="director-chapter-mark">第 ${run.chapter_number} 章</div><div class="director-preview-copy"><strong>${escapeHtml(workspace.blueprint?.core_premise || "创作蓝图")}</strong><p>${escapeHtml(run.preview_content || "角色推演会把共享世界规则和角色可知事实带到同一条故事脉络上。")}</p><small>阶段记录：${escapeHtml((run.stage_history || []).join(" → ") || "排队")}</small></div></div>${roleMarkup}</section>${rightPanel}</div>`;
+    bindDirectorSettings();
+    if (["queued", "character_simulation", "writing", "reviewing", "updating_archive"].includes(run.status)) {
+      state.directorPollTimer = window.setTimeout(() => {
+        state.directorPollTimer = null;
+        if (state.screen === "aiDirector" && state.aiProjectId === workspace.project_id) {
+          loadAIWorkspace(workspace.project_id, true);
+        }
+      }, 650);
+    }
+  }
+
+  function bindDirectorSettings() {
+    const toggle = $("#directorRevealConsequences");
+    if (toggle && !toggle.dataset.bound) {
+      toggle.dataset.bound = "true";
+      toggle.addEventListener("change", async () => {
+        try {
+          const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/settings`, { method: "PUT", body: JSON.stringify({ reveal_consequences: toggle.checked }) });
+          await renderAIDirector(workspace);
+        } catch (error) {
+          setWorkspaceNotice(elements.aiDirectorNotice, error.message || "设置保存失败。", "red");
+        }
+      });
+    }
+  }
+
+  async function startAIDirector(strategy) {
+    try {
+      const chapterNumber = Number(state.aiWorkspace?.next_chapter_number || 1);
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/director/start`, { method: "POST", body: JSON.stringify({ strategy, defer: true, idempotency_key: `director-${state.aiProjectId}-${state.aiWorkspace.blueprint_revision}-${chapterNumber}-${strategy}` }) });
+      navigate(`/ai/${encodeURIComponent(state.aiProjectId)}/director`);
+      await renderAIDirector(workspace);
+      showToast(strategy === "full_auto" ? "全自动继续已开始。" : "导演台会在关键节点停下来等你选择。", "blue");
+    } catch (error) {
+      setWorkspaceNotice(elements.aiDirectorNotice, error.message || "导演台没有开始。", "red");
+    }
+  }
+
+  async function chooseAIDirector(choiceId) {
+    if (!state.aiRunId) return;
+    $(`[data-action="choose-ai-choice"][data-choice-id="${CSS.escape(choiceId)}"]`)?.setAttribute("disabled", "disabled");
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/director/runs/${encodeURIComponent(state.aiRunId)}/choice`, { method: "POST", body: JSON.stringify({ choice_id: choiceId }) });
+      await renderAIDirector(workspace);
+      showToast("选择已成为唯一正式路线，正文和档案正在接续。", "blue");
+    } catch (error) {
+      setWorkspaceNotice(elements.aiDirectorNotice, error.message || "这个选择没有提交成功。", "red");
+    }
+  }
+
+  async function toggleAIDirectorPause() {
+    if (!state.aiRunId || !state.aiWorkspace?.active_run) return;
+    const action = state.aiWorkspace.active_run.status === "paused" ? "resume" : "pause";
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/director/runs/${encodeURIComponent(state.aiRunId)}/${action}`, { method: "POST" });
+      await renderAIDirector(workspace);
+    } catch (error) {
+      setWorkspaceNotice(elements.aiDirectorNotice, error.message || "导演台状态没有更新。", "red");
+    }
+  }
+
+  async function retryAIDirector() {
+    if (!state.aiRunId) return;
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/director/runs/${encodeURIComponent(state.aiRunId)}/retry`, { method: "POST" });
+      await renderAIDirector(workspace);
+    } catch (error) {
+      setWorkspaceNotice(elements.aiDirectorNotice, error.message || "导演台重试失败。", "red");
+    }
+  }
+
+  function openAIStudio() {
+    if (!state.aiProjectId) return;
+    navigate(`/ai/${encodeURIComponent(state.aiProjectId)}`);
+    loadAIWorkspace(state.aiProjectId, false);
+  }
+
+  function openAIDirector() {
+    if (!state.aiProjectId) return;
+    navigate(`/ai/${encodeURIComponent(state.aiProjectId)}/director`);
+    loadAIWorkspace(state.aiProjectId, true);
+  }
+
+  function openAIEditor() {
+    if (!state.aiProjectId) return;
+    state.editorMode = "ai_assisted";
+    navigate(`/independent/${encodeURIComponent(state.aiProjectId)}`);
+    loadIndependentWorkspace(state.aiProjectId);
+  }
+
+  function openAIArchive() {
+    if (!state.aiProjectId) return;
+    navigate(`/archive/${encodeURIComponent(state.aiProjectId)}`);
+    loadArchiveWorkspace(state.aiProjectId);
+  }
+
+  async function handleAction(event) {
+    const actionNode = event.target.closest("[data-action]");
+    if (!actionNode) return;
+    const action = actionNode.dataset.action;
+    if (action === "open-new-project") openNewProject();
+    if (action === "open-notifications") openNotifications();
+    if (action === "open-notification-target") await openNotificationTarget(actionNode);
+    if (action === "retry-library") loadLibrary();
+    if (action === "back-library") {
+      if (await navigate("/library", { replace: true })) await loadLibrary();
+    }
+    if (action === "open-project") {
+      const card = actionNode.closest("[data-project-id]");
+      const project = state.projects.find((item) => item.project_id === card?.dataset.projectId);
+      if (project) {
+        if (project.mode === "independent") {
+          const url = `/independent/${encodeURIComponent(project.project_id)}`;
+          if (await navigate(url, { replace: true })) await loadIndependentWorkspace(project.project_id);
+        } else {
+          const url = `/ai/${encodeURIComponent(project.project_id)}`;
+          if (await navigate(url, { replace: true })) await loadAIWorkspace(project.project_id, false);
+        }
+      }
+    }
+    if (action === "start-blank") startBlankWorkspace();
+    if (action === "start-next-ai") startAIDirector(actionNode.dataset.strategy || "pause_at_key_nodes");
+    if (action === "open-import") elements.importFileInput?.click();
+    if (action === "confirm-import") confirmImport(actionNode.dataset.previewId);
+    if (action === "select-chapter") selectEditorChapter(actionNode.dataset.chapterId);
+    if (action === "show-editor") {
+      elements.archiveDrawer.classList.remove("is-collapsed");
+      elements.archiveDrawer.querySelector(".archive-drawer-body")?.removeAttribute("hidden");
+    }
+    if (action === "show-archive") {
+      if (await navigate(`/archive/${encodeURIComponent(state.editorProjectId)}`)) await loadArchiveWorkspace(state.editorProjectId);
+    }
+    if (action === "toggle-archive") {
+      const collapsed = elements.archiveDrawer.classList.toggle("is-collapsed");
+      actionNode.setAttribute("aria-expanded", String(!collapsed));
+      actionNode.textContent = collapsed ? "展开" : "收起";
+    }
+    if (action === "review-changes") openPendingChangesDialog();
+    if (action === "reload-server") {
+      if (state.editorConflict) {
+        state.editorBuffer = state.editorConflict.content || "";
+        state.editorTitleBuffer = state.editorConflict.title || "";
+        state.editorRevision = state.editorConflict.server_revision || 0;
+        state.editorDirty = false;
+        state.editorConflict = null;
+        renderEditorWorkspace();
+        setEditorSaveState("已载入服务器版本", "saved");
+      }
+    }
+    if (action === "keep-local") {
+      if (state.editorConflict) {
+        state.editorRevision = state.editorConflict.server_revision || state.editorRevision;
+        state.editorConflict = null;
+        flushPendingSave();
+      }
+    }
+    if (action === "retry-task") retryIndependentTask(actionNode.dataset.taskId);
+    if (action === "preview-version") previewVersion(actionNode.dataset.versionId);
+    if (action === "restore-version") restoreVersion(actionNode.dataset.versionId);
+    if (action === "open-trial") openTrialDialog(actionNode.dataset.characterId);
+    if (action === "archive-snapshot") loadArchiveWorkspace(state.archiveProjectId, actionNode.dataset.chapterNumber);
+    if (action === "archive-open-editor") {
+      if (state.archiveMode === "ai_assisted") openAIEditor();
+      else {
+        await navigate(`/independent/${encodeURIComponent(state.archiveProjectId)}`);
+        state.editorMode = "independent";
+        await loadIndependentWorkspace(state.archiveProjectId);
+      }
+    }
+    if (action === "archive-open-ai") openAIStudio();
+    if (action === "archive-open-self") loadArchiveWorkspace(state.archiveProjectId);
+    if (action === "ai-open-studio") openAIStudio();
+    if (action === "ai-open-director") openAIDirector();
+    if (action === "ai-open-editor") openAIEditor();
+    if (action === "ai-open-archive") openAIArchive();
+    if (action === "start-ai-director") startAIDirector(actionNode.dataset.strategy);
+    if (action === "choose-ai-choice") chooseAIDirector(actionNode.dataset.choiceId);
+    if (action === "resume-ai-director") toggleAIDirectorPause();
+    if (action === "retry-ai-director") retryAIDirector();
+  }
+
+  function bindEvents() {
+    // 深链接与浏览器缓存下重新确认动态壳节点，避免旧页面状态阻断整套事件绑定。
+    elements.startWorkspaceContent = $("#startWorkspaceContent");
+    elements.editorWorkspaceContent = $("#editorWorkspaceContent");
+    elements.independentScreen = $("#independentScreen");
+    document.addEventListener("click", async (event) => {
+      const routeLink = event.target.closest("[data-route]");
+      if (routeLink) {
+        event.preventDefault();
+        const path = routeLink.getAttribute("href") || "/";
+        if (path.startsWith("#")) return;
+        await navigate(path);
+      }
+      const comingSoon = event.target.closest("[data-coming-soon]");
+      if (comingSoon) showToast(`${comingSoon.dataset.comingSoon}即将开放。`);
+    });
+    elements.emailForm.addEventListener("submit", submitEmail);
+    elements.libraryContent.addEventListener("click", handleAction);
+    elements.readyContent.addEventListener("click", handleAction);
+    $('#libraryScreen [data-action="open-notifications"]')?.addEventListener("click", handleAction);
+    elements.startWorkspaceContent?.addEventListener("click", handleAction);
+    elements.editorWorkspaceContent?.addEventListener("click", handleAction);
+    elements.editorNotice?.addEventListener("click", handleAction);
+    elements.versionHistoryContent?.addEventListener("click", handleAction);
+    elements.archivePageContent?.addEventListener("click", handleAction);
+    elements.directorPageContent?.addEventListener("click", handleAction);
+    elements.notificationsList.addEventListener("click", handleAction);
+    elements.notificationsList.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      const actionNode = event.target.closest('[data-action="open-notification-target"]');
+      if (!actionNode) return;
+      event.preventDefault();
+      actionNode.click();
+    });
+    document.querySelectorAll(".editor-spine [data-action], .archive-spine [data-action], .ai-spine [data-action]").forEach((node) => node.addEventListener("click", handleAction));
+    elements.editorLogoutButton = $("#editorLogoutButton");
+    elements.editorLogoutButton.addEventListener("click", logout);
+    $("#archiveLogoutButton")?.addEventListener("click", logout);
+    $("#aiStudioLogoutButton")?.addEventListener("click", logout);
+    $("#aiDirectorLogoutButton")?.addEventListener("click", logout);
+    $("#newProjectButton").addEventListener("click", openNewProject);
+    $("#logoutButton").addEventListener("click", logout);
+    elements.modeOptions.forEach((option) => option.addEventListener("click", () => chooseMode(option.dataset.mode)));
+    $("#changeModeButton").addEventListener("click", () => {
+      state.selectedMode = null;
+      elements.projectDetails.classList.add("is-hidden");
+      elements.modeOptions.forEach((option) => option.classList.remove("is-selected"));
+    });
+    elements.newProjectForm.addEventListener("submit", submitProject);
+    elements.dialog.addEventListener("close", resetProjectDialog);
+    elements.librarySearch.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (state.account) loadLibrary(elements.librarySearch.value.trim());
+      }
+    });
+    let searchTimer;
+    elements.librarySearch.addEventListener("input", () => {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => {
+        if (state.account) loadLibrary(elements.librarySearch.value.trim());
+      }, 280);
+    });
+    elements.chapterEditor.addEventListener("input", handleEditorInput);
+    elements.chapterTitleInput.addEventListener("input", handleEditorInput);
+    elements.completeChapterButton.addEventListener("click", completeCurrentChapter);
+    $("#addChapterButton").addEventListener("click", addIndependentChapter);
+    $("#openVersionButton").addEventListener("click", openVersionHistoryDialog);
+    elements.archiveSnapshotSelect.addEventListener("change", (event) => selectArchiveSnapshot(event.target.value));
+    elements.archivePageSnapshotSelect?.addEventListener("change", (event) => loadArchiveWorkspace(state.archiveProjectId, event.target.value || null));
+    elements.closePendingChangesButton = $("#closePendingChangesButton");
+    elements.closePendingChangesButton.addEventListener("click", () => elements.pendingChangesDialog.close());
+    elements.pendingChangesDialog.addEventListener("close", () => restoreDialogFocus(elements.pendingChangesDialog));
+    elements.ignoreChangesButton.addEventListener("click", () => resolvePendingChanges("ignore"));
+    elements.rebuildChangesButton.addEventListener("click", () => resolvePendingChanges("rebuild"));
+    elements.closeVersionHistoryButton = $("#closeVersionHistoryButton");
+    elements.closeVersionHistoryButton.addEventListener("click", () => elements.versionHistoryDialog.close());
+    elements.versionHistoryDialog.addEventListener("close", () => restoreDialogFocus(elements.versionHistoryDialog));
+    elements.closeTrialButton = $("#closeTrialButton");
+    elements.closeTrialButton.addEventListener("click", () => elements.trialDialog.close());
+    elements.trialDialog.addEventListener("close", () => restoreDialogFocus(elements.trialDialog));
+    elements.confirmTrialButton.addEventListener("click", confirmTrialSketch);
+    elements.aiMessageForm?.addEventListener("submit", submitAIMessage);
+    elements.blueprintForm?.addEventListener("submit", saveAIBlueprint);
+    elements.confirmBlueprintButton?.addEventListener("click", confirmAIBlueprint);
+    elements.directorPauseButton?.addEventListener("click", toggleAIDirectorPause);
+    elements.dialog.addEventListener("close", () => restoreDialogFocus(elements.dialog));
+    elements.closeNotificationsButton = $("#closeNotificationsButton");
+    elements.closeNotificationsButton.addEventListener("click", () => elements.notificationsDialog.close());
+    elements.notificationsDialog.addEventListener("close", () => restoreDialogFocus(elements.notificationsDialog));
+    $("#mobileMenuButton").addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      const nav = $(".public-nav");
+      const open = nav.classList.toggle("is-open");
+      button.setAttribute("aria-expanded", String(open));
+    });
+    window.addEventListener("popstate", async () => {
+      if (!(await flushPendingSave())) {
+        if (state.editorProjectId) {
+          window.history.pushState({}, "", `/independent/${encodeURIComponent(state.editorProjectId)}`);
+          setActiveScreen("independent");
+        }
+        return;
+      }
+      await restoreSession(routeFromLocation());
+    });
+    window.addEventListener("beforeunload", (event) => {
+      if (state.editorDirty || state.editorSaving) {
+        event.preventDefault();
+        event.returnValue = "当前正文尚未保存。";
+      }
+    });
+    window.addEventListener("pagehide", () => {
+      if (state.editorDirty || state.editorSaving) void flushPendingSave({ keepalive: true });
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && (state.editorDirty || state.editorSaving)) {
+        void flushPendingSave({ keepalive: true });
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        if (state.screen === "library") {
+          event.preventDefault();
+          elements.librarySearch.focus();
+        }
+      }
+    });
+  }
+
+  function start() {
+    bindEvents();
+    const initialRoute = routeFromLocation();
+    if (initialRoute === "landing") {
+      setActiveScreen("landing");
+      restoreSession("landing");
+    } else {
+      restoreSession(initialRoute);
+    }
+  }
+
+  start();
+})();
