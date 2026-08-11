@@ -1,20 +1,35 @@
-# 忽略所有隐藏的环境变量文件
-.env
+# 忽略所有环境变量文件，但保留无值模板
+.env*
+!.env.example
 
 # 忽略 Python 虚拟环境目录
 venv/
 env/
+.venv/
 .vscode/
+.codex/config.toml
+.codex/
 
 # 忽略 Python 编译的字节码缓存
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
 
 # 忽略 macOS 系统生成的隐藏文件
 .DS_Store
 
 # 忽略你的本地大文件数据（比如 RAG 用到的本地文档）
 data/
+.novel_accounts/
+.novel_ai/
+.novel_independent/
+.novel_transactions/
 .novel_memory/
 .novel_projects/
+*.log
+logs/
+playwright-report/
+test-results/
 *.pdf
+*.local.md

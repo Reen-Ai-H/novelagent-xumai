@@ -3,19 +3,9 @@
 from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
+from app.agents.llm_runtime import build_chat_model
 from app.models import CharacterCard, PlannerOutput
-from core.config import settings
-
-
-planner_llm = ChatOpenAI(
-    model=settings.llm_model,
-    api_key=settings.openai_api_key,
-    base_url=settings.openai_base_url,
-    temperature=settings.llm_temperature,
-    streaming=False,
-)
 
 planner_prompt = ChatPromptTemplate.from_messages(
     [
@@ -48,7 +38,12 @@ planner_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-planner_chain = planner_prompt | planner_llm.with_structured_output(PlannerOutput)
+planner_llm = build_chat_model()
+planner_chain = (
+    planner_prompt | planner_llm.with_structured_output(PlannerOutput)
+    if planner_llm
+    else None
+)
 
 
 def generate_plot_beats_with_llm(
@@ -60,6 +55,9 @@ def generate_plot_beats_with_llm(
     user_instruction: str,
 ) -> PlannerOutput:
     """调用 LLM 生成章节剧情节点。"""
+
+    if planner_chain is None:
+        raise RuntimeError("未配置模型密钥，无法执行 Planner；当前请求可使用确定性降级路径。")
 
     return planner_chain.invoke(
         {

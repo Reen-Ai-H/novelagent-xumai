@@ -3,20 +3,10 @@
 from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
+from app.agents.llm_runtime import build_chat_model
 from app.models import ChapterDraft, CharacterCard, PlotBeat, RetrievalContext, WriterOutput
 from app.core.retriever import format_retrieved_context
-from core.config import settings
-
-
-writer_llm = ChatOpenAI(
-    model=settings.llm_model,
-    api_key=settings.openai_api_key,
-    base_url=settings.openai_base_url,
-    temperature=settings.llm_temperature,
-    streaming=False,
-)
 
 writer_prompt = ChatPromptTemplate.from_messages(
     [
@@ -48,7 +38,12 @@ writer_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-writer_chain = writer_prompt | writer_llm.with_structured_output(WriterOutput)
+writer_llm = build_chat_model()
+writer_chain = (
+    writer_prompt | writer_llm.with_structured_output(WriterOutput)
+    if writer_llm
+    else None
+)
 
 
 def generate_chapter_with_llm(
@@ -63,6 +58,9 @@ def generate_chapter_with_llm(
     retrieved_context: list[RetrievalContext] | None = None,
 ) -> WriterOutput:
     """调用 LLM 生成章节正文。"""
+
+    if writer_chain is None:
+        raise RuntimeError("未配置模型密钥，无法执行 Writer；当前请求可使用确定性降级路径。")
 
     return writer_chain.invoke(
         {
