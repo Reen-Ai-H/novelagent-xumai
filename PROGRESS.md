@@ -23,9 +23,14 @@
 - 本地开发可用不等于生产部署；Draft PR 不等于 merged、deployed、live verified。
 - 清场候选只列不删，必须等用户阅读本阶段回报后再次明确确认。
 
-## 下一步
+## 已交付
 
 - 发布前验证已完成：107 tests 全绿且 0 skipped；compileall、node --check、git diff --check 通过；OpenAPI 54/57，旧 `/novel` 16/19；本地 8017 首页/登录/书架烟雾通过，匿名 API 按合同返回 200/401。
 - Markdown 链接 29 文件、20 本地链接缺失 0；staged manifest 103 文件，保护路径 0，真实密钥形状/Authorization/机器绝对路径 0，最大文件 2.26 MB，总暂存约 35.2 MB。
-- 下一步：回读 staged manifest 与冻结状态，提交 `Prepare v1 development release`，推送并创建面向 main 的 Draft PR。
-- 创建 codex/v1-project-closeout（若远端同名不可安全复用则使用带日期后缀）。
+- 已创建分支 `codex/v1-project-closeout`，提交 `Prepare v1 development release`，并推送到 origin。
+- 已创建面向 `main` 的 Draft PR；PR 是开发版交接，不是 merged、deployed、live verified 或正式 Release。
+
+## 后续边界
+
+- 等待固定独立审计复验；不在本阶段自行宣布审计或文学质量通过。
+- 离线质量门 Q2 已验证，但真实生成质量增益、产品集成和 Q3 仍 pending；清场候选等用户确认，不在本阶段删除。
