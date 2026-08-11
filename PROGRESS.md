@@ -8,7 +8,7 @@
 - 阶段制度：后续阶段使用 `codex/stage-<编号>-<主题>`，结束时必须 commit/push，并在本文件记录分支、SHA 和 PR；需复核时保持 Draft。
 - 清理结果：5 份被忽略的 `.local.md` 历史副本和阶段 28 PR 临时说明已移到 `/Users/makerzhu/.Trash/叙脉-stage29-cleanup-20260812/`，可从废纸篓恢复；本项目遗留的 8000 端口开发服务已停止。
 - 保留结果：另一个旧 worktree 含未提交源码和 `.novel_*` 本地数据，禁止直接删除；远端 `codex/test1` 含未合并独立历史；项目外质量研究仍供 Q3 使用。三者均保留。
-- GitHub 同步：治理决定提交为 `cd3563517a222a4a94c444daebb15d823fd4de8f`；本阶段收尾分支为 `codex/stage-29-main-promotion`，首个收尾提交为 `4e0795a8a67fba83142c1081e803673849b611a7`，[PR #2](https://github.com/aswansong/novelagent/pull/2)。
+- GitHub 同步：治理决定提交为 `cd3563517a222a4a94c444daebb15d823fd4de8f`；本阶段收尾分支为 `codex/stage-29-main-promotion`，首个收尾提交为 `4e0795ae95165d776c4b80273f02843bc9afe305`，[PR #2](https://github.com/aswansong/novelagent/pull/2)。
 
 ## 阶段 28：洁癖知识收口与 GitHub 开发版（2026-08-11）
 
