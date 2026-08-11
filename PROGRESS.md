@@ -3,9 +3,12 @@
 ## 阶段 29：V1 主线晋升与仓库治理（2026-08-12）
 
 - 目标：以阶段 28 的 V1 开发版替换落后的 GitHub `main`，清理经确认可删除的临时项，并建立逐阶段 GitHub 同步制度。
-- 主线裁决：`codex/v1-project-closeout` 经 PR #1 合并后成为当前 `main`；这仍是开发基线，不是生产部署。
+- 状态：已完成。
+- 主线结果：`codex/v1-project-closeout` 已通过 [PR #1](https://github.com/aswansong/novelagent/pull/1) 合并；`main` 合并提交为 `0e48def6bd5404615a32e8d02af78cf75635cf70`，其文件树与 V1 提交 `cd3563517a222a4a94c444daebb15d823fd4de8f` 完全一致。远端和本地 V1 临时分支均已删除。
 - 阶段制度：后续阶段使用 `codex/stage-<编号>-<主题>`，结束时必须 commit/push，并在本文件记录分支、SHA 和 PR；需复核时保持 Draft。
-- 数据保护：另一个旧 worktree 含未提交源码和 `.novel_*` 本地数据，禁止直接删除；项目外质量研究保留供 Q3 使用。
+- 清理结果：5 份被忽略的 `.local.md` 历史副本和阶段 28 PR 临时说明已移到 `/Users/makerzhu/.Trash/叙脉-stage29-cleanup-20260812/`，可从废纸篓恢复；本项目遗留的 8000 端口开发服务已停止。
+- 保留结果：另一个旧 worktree 含未提交源码和 `.novel_*` 本地数据，禁止直接删除；远端 `codex/test1` 含未合并独立历史；项目外质量研究仍供 Q3 使用。三者均保留。
+- GitHub 同步：治理决定提交为 `cd3563517a222a4a94c444daebb15d823fd4de8f`；本阶段收尾使用 `codex/stage-29-main-promotion` 分支同步。
 
 ## 阶段 28：洁癖知识收口与 GitHub 开发版（2026-08-11）
 
