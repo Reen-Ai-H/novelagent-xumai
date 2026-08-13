@@ -1,102 +1,158 @@
+<div align="center">
+
 # 叙脉
 
-> 新一代写作体验
+### 新一代写作体验
 
-叙脉是面向中文长篇作者的 Web 写作与作品记忆工具。它把作者正文、人物、剧情线、伏笔、疑问点和章节快照长期保存，并提供两条平等路径：
+面向中文长篇作者的 Web 写作与作品记忆工具。
 
-- 独立创作：作者写正文，系统负责保存、章末分析和故事档案。
-- AI 辅助写作：作者与主编补全蓝图，导演台在关键节点提供三个互斥选择，AI 继续生成唯一正式正文。
+[快速开始](#快速开始) · [产品预览](#产品预览) · [使用方式](#使用方式) · [文档](#文档)
 
-## 开发版状态
+</div>
 
-这是本地 JSON 持久化的 GitHub 开发版，不是生产服务。阶段 27 独立审计已通过（P0/P1/P2/P3 均为 0）；当前基线为 107 个 unittest，0 failed、0 skipped，OpenAPI 54 paths / 57 operations，旧 /novel 16 paths / 19 operations。
+<p align="center">
+  <img src="docs/assets/current-home.jpg" alt="叙脉当前实现：首页" width="820">
+</p>
 
-真实 DeepSeek 连续三章产品链已经验证。离线质量门研究 Q2 已验证（项目外脱敏黄金集宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过、外部请求/Token/费用为 0）；真实生成质量增益及产品集成仍 pending，Q3 不在本阶段执行。文学质量阶段 23B 结论为 C，不能把功能审计通过写成小说质量通过。
+叙脉让长篇故事在写作、人物、剧情线、伏笔、疑问点和章节快照之间保持连贯。你可以自己写，也可以让 AI 辅助推进；正文始终只有一条，作者始终拥有最终决定权。
 
-## 已实现
+## 为什么是叙脉
 
-- 首页、邮箱本地开发登录、持久会话、书架搜索和作品新建。
-- 独立作品：空白建书、TXT/MD/DOCX 预览确认、三栏编辑器、服务端自动保存、保存冲突、章末确定性演示分析、通知、完整故事档案和章节快照。
-- 旧章集中修改：确认全部修改、忽略轻微措辞、全文重建、30 天可恢复历史稿本。
-- AI 创作室：主编对话、九项蓝图、服务端确认和持久恢复。
-- AI 导演台：全自动/关键节点暂停、后台运行、暂停/继续/重试、三选一（含把决定交给角色）、纯文本正文、审校、档案更新和唯一正式正文。
-- 安全边界：故事人物私有记忆不返回浏览器；结构化阶段严格 JSON；正文使用受验证的纯文本协议；跨 store 事务有 journal、staging、commit marker、作者 revision 冲突补偿和幂等恢复。
-- 旧 /novel 兼容路由仍保留并执行鉴权/归属校验，不代表推荐的新用户入口。
+| 独立创作 | AI 辅助写作 |
+| --- | --- |
+| 你写正文，叙脉保存并理解作品变化 | 先与主编补全蓝图，再由导演台辅助推进 |
+| 安静的三栏编辑器、自动保存、章末分析 | 全自动继续或关键节点暂停 |
+| 角色、剧情线、伏笔和疑问点可回溯 | 每个节点恰好三个选择，始终维护唯一正文 |
 
-## 明确未实现或不在范围
+## 产品预览
 
-- 生产部署、云端同步、注册邮件、手机号/微信登录、正式积分计费、支付和管理员后台。
-- 分享、发布、多人协作、社交消息中心、平行正文、自动全员人像。
-- 离线质量门研究 Q2 已验证，但尚未接入产品运行时；真实生成质量增益、产品集成和 Q3 仍 pending。
+### 当前实现
 
-## 页面与两条流程
+下面是本地开发服务中实际打开的页面截图：
 
-~~~text
+<p align="center">
+  <img src="docs/assets/current-home.jpg" alt="当前实现：首页" width="48%">
+  <img src="docs/assets/current-login.jpg" alt="当前实现：邮箱登录" width="48%">
+</p>
+
+### A 版效果参考
+
+这些图片是仓库中的 A 版界面效果参考，用来表达产品的视觉方向与交互意图，不等同于线上截图：
+
+<table>
+  <tr>
+    <td><img src="design-prototypes/style-a-archive/03-library-new-project.png" alt="A 版：书架与新建作品" width="100%"></td>
+    <td><img src="design-prototypes/style-a-archive/04-independent-editor.png" alt="A 版：独立创作编辑器" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center">书架与新建作品</td>
+    <td align="center">独立创作编辑器</td>
+  </tr>
+  <tr>
+    <td><img src="design-prototypes/style-a-archive/05-story-archive.png" alt="A 版：故事档案" width="100%"></td>
+    <td><img src="design-prototypes/style-a-archive/07-ai-director.png" alt="A 版：AI 导演台" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center">故事档案与章节快照</td>
+    <td align="center">AI 导演台与关键节点</td>
+  </tr>
+</table>
+
+## 使用方式
+
+```text
 首页 → 邮箱登录 → 书架
-  ├─ 独立创作 → 空白/导入 → 编辑器 → 完成本章 → 故事档案
-  └─ AI 辅助写作 → 主编创作室 → 确认蓝图 → 导演台 → 编辑器/故事档案
-~~~
+  ├─ 独立创作 → 空白 / 导入 → 编辑器 → 完成本章 → 故事档案
+  └─ AI 辅助写作 → 主编创作室 → 确认蓝图 → 导演台 → 编辑器 / 故事档案
+```
 
-页面深链接包括 /、/login、/library、/independent/{project_id}、/ai/{project_id}、/ai/{project_id}/director、/archive/{project_id}。
+### 独立创作
 
-## 技术栈与目录
+1. 新建“独立创作”，选择空白开始或上传 TXT、MD、DOCX。
+2. 在导入预览中确认标题、章节识别和字数，再写入正式正文。
+3. 在三栏编辑器中写作；正文自动保存，保存冲突会明确提示。
+4. 点击“完成本章”，系统在后台更新章节快照和故事档案。
+5. 需要回看时，打开档案切换到任意历史章节快照；历史内容只读。
 
-- 后端：FastAPI、Pydantic、Python；兼容旧链路保留 LangGraph/LangChain 依赖。
-- 前端：frontend/index.html、frontend/styles.css、frontend/app.js，原生 HTML/CSS/JS。
-- API：app/entry_routes.py、app/independent_routes.py、app/ai_routes.py、app/archive_routes.py、app/novel_routes.py。
-- 数据合同：schemas/；核心服务：app/core/；自动化测试：tests/；产品与研发文档：docs/；A 版原型：design-prototypes/。
+### AI 辅助写作
 
-## 5 分钟本地启动
+1. 新建“AI 辅助写作”，进入主编创作室。
+2. 通过对话补全故事蓝图，也可以直接编辑蓝图字段。
+3. 点击“确认蓝图并开始创作”，进入导演台。
+4. 选择“全自动继续”，或在关键节点暂停并从三个互斥选项中选一个。
+5. 选择会成为唯一正式路线；生成完成后进入普通正文编辑器和故事档案。
 
-~~~bash
+无 Key 时使用确定性演示，不消耗创作积分；有 OpenAI-compatible 配置时才调用模型，供应商失败进入可重试状态，不静默替换成模板。
+
+## 快速开始
+
+需要 Python、[uv](https://docs.astral.sh/uv/) 和 Node.js。
+
+```bash
 git clone https://github.com/aswansong/novelagent.git
 cd novelagent
+
 uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 cp .env.example .env
+
 .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
-~~~
+```
 
-然后打开 http://127.0.0.1:8000。停止服务使用终端 Ctrl-C。若端口被占用，把 8000 替换为其他本地端口；不要使用 .env 或 .novel 数据目录作为 Git 提交内容。
+打开 <http://127.0.0.1:8000>。停止服务：在终端按 `Ctrl-C`。
 
-## 模型配置
+端口被占用时，把 `--port 8000` 换成其他本地端口。首次体验不需要模型 Key。
 
-无 Key 时可以完整使用确定性演示路径：界面明确标注演示推演，创作积分预算和已用均为 0，不调用供应商。
+## 模型配置（可选）
 
-有 OpenAI-compatible 配置时，在本机 .env 中填写（不要把真实值提交）：
+复制 `.env.example` 为 `.env`，只在本机填写真实值，绝不要提交 `.env`：
 
-~~~dotenv
+```dotenv
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.deepseek.com/v1
 LLM_MODEL=deepseek-chat
 LLM_TEMPERATURE=0.7
-~~~
+```
 
-也兼容 OPENAI_BASE_URL、LLM_BASE_URL，以及百炼别名 DASHSCOPE_API_KEY、DASHSCOPE_BASE_URL、DASHSCOPE_MODEL。开发测试显示模型已连接但不结算正式创作积分；供应商失败进入可重试失败态，不静默改用模板。
+也兼容 `LLM_BASE_URL`，以及百炼别名 `DASHSCOPE_API_KEY`、`DASHSCOPE_BASE_URL`、`DASHSCOPE_MODEL`。
 
-## 测试与检查
+## 开发状态
 
-~~~bash
+- 阶段 27 独立审计：P0/P1/P2/P3 均为 0。
+- 自动化基线：107 tests，0 failed，0 skipped。
+- API 基线：OpenAPI 54 paths / 57 operations；旧 `/novel` 16 paths / 19 operations。
+- 真实 DeepSeek 连续三章链路已验证。
+- 离线质量门研究 Q2 已验证：36 例脱敏黄金集，宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过，外部请求/Token/费用为 0；真实生成质量增益及产品集成仍 pending，Q3 未执行。
+- 文学质量阶段 23B 结论为 C；功能审计通过不等于小说质量通过。
+
+这是 V1 本地开发版，不是生产部署。正式支付、管理员、云端同步、手机号/微信登录、分享发布、多人协作和平行正文不在当前范围内。
+
+## 验证
+
+```bash
 .venv/bin/python -W ignore -m unittest discover -s tests -q
 .venv/bin/python -m compileall -q app schemas main.py
 node --check frontend/app.js
 git diff --check
-~~~
+```
 
-基线是 107 tests、0 failed、0 skipped。OpenAPI 与旧 /novel 数量也应保持至少 54/57 和 16/19。
+## 数据与安全
 
-## 数据、隐私与备份
+账户、正文、作品档案、模型安全元数据和事务恢复数据保存在本地 `.novel_*` 目录。备份前先停止服务；不要直接编辑 JSON，也不要把 `.env` 或 `.novel_*` 提交到 Git。
 
-本地服务会使用 .novel_accounts、.novel_ai、.novel_independent、.novel_projects、.novel_memory、.novel_transactions 等目录。它们属于账户、作品、模型安全元数据和事务恢复数据，不要直接编辑 JSON。备份前先停止服务，复制整个相关数据目录到受保护位置；恢复前停止服务并保留原目录副本。更多说明见 docs/USER_GUIDE.md 和 docs/DEVELOPMENT.md。
+故事人物的私有记忆只用于服务端单人物推演，不返回浏览器；自动化测试使用 fake/确定性运行时，不调用真实模型、图片或付费服务。
 
-## 权威文档
+## 文档
 
-- 使用：[docs/USER_GUIDE.md](docs/USER_GUIDE.md)
-- 架构：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- 开发运维：[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- 产品：[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)
-- 交互：[docs/UX_FLOWS.md](docs/UX_FLOWS.md)
-- 设计：[docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)
-- 验收：[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)
-- 收口矩阵：[docs/CLOSEOUT_MATRIX.md](docs/CLOSEOUT_MATRIX.md)
-- 历史阶段：[docs/history/IMPLEMENTATION_HISTORY_2026-08.md](docs/history/IMPLEMENTATION_HISTORY_2026-08.md)
+- [作者使用说明](docs/USER_GUIDE.md)
+- [架构说明](docs/ARCHITECTURE.md)
+- [开发与运维](docs/DEVELOPMENT.md)
+- [产品规格](docs/PRODUCT_SPEC.md)
+- [交互流程](docs/UX_FLOWS.md)
+- [设计系统](docs/DESIGN_SYSTEM.md)
+- [验收标准](docs/ACCEPTANCE.md)
+- [知识收口矩阵](docs/CLOSEOUT_MATRIX.md)
+
+## License
+
+当前仓库未声明开源许可证；如需公开再分发，请先确认项目授权范围。
