@@ -7,7 +7,8 @@
 - 分支：从 `github-current/main` 建立 `codex/stage-31-independent-deconstruction-release`，已按 `e0f163a → d7166d1 → d614118 → be6fde2 → cdd7d01 → d480a85 → 7ff0273` 顺序重放；最终树与 `7ff0273` 一致。
 - 计划：新增 `docs/WINDOWS_MIGRATION.md`、`.github/workflows/ci.yml`，同步 README/文档/收口矩阵和 GitHub 状态，再完成本地门禁、push、PR、CI、merge。
 - 最大风险：跨平台命令/数据迁移说明误导作者，或把 `.env`、`.novel_*`、审计现场带入公开仓库；只使用无值模板和受控文件清单。
-- 当前状态：Windows 文档与 CI 已写入工作树；尚未 push、建 PR 或合并；不创建 Release/Tag，不清理旧 worktree、分支和本地数据。
+- 发布记录：`codex/stage-31-independent-deconstruction-release` 已推送，当前候选提交为 `8add855`；Draft PR [#1](https://github.com/Reen-Ai-H/novelagent-xumai/pull/1) 已建立，当前 head 的 Ubuntu/Windows CI 均通过。
+- 当前状态：PR #1 作为 `main` 集成记录；最终主线 SHA 以本轮 GitHub 回读为准。不创建 Release/Tag，不清理旧 worktree、分支和本地数据。
 
 ## 阶段 31G：审计 P2 定点收口（2026-09-04）
 

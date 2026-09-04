@@ -34,7 +34,7 @@
 ## 当前状态
 
 - 文档收口日期：2026-09-04；阶段 31 最终审计 P0/P1/P2/P3 均为 0，Windows 迁移与 CI 已纳入发布候选。
-- GitHub `main` 是当前 V1 开发基线；阶段31发布候选为 135 tests、0 failed、0 skipped。
+- GitHub `main` 是当前 V1 开发基线；阶段31发布候选为 135 tests、0 failed、0 skipped，Windows/Ubuntu CI 已通过。
 - 当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations；真实 DeepSeek 三章链路已验证。
 - 独立作品拆解已接入真实前端工作区：支持七种 canonical 状态、服务端后台恢复、来源证据回链和账户隔离；阶段31最终候选为 135 tests、0 failed、0 skipped。
 - 项目外离线质量门 Q2 已验证：36 例脱敏黄金集、宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过、外部请求/Token/费用为 0。真实生成质量增益、产品集成和 Q3 仍 pending。

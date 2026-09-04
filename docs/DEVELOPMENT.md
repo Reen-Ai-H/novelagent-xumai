@@ -30,7 +30,7 @@ node --check frontend/app.js
 git diff --check
 ```
 
-开发版阶段 28 收口时的基线为 107 tests、0 failed、0 skipped；OpenAPI 为 54 paths / 57 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
+阶段 28 的历史基线为 107 tests；当前阶段31发布候选为 135 tests、0 failed、0 skipped。当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
 
 ## 代码和测试约定
 

@@ -2,9 +2,9 @@
 
 ## 阶段 31I Windows 发布收口（2026-09-04）
 
-实现阻塞：无。Windows 迁移手册、双平台 CI 和新仓库发布流程正在完成本地门禁。
+实现阻塞：无。Windows 迁移手册、双平台 CI 和新仓库发布流程已完成本地与 GitHub CI 门禁。
 
-发布状态：尚未 push、建 PR 或合并；目标为 `Reen-Ai-H/novelagent-xumai` 的 `main`，不做生产部署、Release 或 Tag。
+发布记录：`Reen-Ai-H/novelagent-xumai` 的 Draft PR [#1](https://github.com/Reen-Ai-H/novelagent-xumai/pull/1) 已建立并通过当前 head 的 Ubuntu/Windows CI；最终 `main` 回读结果记录在本阶段结束回报。目标仍是不做生产部署、Release 或 Tag。
 
 保护项：旧 worktree、分支、`.novel_*`、`.env`、审计证据和项目外质量研究均保留，不在本阶段清理。
 

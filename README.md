@@ -119,7 +119,7 @@ LLM_TEMPERATURE=0.7
 ## 开发状态
 
 - 阶段 27 独立审计：P0/P1/P2/P3 均为 0。
-- GitHub main 历史基线：107 tests，0 failed，0 skipped；当前阶段31发布候选：135 tests，0 failed，0 skipped。
+- 当前 GitHub 开发版基线：135 tests，0 failed，0 skipped；107 tests 是阶段 28 的历史基线。
 - API 基线：OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations。
 - 真实 DeepSeek 连续三章链路已验证。
 - 独立作品拆解工作区已接入：完成正文后可查看概览、节奏时间线、逐章结构和可回链证据；结果状态与恢复均来自服务端。

@@ -6,7 +6,7 @@
 
 ## 当前实现快照
 
-阶段 27 独立审计已通过，当前代码已覆盖首页、邮箱本地开发登录、书架、独立创作、故事档案、AI 创作室和 AI 导演台；正文、蓝图、档案、版本、通知和后台事务使用服务端本地 JSON 持久化。当前基线为 107 个 unittest、0 failed、0 skipped，OpenAPI 为 54 paths / 57 operations，旧 `/novel` 为 16 paths / 19 operations。
+阶段 27 独立审计已通过，当前代码已覆盖首页、邮箱本地开发登录、书架、独立创作、故事档案、AI 创作室和 AI 导演台；正文、蓝图、档案、版本、通知和后台事务使用服务端本地 JSON 持久化。阶段31发布候选为 135 个 unittest、0 failed、0 skipped，OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations。
 
 这是 GitHub 开发版，不是生产部署。真实 DeepSeek 连续三章链路已验证；文学质量阶段 23B 结论为 C。项目外离线质量门研究 Q2 已验证（36 例脱敏黄金集，宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过，外部请求/Token/费用为 0），但真实生成质量增益及产品集成仍 pending，Q3 本阶段不执行。
 
