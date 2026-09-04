@@ -184,6 +184,8 @@ queued → character_simulation → writing → reviewing → updating_archive �
 
 ## 10. 作品拆解的可恢复状态
 
+阶段 32 升级流程按 [冻结合同](STAGE_32_CONTRACT.md) 实施：已有 1.0 基础结果首次进入深度页时，显示待生成深度报告的 `rebuild_required`，有未确认修改时先确认修改；显式重建创建 2.0 运行，旧结果和证据保持历史只读。该流程仍待后端和前端实现验收。
+
 独立作品完成导入或章节后，拆解事件与正文保存结果一起进入服务端 outbox。作者可以离开页面；服务端会按 `queued → running → completed` 推进，失败显示 `failed_retryable` 和重试入口。服务重启、重复读取和重复触发不会创建重复结果。
 
 拆解页面以 `effective_status` 作为作者应采取的主状态，同时显示 `run_status`、来源是否匹配和当前进度。正文有未确认修改时不显示旧结果为当前结果；来源变化时只能查看历史定位并明确只读，不能把证据带到当前同编号章节。证据回链使用绑定稿本的版本、revision/hash 与 UTF-16 偏移，供浏览器准确定位。

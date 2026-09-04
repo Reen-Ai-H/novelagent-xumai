@@ -66,6 +66,8 @@ AI 正式章节提交使用 durable journal、staging payload 和 commit marker�
 
 ## 作品拆解侧车（阶段 31）
 
+阶段 32 的扩展合同现已冻结，见 [深度拆解合同](STAGE_32_CONTRACT.md)。六视角 2.0 schema 已接入，以下阶段 31 的引擎和实例锁仍待后端升级；共享持久项目锁、source/CAS 发布及旧侧车升级不能仅凭旧实现视为完成。
+
 作品拆解是独立创作内部的版本化派生侧车，不改变既有正文和故事档案文件：
 
 ```text
