@@ -19,11 +19,13 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from threading import local
 from typing import Any
 from uuid import uuid4
 from xml.etree import ElementTree
 
 from app.core.independent_store import IndependentStore
+from app.core.project_lock import ProjectLockStore, ProjectLockError
 from app.core.project_store import ProjectStore, project_store
 from app.core.transaction_store import TransactionCommitted
 from schemas.independent import (
@@ -67,7 +69,7 @@ class IndependentServiceError(Exception):
 
 
 def _author_write_method(method):
-    """给所有会改变正文 revision/active version 的入口加持久项目写锁。"""
+    """给所有会写入独立整记录的入口加持久项目写锁。"""
 
     @wraps(method)
     def wrapped(self, project_id: str, account_id: str, *args: Any, **kwargs: Any):
@@ -91,13 +93,28 @@ class IndependentWorkspaceService:
         # 由 AIStudioService 注入；独立作品自身没有跨 store 导演事务，但其
         # 公开读取必须先尊重已写入的 durable commit marker。
         self.transaction_coordinator: Any | None = None
-        self._write_lock_depth = 0
+        self._write_lock_state = local()
+        # Independent-only instances do not have the AI transaction
+        # coordinator injected, but they still need the same durable project
+        # gate as the deconstruction worker.  Both sidecars derive this path
+        # from the isolated data root, so tests and restarted processes share
+        # one lock without sharing data.
+        self.project_locks = ProjectLockStore(self.store.base_dir.parent / ".novel_transactions")
         # 由拆解路由装配；保持可选，便于旧调用方和阶段 2 测试继续独立运行。
         self.deconstruction_service: Any | None = None
 
     @staticmethod
     def _now() -> datetime:
         return datetime.now(timezone.utc)
+
+    def _in_author_write(self) -> bool:
+        """Return recursion state for this thread only.
+
+        A process-wide integer would let a second writer mistake another
+        thread's active transaction for its own and bypass the project lock.
+        """
+
+        return bool(getattr(self._write_lock_state, "depth", 0))
 
     def _request_deconstruction(self, project_id: str, account_id: str, *, reason: str) -> None:
         """尽力派发同文件 outbox；正文写入成功不受拆解侧车故障反向影响。"""
@@ -166,7 +183,7 @@ class IndependentWorkspaceService:
         """供拆解 worker 记录派发失败；只写安全 outbox 元数据。"""
 
         try:
-            if self._write_lock_depth > 0:
+            if self._in_author_write():
                 self._mark_deconstruction_event_retry(project_id, account_id, error_code=error_code)
                 return
             with self._author_write_guard(project_id, account_id):
@@ -189,7 +206,7 @@ class IndependentWorkspaceService:
     def ack_deconstruction_event(self, project_id: str, account_id: str, event_id: str) -> None:
         """确认一个已进入拆解侧车的事件；不在拆解锁内反向拿作者锁。"""
 
-        if self._write_lock_depth > 0:
+        if self._in_author_write():
             self._remove_deconstruction_event(project_id, account_id, event_id)
             return
         with self._author_write_guard(project_id, account_id):
@@ -212,7 +229,7 @@ class IndependentWorkspaceService:
         return project.title if project is not None else "未命名独立作品"
 
     def _load(self, project_id: str, account_id: str) -> IndependentProjectRecord:
-        if self.transaction_coordinator is not None and self._write_lock_depth == 0:
+        if self.transaction_coordinator is not None and not self._in_author_write():
             self.transaction_coordinator.reconcile_for_read(project_id, account_id)
         record = self.store.load(project_id)
         if record is None:
@@ -243,7 +260,7 @@ class IndependentWorkspaceService:
         return version
 
     def _ensure_record(self, project_id: str, account_id: str) -> IndependentProjectRecord:
-        if self.transaction_coordinator is not None and self._write_lock_depth == 0:
+        if self.transaction_coordinator is not None and not self._in_author_write():
             self.transaction_coordinator.reconcile_for_read(project_id, account_id)
         record = self.store.load(project_id)
         if record is not None:
@@ -270,28 +287,45 @@ class IndependentWorkspaceService:
     def _author_write_guard(self, project_id: str, account_id: str):
         """作者写入口的跨进程门禁；未注入 AI 时也拒绝绕过中的旧 writer。"""
 
-        self._write_lock_depth += 1
+        depth = getattr(self._write_lock_state, "depth", 0)
+        self._write_lock_state.depth = depth + 1
         try:
             coordinator = self.transaction_coordinator
-            if coordinator is not None:
-                try:
-                    with coordinator.author_write_lock(project_id, account_id):
+            # Every entry takes the common hashed project lock.  It is
+            # reentrant for recursive calls on this thread, while a second
+            # thread must still wait even when this instance is already writing.
+            try:
+                with self.project_locks.project_lock(project_id):
+                    if coordinator is not None:
+                        try:
+                            # Keep the coordinator's legacy lock nested after
+                            # the common lock for journal ordering compatibility.
+                            with coordinator.author_write_lock(project_id, account_id):
+                                yield
+                        except TransactionCommitted as exc:
+                            raise IndependentServiceError(
+                                "author_revision_conflict",
+                                "后台导演事务正在收敛，作者正文没有被覆盖；请稍后重试保存。",
+                                status_code=409,
+                                data={"retryable": True, "transaction_id": exc.transaction_id},
+                            ) from None
+                    else:
                         yield
-                except TransactionCommitted as exc:
-                    raise IndependentServiceError(
-                        "author_revision_conflict",
-                        "后台导演事务正在收敛，作者正文没有被覆盖；请稍后重试保存。",
-                        status_code=409,
-                        data={"retryable": True, "transaction_id": exc.transaction_id},
-                    ) from None
-            else:
-                # 独立服务被旧代码/进程外单独实例化时无法完成 AI compensation，
-                # 但历史上它确实可能在 marker 窗口写出 revision。保留这个兼容
-                # 旁路的写入能力，由 coordinator 在下一边界检测并补偿；不能
-                # 假装旧代码不存在，也不能回滚它已经写出的作者正文。
-                yield
+            except ProjectLockError as exc:
+                raise IndependentServiceError(
+                    "project_lock_unavailable",
+                    "作品暂时被另一项操作占用，请稍后重试。",
+                    status_code=503,
+                    data={"retryable": True},
+                ) from exc
         finally:
-            self._write_lock_depth -= 1
+            if depth:
+                self._write_lock_state.depth = depth
+            else:
+                try:
+                    del self._write_lock_state.depth
+                except AttributeError:
+                    pass
 
     @_author_write_method
     def start_blank(self, project_id: str, account_id: str) -> IndependentProjectRecord:
@@ -490,6 +524,7 @@ class IndependentWorkspaceService:
             title = chapters[0].title
         return title, chapters, fragments
 
+    @_author_write_method
     def preview_import(
         self,
         project_id: str,
@@ -645,6 +680,7 @@ class IndependentWorkspaceService:
         self.store.save(record)
         return chapter
 
+    @_author_write_method
     def commit_system_generated_chapter(
         self,
         project_id: str,
@@ -929,6 +965,11 @@ class IndependentWorkspaceService:
     ) -> IndependentProjectRecord:
         """移除本事务对稿本/档案的公开投影，同时逐字保留作者 revision。"""
 
+        # persist=True is an internal transaction callback. The
+        # CrossStoreTransactionCoordinator invokes it while holding the same
+        # common-project-lock -> legacy-transaction-lock section used by
+        # apply_system_generated_projection; persist=False only mutates an
+        # in-memory overlay and never calls IndependentStore.save.
         project_id = str(projection["project_id"])
         account_id = str(projection["account_id"])
         raw = record_override if record_override is not None else self.store.load(project_id)
@@ -979,7 +1020,15 @@ class IndependentWorkspaceService:
         return record
 
     def apply_system_generated_projection(self, projection: dict[str, Any], *, persist: bool) -> str:
-        """把已准备好的安全投影幂等应用到稿本 store。"""
+        """把已准备好的安全投影幂等应用到稿本 store。
+
+        This method intentionally has no author-write decorator.  The durable
+        transaction coordinator calls it from its common-project-lock -> legacy
+        transaction-lock critical section; adding the coordinator lock here
+        would make a committed apply callback try to reconcile its own marker.
+        The compatibility entry point above is guarded before it reaches this
+        method.
+        """
 
         project_id = str(projection["project_id"])
         account_id = str(projection["account_id"])
@@ -1387,6 +1436,7 @@ class IndependentWorkspaceService:
         version.updated_at = task.completed_at
         self._notify(record, "analysis_completed", "全文档案重建完成，当前稿本已成为唯一正式版本。")
 
+    @_author_write_method
     def run_task(self, project_id: str, account_id: str, task_id: str) -> AnalysisTask:
         record = self._load(project_id, account_id)
         task = self._find_task(record, task_id)
@@ -1419,6 +1469,7 @@ class IndependentWorkspaceService:
         self.store.save(record)
         return task
 
+    @_author_write_method
     def retry_task(self, project_id: str, account_id: str, task_id: str) -> AnalysisTask:
         record = self._load(project_id, account_id)
         task = self._find_task(record, task_id)

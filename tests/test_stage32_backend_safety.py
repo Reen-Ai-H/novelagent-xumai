@@ -1,0 +1,427 @@
+"""阶段 32 后端专项：实体保守性、CAS 和共享持久锁。"""
+
+from __future__ import annotations
+
+import hashlib
+import multiprocessing
+from pathlib import Path
+import tempfile
+import threading
+import time
+import unittest
+from datetime import datetime, timezone
+
+from app.core.deconstruction_depth import (
+    ChapterInput,
+    DepthAnalysisEngine,
+    DepthSnapshot,
+)
+from app.core.deconstruction_service import DeconstructionService
+from app.core.deconstruction_store import (
+    DeconstructionStore,
+    DeconstructionStoreConflict,
+)
+from app.core.independent_service import IndependentWorkspaceService
+from app.core.independent_store import IndependentStore
+from app.core.project_lock import ProjectLockError, ProjectLockStore
+from app.core.transaction_store import TransactionStore
+from schemas.deconstruction import DeconstructionProjectRecord
+from schemas.independent import (
+    ChapterDocument,
+    IndependentProjectRecord,
+    ManuscriptVersion,
+    StoryArchive,
+)
+
+
+def _snapshot(texts: list[str]) -> DepthSnapshot:
+    chapters = tuple(
+        ChapterInput(f"c{index}", index, f"第{index}章", text)
+        for index, text in enumerate(texts, 1)
+    )
+    return DepthSnapshot(
+        project_id="backend-safety",
+        document_id="backend-document",
+        source_version_id="backend-version",
+        source_revision=1,
+        source_hash="a" * 64,
+        chapters=chapters,
+    )
+
+
+def _hold_shared_project_lock(
+    base_dir: str,
+    role: str,
+    entered: object,
+    release: object,
+    result_queue: object,
+) -> None:
+    """Spawn target that exercises the two independent lock entry points."""
+
+    root = Path(base_dir)
+    if role == "transaction":
+        context = TransactionStore(root / "transactions").project_lock("shared-project")
+    else:
+        context = DeconstructionStore(root / "deconstruction").project_locks.project_lock("shared-project")
+    try:
+        with context:
+            entered.set()  # type: ignore[attr-defined]
+            result_queue.put(("entered", role))  # type: ignore[attr-defined]
+            if not release.wait(8):  # type: ignore[attr-defined]
+                result_queue.put(("timeout", role))  # type: ignore[attr-defined]
+    except BaseException as exc:
+        result_queue.put(("error", role, type(exc).__name__, str(exc)))  # type: ignore[attr-defined]
+        raise
+
+
+def _independent_record(project_id: str, account_id: str, content: str) -> IndependentProjectRecord:
+    now = datetime.now(timezone.utc)
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    chapter = ChapterDocument(
+        chapter_id="chapter-1",
+        chapter_number=1,
+        title="第一章",
+        formal_title="第一章",
+        content=content,
+        formal_content=content,
+        server_revision=1,
+        word_count=len(content),
+        formal_word_count=len(content),
+        status="ready",
+        last_completed_hash=content_hash,
+        updated_at=now,
+    )
+    version = ManuscriptVersion(
+        version_id="version-1",
+        label="稿本 1",
+        status="active",
+        created_at=now,
+        updated_at=now,
+        chapters=[chapter],
+        archive=StoryArchive(),
+    )
+    return IndependentProjectRecord(
+        project_id=project_id,
+        account_id=account_id,
+        title="并发安全测试",
+        created_at=now,
+        updated_at=now,
+        active_version_id=version.version_id,
+        versions=[version],
+    )
+
+
+class Stage32BackendSafetyTest(unittest.TestCase):
+    def test_unlabelled_names_require_recurrence_and_exclude_phrase_fragments(self) -> None:
+        natural = [
+            "林舟想找到失踪的姐姐，却害怕再次走进旧站。顾遥把一把缺角的铜钥匙交给林舟，说：“我替你守住门，你去找她。”林舟答应与顾遥合作。",
+            "三年前，姐姐曾对林舟说：“缺角的铜钥匙能打开钟楼的门。”与此同时，顾遥在河岸寻找脚印。",
+            "林舟用那把缺角的铜钥匙打开钟楼，终于找到姐姐的信。顾遥赶来帮助林舟，两人决定一起公开真相。",
+        ]
+        engine = DepthAnalysisEngine(_snapshot(natural))
+        self.assertEqual(set(engine.names), {"林舟", "顾遥"})
+        self.assertFalse({"我替你", "他把疑问", "林舟说", "终于", "然后"} & set(engine.names))
+
+    def test_second_unlabelled_natural_pair_is_recovered_without_fragments(self) -> None:
+        engine = DepthAnalysisEngine(_snapshot([
+            "周砚沿河走到码头，拿出一张船票。",
+            "阿岚把绳索抛给周砚，两人一起把船拖到岸边。",
+        ]))
+        self.assertEqual(set(engine.names), {"周砚", "阿岚"})
+
+    def test_scene_and_colour_repetition_do_not_invent_people_or_paid_off_thread(self) -> None:
+        scenery = DepthAnalysisEngine(_snapshot(["雨落在空庭。天色暗了。石阶上积起了水。"])).build()
+        self.assertEqual(scenery.characters.characters, [])
+        self.assertEqual(scenery.foreshadowing.threads, [])
+        colours = DepthAnalysisEngine(_snapshot([
+            "林舟看见墙是蓝色的，然后离开。",
+            "顾遥看见海是蓝色的，然后回家。",
+        ])).build()
+        self.assertEqual(colours.characters.characters, [])
+        self.assertFalse(any(item.status == "paid_off" for item in colours.foreshadowing.states))
+
+    def test_empty_sidecar_uses_zero_as_cas_revision(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="stage32-cas-") as temporary:
+            store = DeconstructionStore(Path(temporary) / "deconstruction")
+            record = DeconstructionProjectRecord(
+                project_id="cas-project",
+                account_id="cas-account",
+                record_revision=3,
+            )
+            with self.assertRaises(DeconstructionStoreConflict):
+                store.save(record)
+
+    def test_project_lock_release_failure_does_not_poison_in_process_mutex(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="stage32-lock-") as temporary:
+            locks = ProjectLockStore(Path(temporary))
+            original = locks._release_os
+            locks._release_os = lambda descriptor: (_ for _ in ()).throw(OSError("injected"))
+            with self.assertRaises(ProjectLockError):
+                with locks.project_lock("release-project"):
+                    pass
+            locks._release_os = original
+            with locks.project_lock("release-project"):
+                pass
+
+    def test_transaction_and_deconstruction_share_ordered_project_gate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="stage32-order-") as temporary:
+            root = Path(temporary)
+            transaction_store = TransactionStore(root / "transactions")
+            deconstruction_store = DeconstructionStore(root / "deconstruction")
+            barrier = threading.Barrier(2)
+            entered: list[str] = []
+            errors: list[BaseException] = []
+
+            def transaction_worker() -> None:
+                try:
+                    barrier.wait(timeout=2)
+                    with transaction_store.project_lock("ordered-project"):
+                        entered.append("transaction")
+                        time.sleep(0.04)
+                except BaseException as exc:  # surfaced below, not swallowed
+                    errors.append(exc)
+
+            def deconstruction_worker() -> None:
+                try:
+                    barrier.wait(timeout=2)
+                    with deconstruction_store.project_locks.project_lock("ordered-project"):
+                        entered.append("deconstruction")
+                        time.sleep(0.04)
+                except BaseException as exc:
+                    errors.append(exc)
+
+            first = threading.Thread(target=transaction_worker)
+            second = threading.Thread(target=deconstruction_worker)
+            first.start()
+            second.start()
+            first.join(3)
+            second.join(3)
+            self.assertFalse(first.is_alive(), "transaction/deconstruction lock order deadlocked")
+            self.assertFalse(second.is_alive(), "transaction/deconstruction lock order deadlocked")
+            self.assertFalse(errors)
+            self.assertEqual(set(entered), {"transaction", "deconstruction"})
+
+    def test_spawned_transaction_and_deconstruction_locks_are_mutually_exclusive(self) -> None:
+        context = multiprocessing.get_context("spawn")
+        with tempfile.TemporaryDirectory(prefix="stage32-spawn-lock-") as temporary:
+            first_entered = context.Event()
+            first_release = context.Event()
+            second_entered = context.Event()
+            second_release = context.Event()
+            result_queue = context.Queue()
+            first = context.Process(
+                target=_hold_shared_project_lock,
+                args=(temporary, "transaction", first_entered, first_release, result_queue),
+            )
+            second = context.Process(
+                target=_hold_shared_project_lock,
+                args=(temporary, "deconstruction", second_entered, second_release, result_queue),
+            )
+            processes = (first, second)
+            try:
+                first.start()
+                self.assertTrue(first_entered.wait(5), "transaction child did not acquire the project lock")
+                self.assertEqual(result_queue.get(timeout=5), ("entered", "transaction"))
+
+                second.start()
+                self.assertFalse(
+                    second_entered.wait(0.35),
+                    "deconstruction child entered while transaction child still held the shared lock",
+                )
+                first_release.set()
+                first.join(8)
+                self.assertFalse(first.is_alive(), "transaction child did not release the shared lock")
+                self.assertEqual(first.exitcode, 0)
+
+                self.assertTrue(second_entered.wait(5), "deconstruction child did not acquire after release")
+                self.assertEqual(result_queue.get(timeout=5), ("entered", "deconstruction"))
+                second_release.set()
+                second.join(8)
+                self.assertFalse(second.is_alive(), "deconstruction child did not release the shared lock")
+                self.assertEqual(second.exitcode, 0)
+
+                with TransactionStore(Path(temporary) / "transactions").project_lock("shared-project"):
+                    pass
+                with DeconstructionStore(Path(temporary) / "deconstruction").project_locks.project_lock("shared-project"):
+                    pass
+            finally:
+                first_release.set()
+                second_release.set()
+                for process in processes:
+                    process.join(2)
+                    if process.is_alive():
+                        process.terminate()
+                        process.join(5)
+
+    def test_retry_during_old_publish_cannot_overwrite_newer_queued_document(self) -> None:
+        project_id = "interleave-project"
+        account_id = "interleave-account"
+        content = "林舟推开钟楼的门。顾遥在河岸等他。"
+        with tempfile.TemporaryDirectory(prefix="stage32-retry-publish-") as temporary:
+            root = Path(temporary)
+            IndependentStore(root / "independent").save(
+                _independent_record(project_id, account_id, content)
+            )
+            service_one = DeconstructionService(
+                independent=IndependentWorkspaceService(store=IndependentStore(root / "independent")),
+                store=DeconstructionStore(root / "deconstruction"),
+            )
+            service_two = DeconstructionService(
+                independent=IndependentWorkspaceService(store=IndependentStore(root / "independent")),
+                store=DeconstructionStore(root / "deconstruction"),
+            )
+            queued = service_one.enqueue_for_project(project_id, account_id)
+            build_started = threading.Event()
+            release_build = threading.Event()
+            original_build = service_one._build_document
+
+            def blocked_build(source, document):
+                build_started.set()
+                if not release_build.wait(5):
+                    raise RuntimeError("test build gate timed out")
+                return original_build(source, document)
+
+            service_one._build_document = blocked_build  # type: ignore[method-assign]
+            worker_result: list[object] = []
+            worker_errors: list[BaseException] = []
+
+            def old_worker() -> None:
+                try:
+                    worker_result.append(
+                        service_one.run_document(project_id, account_id, queued.document_id)
+                    )
+                except BaseException as exc:
+                    worker_errors.append(exc)
+
+            worker = threading.Thread(target=old_worker)
+            worker.start()
+            try:
+                self.assertTrue(build_started.wait(5), "old worker did not reach its unlocked analysis phase")
+                service_two._mark_failed(  # noqa: SLF001 - exercise the durable retry transition.
+                    project_id,
+                    account_id,
+                    queued.document_id,
+                    "test failure before retry",
+                )
+                retried = service_two.retry(project_id, account_id, queued.document_id)
+                self.assertEqual(retried.status, "queued")
+                self.assertEqual(retried.retry_count, 1)
+                release_build.set()
+                worker.join(8)
+                self.assertFalse(worker.is_alive(), "old worker did not finish after retry")
+                self.assertFalse(worker_errors)
+                self.assertEqual(worker_result[0].status, "queued")
+
+                current = service_two.store.load(project_id)
+                self.assertIsNotNone(current)
+                current_document = next(item for item in current.documents if item.document_id == queued.document_id)
+                self.assertEqual(current_document.status, "queued")
+                self.assertIsNone(current_document.report)
+                revision_after_retry = current.record_revision
+
+                service_two.process_background_tasks()
+                completed = service_two.store.load(project_id)
+                self.assertIsNotNone(completed)
+                completed_document = next(item for item in completed.documents if item.document_id == queued.document_id)
+                self.assertEqual(completed_document.status, "completed")
+                self.assertIsNotNone(completed_document.report)
+                self.assertGreater(completed.record_revision, revision_after_retry)
+            finally:
+                release_build.set()
+                worker.join(8)
+                service_one._build_document = original_build  # type: ignore[method-assign]
+
+    def test_author_save_waits_for_run_task_and_preserves_revision_and_outbox(self) -> None:
+        project_id = "author-worker-project"
+        account_id = "author-worker-account"
+        with tempfile.TemporaryDirectory(prefix="stage32-author-worker-") as temporary:
+            store = IndependentStore(Path(temporary) / "independent")
+            service = IndependentWorkspaceService(store=store)
+            service.start_blank(project_id, account_id)
+            chapter = service.workspace(project_id, account_id)["active_version"].chapters[0]
+            draft = service.save_draft(
+                project_id,
+                account_id,
+                chapter.chapter_id,
+                content="林舟推开钟楼的门。",
+                title=None,
+                expected_revision=chapter.server_revision,
+            )
+            task = service.complete_chapter(
+                project_id,
+                account_id,
+                draft.chapter_id,
+                content=draft.content,
+                expected_revision=draft.server_revision,
+                idempotency_key="author-worker-task",
+            )
+            analysis_started = threading.Event()
+            release_analysis = threading.Event()
+            original_analysis = service._run_chapter_analysis
+
+            def blocked_analysis(record, pending_task):
+                analysis_started.set()
+                if not release_analysis.wait(5):
+                    raise RuntimeError("test analysis gate timed out")
+                return original_analysis(record, pending_task)
+
+            service._run_chapter_analysis = blocked_analysis  # type: ignore[method-assign]
+            run_errors: list[BaseException] = []
+            author_errors: list[BaseException] = []
+            author_done = threading.Event()
+            author_result: list[object] = []
+
+            def run_worker() -> None:
+                try:
+                    service.run_task(project_id, account_id, task.task_id)
+                except BaseException as exc:
+                    run_errors.append(exc)
+
+            def author_worker() -> None:
+                try:
+                    author_result.append(
+                        service.save_draft(
+                            project_id,
+                            account_id,
+                            draft.chapter_id,
+                            content="林舟决定把真相写进档案。",
+                            title=None,
+                            expected_revision=draft.server_revision,
+                        )
+                    )
+                except BaseException as exc:
+                    author_errors.append(exc)
+                finally:
+                    author_done.set()
+
+            run_thread = threading.Thread(target=run_worker)
+            run_thread.start()
+            try:
+                self.assertTrue(analysis_started.wait(5), "run_task did not reach its analysis phase")
+                author_thread = threading.Thread(target=author_worker)
+                author_thread.start()
+                self.assertFalse(author_done.wait(0.35), "author write bypassed the running task project lock")
+                release_analysis.set()
+                run_thread.join(8)
+                author_thread.join(8)
+                self.assertFalse(run_thread.is_alive())
+                self.assertFalse(author_thread.is_alive())
+                self.assertFalse(run_errors)
+                self.assertFalse(author_errors)
+                self.assertEqual(len(author_result), 1)
+
+                persisted = store.load(project_id)
+                self.assertIsNotNone(persisted)
+                persisted_chapter = persisted.versions[0].chapters[0]
+                self.assertEqual(persisted_chapter.content, "林舟决定把真相写进档案。")
+                self.assertEqual(persisted_chapter.server_revision, 2)
+                self.assertTrue(persisted.deconstruction_outbox)
+                self.assertEqual(persisted.tasks[0].status, "completed")
+            finally:
+                release_analysis.set()
+                run_thread.join(8)
+                service._run_chapter_analysis = original_analysis  # type: ignore[method-assign]
+
+
+if __name__ == "__main__":
+    unittest.main()
