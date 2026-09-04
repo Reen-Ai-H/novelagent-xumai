@@ -78,11 +78,14 @@ async function oneViewport(browser, width) {
 
     // Six real views must be reachable by keyboard with evidence available.
     const views = ['人物', '剧情', '伏笔', '节奏', '读者', '文笔'];
+    const overviewTab = page.getByRole('tab', {name: '总览'});
+    await overviewTab.focus();
+    assert.equal(await overviewTab.getAttribute('aria-selected'), 'true');
     for (let index = 0; index < views.length; index += 1) {
+      await page.keyboard.press('ArrowRight');
       const tab = page.getByRole('tab', {name: new RegExp(views[index])});
-      await tab.focus();
-      await page.keyboard.press('Enter');
       assert.equal(await tab.getAttribute('aria-selected'), 'true');
+      assert.equal(await tab.evaluate(node => node === document.activeElement), true);
       await layout(page, width, `view-${index + 1}`);
     }
     await page.reload();

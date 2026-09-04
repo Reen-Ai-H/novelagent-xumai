@@ -6,6 +6,7 @@
 - 并行研发已启动：可见“阶段32 深度拆解后端引擎”使用 `codex/stage-32-backend-depth`；“阶段32 六视角前端体验”使用 `codex/stage-32-frontend-depth`。两者已核实 active，且均 fast-forward 到冻结管理基线 `de736c2`，模型/推理均为 Luna/max。后端不改前端，前端不改后端，管理验收/文档/CI不交给执行任务改写；待集成后再建独立审计。
 - 冻结后验收对齐：旧版夹具使用独立的 legacy 文档身份，避免借用新引擎排队 ID；补首读 `rebuild_required`/可升级、旧证据历史只读以及响应不含内部 CAS/去重字段断言。升级单测实跑 1 failure / 0 skipped（0.065s），旧引擎仍误报 completed，确认下一步由后端修复；diff 检查通过。
 - 管理浏览器门禁对齐冻结合同：真实端到端不再从阶段31顶层 `result.evidence` 误取证据，改为强制 `analysis_contract_version=2.0`、六视角容器完整、`result.report.evidence` 来源 hash 一致；修改后重建也必须仍为2.0，再用旧深度证据验证历史只读。前端证据抽屉的可访问交互待前端候选接入后继续补齐。
+- 前端增量审查发现并回派两项：nullable 深度指标不能被 JavaScript 转成0（前端已改为严格保留null并显示未知）；roving tab 只有当前项可进Tab序列时，必须实现方向键/Home/End，否则六视角对普通键盘用户不可达。管理浏览器门禁已改为从总览仅用 ArrowRight 依次切换六视角并核对焦点，不再通过测试代码逐个强制 focus 掩盖缺陷。
 
 - 管理分支：`codex/stage-32-deconstruction-depth`，从最新 `origin/main=223b414` 建立隔离工作区；原 main 工作区的测试改动、启动脚本和本地数据全部保留。
 - 已执行：`git fetch origin main`、`git merge --ff-only origin/main`、`git rev-list --left-right --count HEAD...origin/main`，主线一致（0/0）；完整读取规则、路线、任务书、进度与阻塞。
