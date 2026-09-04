@@ -88,6 +88,41 @@ async function oneViewport(browser, width) {
       assert.equal(await tab.evaluate(node => node === document.activeElement), true);
       await layout(page, width, `view-${index + 1}`);
     }
+
+    // A current span must open the real evidence endpoint and select the exact
+    // UTF-16 range in the author editor. This exercises the drawer and the
+    // navigation boundary instead of validating only the JSON response.
+    const currentEvidenceButton = page.locator('.deconstruction-evidence-link').first();
+    await currentEvidenceButton.waitFor();
+    const currentEvidence = await currentEvidenceButton.evaluate(node => ({
+      excerpt: node.dataset.excerpt,
+      start: Number(node.dataset.charStart),
+      end: Number(node.dataset.charEnd),
+    }));
+    assert.ok(currentEvidence.excerpt);
+    await currentEvidenceButton.click();
+    await page.locator('#deconstructionEvidenceDialog[open]').waitFor();
+    await page.locator('.deconstruction-evidence-dialog-card.is-current').waitFor();
+    assert.equal(await page.locator('#deconstructionEvidenceTitle').textContent(), '证据回链');
+    assert.equal(await page.locator('#locateDeconstructionEvidenceButton').isEnabled(), true);
+    await page.locator('#locateDeconstructionEvidenceButton').click();
+    await page.locator('#chapterEditor').waitFor({state: 'visible'});
+    await page.waitForFunction(({start, end}) => {
+      const editor = document.querySelector('#chapterEditor');
+      return editor && editor.selectionStart === start && editor.selectionEnd === end;
+    }, currentEvidence, {timeout: 10000});
+    const selectedEvidence = await page.locator('#chapterEditor').evaluate(editor => ({
+      start: editor.selectionStart,
+      end: editor.selectionEnd,
+      text: editor.value.slice(editor.selectionStart, editor.selectionEnd),
+    }));
+    assert.deepEqual(selectedEvidence, {
+      start: currentEvidence.start,
+      end: currentEvidence.end,
+      text: currentEvidence.excerpt,
+    });
+    await page.locator('[data-action="show-deconstruction"]').click();
+    await waitComplete(page);
     await page.reload();
     await waitComplete(page);
     const response = await context.request.get(`${origin}/api/independent/projects/${projectId}/deconstruction`);
@@ -114,6 +149,21 @@ async function oneViewport(browser, width) {
     await waitComplete(page);
     await layout(page, width, 'relogin');
 
+    // Keep one tab on the old DOM while another tab performs a real author
+    // edit and rebuild. Clicking that stale button afterwards must produce a
+    // historical, read-only drawer and must never enable current-text locate.
+    const stalePage = await context.newPage();
+    stalePage.on('console', msg => {
+      if (['warning', 'error'].includes(msg.type())) diagnostics.push(`stale ${msg.type()}: ${msg.text()}`);
+    });
+    stalePage.on('pageerror', error => diagnostics.push(`stale pageerror: ${error.message}`));
+    stalePage.on('requestfailed', req => diagnostics.push(`stale requestfailed: ${req.url()} ${req.failure()?.errorText}`));
+    await stalePage.goto(`${editorUrl}?view=deconstruction`);
+    await waitComplete(stalePage);
+    await stalePage.getByRole('tab', {name: /文笔/}).click();
+    const staleEvidenceButton = stalePage.locator('.deconstruction-evidence-link').first();
+    await staleEvidenceButton.waitFor();
+
     // Author editing/rebuild is performed through the actual UI, not store edits.
     await page.goto(editorUrl);
     await page.locator('#chapterEditor').waitFor({state: 'visible'});
@@ -135,6 +185,12 @@ async function oneViewport(browser, width) {
     const historical = await (await context.request.get(`${origin}/api/independent/projects/${projectId}/deconstruction/evidence/${oldEvidence.evidence_id}`)).json();
     assert.equal(historical.historical, true);
     assert.equal(historical.chapter.read_only, true);
+    await staleEvidenceButton.click();
+    await stalePage.locator('#deconstructionEvidenceDialog[open]').waitFor();
+    await stalePage.locator('.deconstruction-evidence-dialog-card.is-historical').waitFor();
+    assert.equal(await stalePage.locator('#deconstructionEvidenceTitle').textContent(), '历史证据回链');
+    assert.equal(await stalePage.locator('#locateDeconstructionEvidenceButton').isDisabled(), true);
+    await stalePage.close();
     await layout(page, width, 'rebuilt');
     assert.deepEqual(diagnostics, [], 'Browser must have zero errors and warnings');
     return {width, height: 900, completed: true, consoleErrorsAndWarnings: diagnostics.length, views: views.length};
