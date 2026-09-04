@@ -73,6 +73,38 @@ class Stage32AcceptanceTest(unittest.TestCase):
         self.assertEqual(preview.status_code, 200)
         confirmed = self.client.post(f"/api/independent/projects/{project_id}/imports/{preview.json()['preview']['preview_id']}/confirm")
         self.assertEqual(confirmed.status_code, 200)
+        return self.analyze_project(project_id)
+
+    def write_story(self, chapters):
+        created = self.client.post("/api/library/projects", json={"title": "逐字正文验收", "mode": "independent"})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["project"]["project_id"]
+        base = f"/api/independent/projects/{project_id}"
+        started = self.client.post(base + "/start", json={"source": "blank"})
+        self.assertEqual(started.status_code, 200)
+        chapter = started.json()["active_version"]["chapters"][0]
+        for number, content in enumerate(chapters, 1):
+            if number > 1:
+                added = self.client.post(base + "/chapters")
+                self.assertEqual(added.status_code, 200)
+                chapter = added.json()["chapter"]
+            saved = self.client.put(base + f"/chapters/{chapter['chapter_id']}/draft",
+                                   json={"content": content, "expected_revision": chapter["server_revision"]})
+            self.assertEqual(saved.status_code, 200)
+            chapter = saved.json()["chapter"]
+            self.assertEqual(chapter["content"], content)
+            if content.strip():
+                completed = self.client.post(base + f"/chapters/{chapter['chapter_id']}/complete",
+                                             json={"content": content, "expected_revision": chapter["server_revision"],
+                                                   "idempotency_key": f"raw-chapter-{number}"})
+                self.assertEqual(completed.status_code, 200)
+        current = self.independent.workspace(project_id, self.account_id)["active_version"]
+        self.assertEqual([item.content for item in current.chapters], chapters)
+        self.assertEqual([item.formal_content for item in current.chapters if item.formal_content.strip()],
+                         [content for content in chapters if content.strip()])
+        return self.analyze_project(project_id)
+
+    def analyze_project(self, project_id):
         before = self.independent.workspace(project_id, self.account_id)["active_version"].model_dump(mode="json")
         self.service.process_background_tasks()
         payload = self.client.get(f"/api/independent/projects/{project_id}/deconstruction").json()
@@ -148,10 +180,17 @@ class Stage32AcceptanceTest(unittest.TestCase):
         self.assertEqual(len(payload["result"]["report"]["chapters"]), 100)
 
     def test_leading_and_internal_whitespace_does_not_shift_evidence(self):
-        self.import_story(["  \n\n\t  林舟推开门。\n\n顾遥在屋内点灯。  ", "\n\t顾遥带着林舟走向河岸。\n"])
+        self.write_story(["  \n\n\t  林舟推开门。\n\n顾遥在屋内点灯。  ", "\n\t顾遥带着林舟走向河岸。\n"])
 
     def test_emoji_utf16_evidence_keeps_real_source_boundaries(self):
-        self.import_story(["  🧭林舟拿起钥匙。顾遥问：“这把🔑能开哪扇门？”", "顾遥用钥匙开门，门后挂着一面🏳️‍🌈旗帜。"])
+        self.write_story(["  🧭林舟拿起钥匙。顾遥问：“这把🔑能开哪扇门？”", "顾遥用钥匙开门，门后挂着一面🏳️‍🌈旗帜。"])
+
+    def test_blank_chapters_do_not_create_invented_events_or_progress(self):
+        _, payload, before = self.write_story(["  ", "林舟推开门。", "\n\t", "顾遥点亮灯。", ""])
+        blank_ids = {item["chapter_id"] for item in before["chapters"] if not item["formal_content"].strip()}
+        report = payload["result"]["report"]
+        self.assertFalse(blank_ids.intersection(ref["chapter_id"] for ref in report["evidence"]))
+        self.assertFalse(blank_ids.intersection(key for event in report["plot"]["events"] for key in event["chapter_ids"]))
 
     def test_repetition_alone_is_not_confirmed_foreshadowing_payoff(self):
         _, payload, _ = self.import_story(["林舟看见墙是蓝色的，然后离开。", "顾遥看见海是蓝色的，然后回家。"])
