@@ -107,3 +107,25 @@ DeconstructionService
 `app/core/deconstruction_depth.py` 按章节事实、跨章关系、六视角分析、证据校验和发布顺序构造 `report_version="2.0"`。事件、人物状态和证据 ID 使用来源 token 与章节/span 等固有锚点，不使用遍历序号；否定、拒绝、阻止、能力/许可否定与双重否定按局部谓词作用域处理，缺少证据时保持未知或降低置信。
 
 作者写入、后台分析和跨 store 事务统一进入持久项目锁；发布前重新校验 active version、revision、hash 与 CAS token，正文变更时放弃旧发布并进入 `stale` 或 `rebuild_required`。前端只接受严格 2.0 报告，提供总览和六视角 roving tabs、筛选与证据抽屉；当前来源允许精确定位，历史来源只读且禁用定位。
+
+## 阶段 33：独立创作体验接缝（待实施）
+
+阶段 33 的范围和测试矩阵见 [`goals/STAGE_33_INDEPENDENT_EXPERIENCE.md`](goals/STAGE_33_INDEPENDENT_EXPERIENCE.md)。本阶段只收口既有 `independent`、`archive`、`deconstruction` 和版本接口之间的接缝，不改变阶段 32 分析引擎。
+
+### 编辑器导航状态
+
+编辑器当前章节采用 URL 导航 token `/independent/{project_id}?chapter={chapter_id}`。`chapter_id` 只在当前 active manuscript version 内解析；服务端 workspace 仍是章节正文、标题、`server_revision`、`formal_content` 和任务状态的唯一真相。选中、展开和焦点不进入 `.novel_*`，也不改变档案或拆解侧车。新章接口成功后使用响应中的新 `chapter_id`，不能让旧的内存选中态覆盖服务端结果。
+
+加载顺序固定为：恢复 HttpOnly 会话 → 读取 workspace → 校验当前 active version → 解析 URL chapter token → 渲染章节和状态 → 必要时修正无效 URL。无 token 才默认第一章；token 失效或稿本变化时必须安全降级并给出可读提示。
+
+### 保存与完成投影
+
+`server_revision`/返回正文代表落盘事实，`ChapterDocument.status` 代表完成/分析生命周期。`drafting` 不得单独投影为“等待保存”。已保存但未完成的章显示“已保存，尚未完成本章”；只有 revision 为 0 且内容为空的新空章可显示等待保存。档案返回和路由刷新不得用旧前端缓冲替代这两个服务端事实。
+
+### 版本预览与恢复
+
+版本预览继续走 owner-scoped 的只读接口，不在浏览器缓存整本正文。预览层遍历全部 `version.chapters`，按章节号展示真实只读内容或等价的章节读取结果，不能只取第一章。预览没有副作用；恢复前必须处理本地保存冲突和 `pending_changes`，恢复在既有作者写门禁下创建新的 active version，保留历史稿本、正文、快照、revision/hash 和恢复期限。恢复后重新解析新 active version 的 chapter token，不能继续使用旧稿本的章节 ID。
+
+### 保持的安全接缝
+
+新章和导航状态不触发阶段 32 报告发布；完成章节、稿本恢复才按既有 outbox、source token、CAS 和历史只读规则推进拆解。预览、档案回看和章节切换不得引入 AI 调用、公开分享、正文导出或新的并行正文。所有新增/调整路径继续执行账户、作品 owner、mode 和 response projection 校验，自动化只使用临时 store 与 fake runtime。
