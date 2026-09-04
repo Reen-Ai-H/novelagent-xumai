@@ -6,7 +6,7 @@
 
 面向中文长篇作者的 Web 写作与作品记忆工具。
 
-[快速开始](#快速开始) · [产品预览](#产品预览) · [使用方式](#使用方式) · [文档](#文档)
+[快速开始](#快速开始) · [产品预览](#产品预览) · [使用方式](#使用方式) · [Windows 迁移](docs/WINDOWS_MIGRATION.md) · [文档](#文档)
 
 </div>
 
@@ -89,8 +89,8 @@
 需要 Python、[uv](https://docs.astral.sh/uv/) 和 Node.js。
 
 ```bash
-git clone https://github.com/aswansong/novelagent.git
-cd novelagent
+git clone https://github.com/Reen-Ai-H/novelagent-xumai.git
+cd novelagent-xumai
 
 uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
@@ -119,7 +119,7 @@ LLM_TEMPERATURE=0.7
 ## 开发状态
 
 - 阶段 27 独立审计：P0/P1/P2/P3 均为 0。
-- GitHub main 历史基线：107 tests，0 failed，0 skipped；当前作品拆解候选集成：133 tests，0 failed，0 skipped。
+- GitHub main 历史基线：107 tests，0 failed，0 skipped；当前阶段31发布候选：135 tests，0 failed，0 skipped。
 - API 基线：OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations。
 - 真实 DeepSeek 连续三章链路已验证。
 - 独立作品拆解工作区已接入：完成正文后可查看概览、节奏时间线、逐章结构和可回链证据；结果状态与恢复均来自服务端。
@@ -146,6 +146,7 @@ git diff --check
 ## 文档
 
 - [作者使用说明](docs/USER_GUIDE.md)
+- [Windows 迁移与本地运行](docs/WINDOWS_MIGRATION.md)
 - [架构说明](docs/ARCHITECTURE.md)
 - [开发与运维](docs/DEVELOPMENT.md)
 - [产品规格](docs/PRODUCT_SPEC.md)

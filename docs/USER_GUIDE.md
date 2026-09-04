@@ -7,8 +7,8 @@
 在已经安装 Python、`uv` 和 Node.js 的电脑上：
 
 ```bash
-git clone https://github.com/aswansong/novelagent.git
-cd novelagent
+git clone https://github.com/Reen-Ai-H/novelagent-xumai.git
+cd novelagent-xumai
 uv venv .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 cp .env.example .env

@@ -9,6 +9,8 @@ cp .env.example .env
 .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
+Windows PowerShell 的等价步骤见 [`docs/WINDOWS_MIGRATION.md`](WINDOWS_MIGRATION.md)。仓库 CI 在 Ubuntu 和 Windows、Python 3.12、Node LTS 上运行完整 unittest、compileall 和 `node --check`；不加载 `.env`，不调用模型、图片或付费服务。
+
 服务默认只监听本机。不要把本地数据目录当成配置文件编辑，不要把 `.env` 或任何 `.novel_*` 目录加入 Git。
 
 ## 配置合同
