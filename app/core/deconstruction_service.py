@@ -126,6 +126,47 @@ class DeconstructionService:
         parts = re.split(r"\n\s*\n|\n", text)
         return [part.strip() for part in parts if part.strip()]
 
+    @staticmethod
+    def _normalize_timeline(timeline: list[TimelineNode]) -> list[TimelineNode]:
+        """把有效正文跨度映射到 0–100，不改动任何绝对证据锚点。"""
+
+        if not timeline:
+            return []
+        minimum = min(item.normalized_start for item in timeline)
+        maximum = max(item.normalized_end for item in timeline)
+        span = maximum - minimum
+        if span <= 0:
+            if len(timeline) == 1:
+                return [timeline[0].model_copy(update={"normalized_start": 0.0, "normalized_end": 100.0})]
+            span = float(len(timeline) - 1)
+            minimum = 0.0
+            raw_positions = [float(index) for index in range(len(timeline))]
+        else:
+            raw_positions = []
+
+        normalized: list[TimelineNode] = []
+        previous_end = 0.0
+        for index, item in enumerate(timeline):
+            if raw_positions:
+                start = raw_positions[index]
+                end = raw_positions[index] + 1.0
+                start = (start / span) * 100.0
+                end = (end / span) * 100.0
+            else:
+                start = ((item.normalized_start - minimum) / span) * 100.0
+                end = ((item.normalized_end - minimum) / span) * 100.0
+            start = round(max(0.0, min(100.0, start)), 2)
+            end = round(max(0.0, min(100.0, end)), 2)
+            if index == 0:
+                start = 0.0
+            start = max(previous_end, start)
+            end = max(start, end)
+            if index == len(timeline) - 1:
+                end = 100.0
+            normalized.append(item.model_copy(update={"normalized_start": start, "normalized_end": end}))
+            previous_end = end
+        return normalized
+
     def _load_independent_record(self, project_id: str, account_id: str):
         try:
             return self.independent._load(project_id, account_id)  # noqa: SLF001 - 同一后端侧车的内部来源边界。
@@ -1034,7 +1075,7 @@ class DeconstructionService:
             uncertainty=overview_uncertainty,
         )
         document.overview = overview
-        document.timeline = timeline
+        document.timeline = self._normalize_timeline(timeline)
         document.chapter_breakdowns = chapter_breakdowns
         deduplicated: dict[str, EvidenceRef] = {item.evidence_id: item for item in evidence}
         document.evidence = list(deduplicated.values())

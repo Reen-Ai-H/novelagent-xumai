@@ -276,6 +276,18 @@ class DeconstructionHistoryItem(BaseModel):
     completed_at: datetime | None = None
 
 
+class DeconstructionEvidenceChapter(BaseModel):
+    """证据回链公开的稳定章节定位，不包含正文或内部字段。"""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    chapter_id: str
+    chapter_number: int = Field(..., ge=1)
+    title: str = Field(default="", max_length=200)
+    read_only: Literal[True] = True
+    source_available: bool = False
+
+
 class DeconstructionState(BaseModel):
     """兼容旧客户端的嵌套投影；字段与顶层 canonical state 保持一致。"""
 
@@ -368,7 +380,7 @@ class DeconstructionEvidenceResponse(BaseModel):
     project_id: str
     title: str
     evidence: EvidenceRef
-    chapter: dict[str, object]
+    chapter: DeconstructionEvidenceChapter
     source_matches_current: bool = False
     historical: bool = True
 
