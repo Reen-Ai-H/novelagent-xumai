@@ -27,9 +27,19 @@ class Stage31CDeconstructionFrontendContractTest(unittest.TestCase):
         self.assertIn("const deconstructionApi = Object.freeze({", self.app_source)
         self.assertIn("/api/independent/projects/${encodeURIComponent(projectId)}/deconstruction", self.app_source)
         self.assertIn("this.action(projectId, action)", self.app_source)
+        self.assertIn("this.evidence(projectId, evidenceId)", self.app_source)
         self.assertIn('method: "POST"', self.app_source)
-        self.assertIn('action === "rebuild"', self.app_source)
+        for field in ("effective_status", "run_status", "source_match", "active_run", "payload.result", "payload.actions", "payload.history"):
+            self.assertIn(field, self.app_source)
+        self.assertIn("expected_source_version_id", self.app_source)
+        self.assertIn("expected_source_revision", self.app_source)
+        self.assertIn("expected_source_hash", self.app_source)
+        self.assertIn("idempotency_key", self.app_source)
         self.assertNotIn("/api/deconstruction/projects/", self.app_source)
+
+        canonical_slice = self.app_source[self.app_source.index("const deconstructionStatusText"):self.app_source.index("function renderArchivePage")]
+        for forbidden in ("payload?.deconstruction", "payload?.document", "root.status", "payload?.status", "root.document"):
+            self.assertNotIn(forbidden, canonical_slice)
 
     def test_all_server_states_are_rendered_without_promoting_unknown_to_completed(self) -> None:
         for status in (
@@ -42,23 +52,26 @@ class Stage31CDeconstructionFrontendContractTest(unittest.TestCase):
             "rebuild_required",
         ):
             self.assertIn(f"{status}:", self.app_source)
-        self.assertIn("className = `deconstruction-status-pill is-${data.status}`", self.app_source)
+        self.assertIn("className = `deconstruction-status-pill is-${data.effectiveStatus}`", self.app_source)
         self.assertIn(".deconstruction-status-pill", self.css_source)
-        self.assertIn("normalizeDeconstructionStatus", self.app_source)
-        self.assertIn('return initialized ? "empty" : "empty";', self.app_source)
-        self.assertIn("empty_reason", self.app_source)
-        self.assertIn("error_message", self.app_source)
-        self.assertIn("actions: {", self.app_source)
+        self.assertIn('if (!deconstructionStatusSet.has(status) || !deconstructionRunStatusSet.has(runStatus))', self.app_source)
+        self.assertIn('if (result && (status !== "completed" || runStatus !== "completed" || !sourceMatch))', self.app_source)
+        self.assertIn('includes(data.runStatus)', self.app_source)
 
-    def test_nested_document_and_absolute_anchors_are_normalized(self) -> None:
+    def test_canonical_result_and_absolute_anchors_are_normalized(self) -> None:
         for field in (
-            "document.overview",
-            "document.timeline",
-            "document.chapter_breakdowns",
-            "document.evidence",
-            "source_version_id",
-            "source_revision",
-            "source_hash",
+            "value.overview",
+            "value.timeline",
+            "value.chapter_breakdowns",
+            "value.evidence",
+            "value.source_version_id",
+            "value.source_revision",
+            "value.source_hash",
+            "ref.document_id",
+            "ref.source_version_id",
+            "ref.source_revision",
+            "ref.source_hash",
+            "ref.offset_unit",
             "normalized_start",
             "normalized_end",
             "word_start",
@@ -75,11 +88,28 @@ class Stage31CDeconstructionFrontendContractTest(unittest.TestCase):
 
     def test_evidence_links_return_to_editor_and_only_select_valid_offsets(self) -> None:
         self.assertIn('data-action="open-deconstruction-evidence"', self.app_source)
+        for attribute in ("data-document-id", "data-source-version-id", "data-source-revision", "data-source-hash", "data-offset-unit"):
+            self.assertIn(attribute, self.app_source)
         self.assertIn("navigate(`/independent/${encodeURIComponent(projectId)}`)", self.app_source)
         self.assertIn("setSelectionRange(evidence.charStart, evidence.charEnd)", self.app_source)
+        self.assertIn("deconstructionEvidenceIdentityMatches", self.app_source)
+        self.assertIn("deconstructionEvidenceMatchesSource", self.app_source)
+        self.assertIn("source_matches_current", self.app_source)
+        self.assertIn('evidence.offsetUnit === DECONSTRUCTION_OFFSET_UNIT', self.app_source)
         self.assertIn("evidence.charStart >= 0", self.app_source)
         self.assertIn("evidence.charEnd <= content.length", self.app_source)
-        self.assertIn("章节级定位，未伪装成精确字符高亮", self.app_source)
+        self.assertIn("章节级回看", self.app_source)
+        self.assertNotIn("|| version?.chapters?.find((item) => evidence.chapterNumber", self.app_source)
+
+    def test_status_actions_follow_server_capabilities(self) -> None:
+        action_slice = self.app_source[self.app_source.index("function deconstructionStatusAction"):self.app_source.index("function renderDeconstructionStatus")]
+        self.assertIn('data.effectiveStatus === "failed_retryable" && data.actions.retry', action_slice)
+        self.assertIn('data.effectiveStatus === "stale" && data.actions.rebuild', action_slice)
+        self.assertIn('data.effectiveStatus === "rebuild_required"', action_slice)
+        self.assertIn('data-action="deconstruction-open-editor"', action_slice)
+        self.assertNotIn('data.effectiveStatus === "rebuild_required" && data.actions.rebuild', action_slice)
+        self.assertIn('current?.effectiveStatus === "failed_retryable"', self.app_source)
+        self.assertIn('current?.effectiveStatus === "stale"', self.app_source)
 
     def test_page_uses_a_scroll_container_for_wide_breakdown_table(self) -> None:
         self.assertIn("overflow-x: auto", self.css_source)
@@ -101,9 +131,9 @@ class Stage31CDeconstructionFrontendContractTest(unittest.TestCase):
         render_start = self.app_source.index("function renderDeconstructionPage")
         render_end = self.app_source.index("function renderDeconstructionLoading")
         render_source = self.app_source[render_start:render_end]
-        self.assertIn("renderDeconstructionOverview(data)", render_source)
-        self.assertIn("renderDeconstructionTimeline(data)", render_source)
-        self.assertIn("renderDeconstructionChapterTable(data)", render_source)
+        self.assertIn("renderDeconstructionResult(data)", render_source)
+        self.assertIn("hasDeconstructionResults(data)", render_source)
+        self.assertIn("data.effectiveStatus === \"completed\"", render_source)
         self.assertNotRegex(render_source, re.compile(r"雾港|陆沉|第一章"))
 
 
