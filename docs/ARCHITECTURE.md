@@ -15,6 +15,7 @@ core services (account / entry / independent / ai / transaction)
         ↓ 原子 JSON store + 安全元数据
 .novel_accounts  .novel_independent  .novel_ai
 .novel_projects  .novel_memory       .novel_transactions
+.novel_deconstruction
 ```
 
 - `app/entry_routes.py`：登录、书架、通知和应用入口。
@@ -66,7 +67,7 @@ AI 正式章节提交使用 durable journal、staging payload 和 commit marker�
 
 ## 作品拆解侧车（阶段 31）
 
-阶段 32 的扩展合同现已冻结，见 [深度拆解合同](STAGE_32_CONTRACT.md)。六视角 2.0 schema 已接入，以下阶段 31 的引擎和实例锁仍待后端升级；共享持久项目锁、source/CAS 发布及旧侧车升级不能仅凭旧实现视为完成。
+阶段 32 的扩展合同与现役实现见 [深度拆解合同](STAGE_32_CONTRACT.md)。六视角 2.0 schema、确定性分析引擎、共享持久项目锁、source/CAS 发布、旧侧车显式升级和前端工作区均已接入。
 
 作品拆解是独立创作内部的版本化派生侧车，不改变既有正文和故事档案文件：
 
@@ -77,7 +78,7 @@ DeconstructionService
         ↓ queued → running → completed / failed_retryable / rebuild_required
 .novel_deconstruction/{project_id}.json
         ↓ 单次 GET
-作品概览 · 0–100% 节奏时间线 · 章节拆解 · EvidenceRef 回链
+总览 · 人物 · 剧情 · 伏笔 · 章节节奏 · 读者体验 · 文笔技法 · EvidenceRef 回链
 ```
 
 - `schemas/deconstruction.py` 定义拆解运行、概览观察、候选、时间线节点、章节拆解和证据定位合同。结果只保存最小证据摘录，不保存整本正文、prompt 或内部分析过程。
@@ -100,3 +101,9 @@ DeconstructionService
 `frontend/app.js` 通过单一 `deconstructionApi` adapter 读取上述 canonical 顶层字段，不读取兼容投影来猜状态。页面支持 `empty`、`queued`、`running`、`completed`、`failed_retryable`、`stale` 和 `rebuild_required` 七种服务端状态；轮询只重新读取状态，不向服务端发送推进动作。深链 `/independent/{project_id}?view=deconstruction` 在刷新时先恢复 HttpOnly 会话，再读取真实作品和侧车，未登录与跨账户仍沿既有门禁处理。
 
 拆解结果中的 `EvidenceRef` 在跳回正文前会再次校验文档、稿本版本、revision、hash、章节和 UTF-16 偏移。校验不通过时只显示历史章节级只读证据；前端不保存正文副本、私有记忆或结果 fixture，服务端仍是唯一数据来源。
+
+### 阶段 32：六视角深度报告
+
+`app/core/deconstruction_depth.py` 按章节事实、跨章关系、六视角分析、证据校验和发布顺序构造 `report_version="2.0"`。事件、人物状态和证据 ID 使用来源 token 与章节/span 等固有锚点，不使用遍历序号；否定、拒绝、阻止、能力/许可否定与双重否定按局部谓词作用域处理，缺少证据时保持未知或降低置信。
+
+作者写入、后台分析和跨 store 事务统一进入持久项目锁；发布前重新校验 active version、revision、hash 与 CAS token，正文变更时放弃旧发布并进入 `stale` 或 `rebuild_required`。前端只接受严格 2.0 报告，提供总览和六视角 roving tabs、筛选与证据抽屉；当前来源允许精确定位，历史来源只读且禁用定位。
