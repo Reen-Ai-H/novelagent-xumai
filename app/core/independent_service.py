@@ -1564,7 +1564,13 @@ class IndependentWorkspaceService:
                 task.status = "cancelled"
                 task.error_message = "原稿本已进入历史恢复区，原分析任务失效。"
                 task.updated_at = now
+        # Clone the author-visible current text first, then freeze the old
+        # version back to its last formal state.  Draft saves intentionally
+        # update ``chapter.content`` in place while leaving ``formal_content``
+        # untouched; retaining that draft on the recoverable version would let
+        # a later restore resurrect text the author never confirmed.
         new_version = self._clone_as_active(version, label=f"稿本 {len(record.versions) + 1} · 全文重建", source_version_id=old_version_id)
+        self._freeze_recoverable_version(version)
         record.versions.append(new_version)
         record.active_version_id = new_version.version_id
         record.pending_changes = None
@@ -1577,6 +1583,18 @@ class IndependentWorkspaceService:
         self.store.save(record)
         self._request_deconstruction(project_id, account_id, reason="全文重建")
         return {"decision": decision, "task": task, "version": new_version, "old_version": version}
+
+    def _freeze_recoverable_version(self, version: ManuscriptVersion) -> None:
+        """Keep a recoverable version at its last confirmed author state."""
+
+        for chapter in version.chapters:
+            formal_content = chapter.formal_content
+            chapter.content = formal_content
+            chapter.word_count = chapter.formal_word_count or self._word_count(formal_content)
+            if chapter.formal_title:
+                chapter.title = chapter.formal_title
+            chapter.status = "ready" if formal_content else "drafting"
+            chapter.last_completed_hash = self._hash_text(formal_content) if formal_content else None
 
     def _clone_as_active(self, source: ManuscriptVersion, *, label: str, source_version_id: str) -> ManuscriptVersion:
         now = self._now()
@@ -1602,18 +1620,89 @@ class IndependentWorkspaceService:
             archive=StoryArchive(analysis_label=ANALYSIS_LABEL),
         )
 
+    @staticmethod
+    def _restore_projection_matches_source(
+        active: ManuscriptVersion,
+        source: ManuscriptVersion,
+    ) -> bool:
+        """Check whether a restore result is still the same author state."""
+
+        if active.source_version_id != source.version_id:
+            return False
+        current_chapters = sorted(active.chapters, key=lambda item: item.chapter_number)
+        source_chapters = sorted(source.chapters, key=lambda item: item.chapter_number)
+        if len(current_chapters) != len(source_chapters):
+            return False
+        for current, original in zip(current_chapters, source_chapters):
+            if (
+                current.chapter_number,
+                current.title,
+                current.content,
+                current.formal_content,
+                current.server_revision,
+                current.word_count,
+                current.formal_word_count,
+            ) != (
+                original.chapter_number,
+                original.title,
+                original.content,
+                original.formal_content,
+                original.server_revision,
+                original.word_count,
+                original.formal_word_count,
+            ):
+                return False
+        return True
+
     @_author_write_method
     def restore_version(self, project_id: str, account_id: str, version_id: str) -> dict[str, Any]:
         record = self._load(project_id, account_id)
         selected = next((item for item in record.versions if item.version_id == version_id), None)
         if selected is None:
             raise IndependentServiceError("version_missing", "稿本版本不存在。", status_code=404)
-        if selected.version_id == record.active_version_id:
+        old_active = self._active(record)
+        has_unconfirmed_changes = record.pending_changes is not None or any(
+            chapter.content != chapter.formal_content
+            or chapter.title != (chapter.formal_title or chapter.title)
+            for chapter in old_active.chapters
+        )
+        if has_unconfirmed_changes:
+            raise IndependentServiceError(
+                "pending_changes_confirmation_required",
+                "当前稿本存在未确认修改，请先选择忽略或根据当前全文重建后再恢复历史稿本。",
+                status_code=409,
+                data={
+                    "pending_changes": (
+                        record.pending_changes.model_dump(mode="json")
+                        if record.pending_changes is not None
+                        else None
+                    )
+                },
+            )
+        if selected.version_id == old_active.version_id:
             raise IndependentServiceError("version_already_active", "当前已经是当前稿本。", status_code=409)
         if selected.recoverable_until is not None and selected.recoverable_until <= self._now():
             raise IndependentServiceError("version_expired", "这个历史稿本已超过 30 天恢复期限，但仍保留为历史记录。", status_code=410)
+        existing_restore = next(
+            (
+                task
+                for task in record.tasks
+                if task.kind == "restore"
+                and task.version_id == old_active.version_id
+                and task.status != "cancelled"
+            ),
+            None,
+        )
+        if (
+            existing_restore is not None
+            and self._restore_projection_matches_source(old_active, selected)
+        ):
+            # The restore endpoint has no request body/idempotency token.  A
+            # repeated confirmation for the same just-created restore must
+            # therefore return the existing projection instead of appending
+            # another equivalent current version.
+            return {"task": existing_restore, "version": old_active, "restored_from": selected}
         now = self._now()
-        old_active = self._active(record)
         old_active.status = "recoverable"
         old_active.recoverable_until = now + timedelta(days=RECOVERY_DAYS)
         new_version = self._clone_as_active(selected, label=f"稿本 {len(record.versions) + 1} · 从历史恢复", source_version_id=selected.version_id)
