@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111827" />
     <title>叙脉｜新一代写作体验</title>
-    <link rel="stylesheet" href="/static/styles.css?v=stage4-20260810b" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
+    <link rel="stylesheet" href="/static/styles.css?v=stage32-20260905" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -430,6 +431,19 @@
       </div>
     </dialog>
 
-    <script src="/static/app.js?v=stage22-20260811" defer></script>
+    <dialog id="deconstructionEvidenceDialog" class="review-dialog deconstruction-evidence-dialog" aria-labelledby="deconstructionEvidenceTitle">
+      <div class="review-dialog-shell">
+        <button id="closeDeconstructionEvidenceButton" class="dialog-close" type="button" data-action="close-deconstruction-evidence" aria-label="关闭证据抽屉">×</button>
+        <p class="kicker"><span class="kicker-line"></span>证据回链 / 只读</p>
+        <h2 id="deconstructionEvidenceTitle">证据详情</h2>
+        <div id="deconstructionEvidenceContent" class="deconstruction-evidence-dialog-content" aria-live="polite"></div>
+        <div class="review-actions deconstruction-evidence-dialog-actions">
+          <button id="locateDeconstructionEvidenceButton" class="button button-primary" type="button" data-action="locate-deconstruction-evidence" disabled>在当前正文中定位</button>
+          <button id="dismissDeconstructionEvidenceButton" class="button button-outline" type="button" data-action="close-deconstruction-evidence">关闭</button>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="/static/app.js?v=stage32-20260905" defer></script>
   </body>
 </html>

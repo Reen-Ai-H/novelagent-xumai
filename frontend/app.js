@@ -46,6 +46,10 @@
     deconstructionWorkspace: null,
     deconstructionLoadToken: 0,
     deconstructionPollTimer: null,
+    deconstructionView: "overview",
+    deconstructionProgress: 100,
+    deconstructionChapterId: "",
+    deconstructionEvidenceRequestToken: 0,
     pendingEvidence: null,
     dialogFocus: new WeakMap(),
   };
@@ -129,6 +133,10 @@
     deconstructionRefreshButton: $("#deconstructionRefreshButton"),
     deconstructionNotice: $("#deconstructionNotice"),
     deconstructionPageContent: $("#deconstructionPageContent"),
+    deconstructionEvidenceDialog: $("#deconstructionEvidenceDialog"),
+    deconstructionEvidenceTitle: $("#deconstructionEvidenceTitle"),
+    deconstructionEvidenceContent: $("#deconstructionEvidenceContent"),
+    locateDeconstructionEvidenceButton: $("#locateDeconstructionEvidenceButton"),
     aiStudioProjectTitle: $("#aiStudioProjectTitle"),
     aiStudioModelLabel: $("#aiStudioModelLabel"),
     aiStudioBlueprintState: $("#aiStudioBlueprintState"),
@@ -258,6 +266,7 @@
     if (state.screen === "deconstruction" && screen !== "deconstruction") {
       window.clearTimeout(state.deconstructionPollTimer);
       state.deconstructionPollTimer = null;
+      closeDeconstructionEvidenceDialog?.();
     }
     state.screen = screen;
     const screens = {
@@ -1290,6 +1299,23 @@
     return Number.isFinite(number) ? number : null;
   }
 
+  // Nullable Depth fields must preserve an explicit unknown.  Do not coerce
+  // null, booleans, or numeric strings into a plotted zero.
+  function deconstructionNullableNumber(value) {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  function deconstructionEvidenceExcerptMatches(evidence, content) {
+    if (!evidence || typeof content !== "string" || typeof evidence.excerpt !== "string") return false;
+    if (evidence.offsetUnit !== DECONSTRUCTION_OFFSET_UNIT
+      || !Number.isInteger(evidence.charStart)
+      || !Number.isInteger(evidence.charEnd)
+      || evidence.charStart < 0
+      || evidence.charEnd < evidence.charStart
+      || evidence.charEnd > content.length) return false;
+    return content.slice(evidence.charStart, evidence.charEnd) === evidence.excerpt;
+  }
+
   function deconstructionText(value, fallback = "") {
     const text = String(value ?? "").trim();
     return text || fallback;
@@ -1318,10 +1344,11 @@
       sourceHash: String(ref.source_hash || ""),
       chapterId: String(ref.chapter_id || ""),
       chapterNumber: deconstructionNumber(ref.chapter_number),
+      granularity: ref.granularity === "chapter" ? "chapter" : "span",
       charStart: deconstructionNumber(ref.start_offset),
       charEnd: deconstructionNumber(ref.end_offset),
       offsetUnit: String(ref.offset_unit || ""),
-      excerpt: deconstructionText(ref.excerpt),
+      excerpt: typeof ref.excerpt === "string" ? ref.excerpt : "",
       label: deconstructionText(ref.label, "正文证据"),
       targetPath: ref.target_path ? String(ref.target_path) : "",
     };
@@ -1416,13 +1443,322 @@
     };
   }
 
+  const depthPerspectiveMeta = Object.freeze({
+    overview: {
+      label: "总览",
+      title: "拆解总览",
+      description: "先看六个视角如何共同落在同一份正文和证据上。",
+    },
+    characters: {
+      label: "人物与人物弧",
+      title: "人物与人物弧",
+      description: "按阅读进度回看人物状态、动机和关系如何变化。",
+    },
+    plot: {
+      label: "剧情线与事件因果",
+      title: "剧情线与事件因果",
+      description: "把事件的叙述顺序、故事时间和因果解释分开呈现。",
+    },
+    foreshadowing: {
+      label: "伏笔与回收",
+      title: "伏笔与回收",
+      description: "沿着铺垫、强化、回收或改写的状态轨迹回看。",
+    },
+    rhythm: {
+      label: "章节结构与节奏",
+      title: "章节结构与节奏",
+      description: "节奏指标共用正文的 0–100 阅读轴，未知值保持未知。",
+    },
+    reader: {
+      label: "读者体验",
+      title: "读者体验",
+      description: "回看期待、信息差、情绪影响和回收感怎样推进。",
+    },
+    technique: {
+      label: "文笔与叙事技法",
+      title: "文笔与叙事技法",
+      description: "每项技法都同时给出观察、例证、学习说明和适用边界。",
+    },
+  });
+
+  const depthPerspectiveOrder = Object.freeze([
+    "overview", "characters", "plot", "foreshadowing", "rhythm", "reader", "technique",
+  ]);
+
+  const depthRelationText = Object.freeze({
+    allies: "结盟",
+    opposes: "对立",
+    depends_on: "依赖",
+    changes_to: "状态变化为",
+    causes: "促成",
+    enables: "使……成为可能",
+    prevents: "阻止",
+    precedes: "叙述上先于",
+    parallel_to: "与……并行",
+    intersects: "交汇",
+    plants: "埋下",
+    reinforces: "强化",
+    pays_off: "回收",
+    subverts: "改写预期",
+  });
+
+  const depthTemporalModeText = Object.freeze({
+    linear: "线性时间",
+    flashback: "倒叙",
+    flashforward: "预叙",
+    parallel: "并行线",
+    unknown: "故事时间未知",
+  });
+
+  const depthPlotStatusText = Object.freeze({
+    introduced: "引入",
+    developing: "发展",
+    turning: "转折",
+    resolved: "已解决",
+    open: "仍开放",
+    unknown: "状态未知",
+  });
+
+  const depthForeshadowingStatusText = Object.freeze({
+    planted: "已埋下",
+    reinforced: "已强化",
+    paid_off: "已回收",
+    subverted: "预期被改写",
+    unresolved: "尚未回收",
+    unknown: "状态未知",
+  });
+
+  const depthEpistemicStatusText = Object.freeze({
+    observed: "正文观察",
+    inferred: "基于证据推断",
+    unknown: "证据状态未知",
+  });
+
+  function normalizeDepthSource(value) {
+    const source = value && typeof value === "object" ? value : {};
+    return {
+      projectId: String(source.project_id || ""),
+      documentId: String(source.document_id || ""),
+      versionId: String(source.source_version_id || ""),
+      revision: deconstructionNumber(source.source_revision),
+      contentHash: String(source.source_hash || ""),
+    };
+  }
+
+  function normalizeDepthChapter(value) {
+    const chapter = value && typeof value === "object" ? value : {};
+    return {
+      id: String(chapter.chapter_id || ""),
+      number: deconstructionNumber(chapter.chapter_number),
+      title: deconstructionText(chapter.title, "未命名章节"),
+      utf16Length: deconstructionNumber(chapter.utf16_length),
+      start: deconstructionNumber(chapter.normalized_start),
+      end: deconstructionNumber(chapter.normalized_end),
+    };
+  }
+
+  function normalizeDepthItem(value, extra = {}) {
+    const item = value && typeof value === "object" ? value : {};
+    const epistemicStatus = ["observed", "inferred", "unknown"].includes(item.epistemic_status)
+      ? item.epistemic_status
+      : "unknown";
+    return {
+      id: String(item.item_id || ""),
+      kind: String(item.kind || ""),
+      category: deconstructionText(item.category, "结论"),
+      conclusion: deconstructionText(item.conclusion, "不确定：当前正文证据不足。"),
+      epistemicStatus,
+      chapterIds: deconstructionStringList(item.chapter_ids),
+      normalizedStart: deconstructionNumber(item.normalized_start),
+      normalizedEnd: deconstructionNumber(item.normalized_end),
+      evidenceIds: deconstructionStringList(item.evidence_ids),
+      relatedItemIds: deconstructionStringList(item.related_item_ids),
+      confidence: epistemicStatus === "unknown" ? normalizedConfidence(null) : normalizedConfidence(item.confidence),
+      uncertainty: deconstructionStringList(item.uncertainty),
+      ...extra,
+    };
+  }
+
+  function normalizeDepthEndpoint(value) {
+    const endpoint = value && typeof value === "object" ? value : {};
+    return { id: String(endpoint.item_id || ""), kind: String(endpoint.kind || "") };
+  }
+
+  function normalizeDepthRelation(value) {
+    const item = value && typeof value === "object" ? value : {};
+    return normalizeDepthItem(item, {
+      start: normalizeDepthEndpoint(item.start),
+      end: normalizeDepthEndpoint(item.end),
+      relationType: String(item.relation_type || ""),
+      explanation: deconstructionText(item.explanation, "不确定：关系解释证据不足。"),
+    });
+  }
+
+  function normalizeDepthView(value) {
+    const view = value && typeof value === "object" ? value : {};
+    return {
+      summary: deconstructionText(view.summary, "当前视角还没有足够证据形成摘要。"),
+      uncertainty: deconstructionStringList(view.uncertainty),
+    };
+  }
+
+  function normalizeDepthReport(value) {
+    if (!value || typeof value !== "object" || value.report_version !== "2.0") return null;
+    const requiredViews = ["characters", "plot", "foreshadowing", "rhythm", "reader_experience", "technique"];
+    if (!value.source || !Array.isArray(value.chapters) || !value.chapters.length
+      || !Array.isArray(value.evidence) || !value.evidence.length
+      || requiredViews.some((key) => !value[key] || typeof value[key] !== "object")) return null;
+    const source = normalizeDepthSource(value.source);
+    if (!source.projectId || !source.documentId || !source.versionId || source.revision === null || !source.contentHash) return null;
+    const chapters = value.chapters.map(normalizeDepthChapter).filter((chapter) => chapter.id);
+    const evidence = value.evidence.map(normalizeEvidenceRef).filter(Boolean);
+    if (!chapters.length || !evidence.length
+      || chapters.some((chapter) => chapter.number === null || chapter.utf16Length === null || chapter.start === null || chapter.end === null)
+      || evidence.some((item) => item.documentId !== source.documentId
+        || item.sourceVersionId !== source.versionId
+        || item.sourceRevision !== source.revision
+        || item.sourceHash !== source.contentHash)) return null;
+    if (!Array.isArray(value.rhythm.items) || !value.rhythm.items.length
+      || !Array.isArray(value.reader_experience.items) || !value.reader_experience.items.length
+      || !Array.isArray(value.technique.items) || !value.technique.items.length) return null;
+    const characters = normalizeDepthView(value.characters);
+    characters.characters = Array.isArray(value.characters.characters)
+      ? value.characters.characters.map((item) => normalizeDepthItem(item, {
+        name: deconstructionText(item.name, "未命名人物"),
+        aliases: deconstructionStringList(item.aliases),
+        role: deconstructionText(item.role, "人物身份未知"),
+        motivation: deconstructionText(item.motivation, "动机未知"),
+        innerConflict: deconstructionText(item.inner_conflict, "内在冲突未知"),
+        arcSummary: deconstructionText(item.arc_summary, "人物弧线仍需回看"),
+      }))
+      : [];
+    characters.states = Array.isArray(value.characters.states)
+      ? value.characters.states.map((item) => normalizeDepthItem(item, {
+        characterId: String(item.character_id || ""),
+        goal: deconstructionText(item.goal, "目标未知"),
+        belief: deconstructionText(item.belief, "信念未知"),
+        emotion: deconstructionText(item.emotion, "情绪未知"),
+        agency: deconstructionText(item.agency, "行动能力未知"),
+        change: deconstructionText(item.change, "变化未知"),
+        triggerEventIds: deconstructionStringList(item.trigger_event_ids),
+      }))
+      : [];
+    characters.relations = Array.isArray(value.characters.relations)
+      ? value.characters.relations.map(normalizeDepthRelation)
+      : [];
+
+    const plot = normalizeDepthView(value.plot);
+    plot.plotlines = Array.isArray(value.plot.plotlines)
+      ? value.plot.plotlines.map((item) => normalizeDepthItem(item, {
+        title: deconstructionText(item.title, "未命名剧情线"),
+        centralQuestion: deconstructionText(item.central_question, "核心问题未知"),
+        stakes: deconstructionText(item.stakes, "代价未知"),
+        resolution: deconstructionText(item.resolution, "结局仍开放"),
+        characterIds: deconstructionStringList(item.character_ids),
+      }))
+      : [];
+    plot.events = Array.isArray(value.plot.events)
+      ? value.plot.events.map((item) => normalizeDepthItem(item, {
+        plotlineIds: deconstructionStringList(item.plotline_ids),
+        characterIds: deconstructionStringList(item.character_ids),
+        storyOrder: deconstructionNullableNumber(item.story_order),
+        narrativeOrder: deconstructionNumber(item.narrative_order),
+        temporalMode: depthTemporalModeText[item.temporal_mode] ? item.temporal_mode : "unknown",
+        action: deconstructionText(item.action, "动作未知"),
+        consequence: deconstructionText(item.consequence, "后果未知"),
+        plotlineStatus: depthPlotStatusText[item.plotline_status] ? item.plotline_status : "unknown",
+      }))
+      : [];
+    plot.relations = Array.isArray(value.plot.relations)
+      ? value.plot.relations.map(normalizeDepthRelation)
+      : [];
+
+    const foreshadowing = normalizeDepthView(value.foreshadowing);
+    foreshadowing.threads = Array.isArray(value.foreshadowing.threads)
+      ? value.foreshadowing.threads.map((item) => normalizeDepthItem(item, {
+        label: deconstructionText(item.label, "未命名伏笔"),
+        plantedDetail: deconstructionText(item.planted_detail, "铺垫细节未知"),
+        expectedPayoff: deconstructionText(item.expected_payoff, "预期回收未知"),
+        interpretation: deconstructionText(item.interpretation, "解释仍需回看"),
+      }))
+      : [];
+    foreshadowing.states = Array.isArray(value.foreshadowing.states)
+      ? value.foreshadowing.states.map((item) => normalizeDepthItem(item, {
+        foreshadowingId: String(item.foreshadowing_id || ""),
+        status: depthForeshadowingStatusText[item.status] ? item.status : "unknown",
+        payoff: deconstructionText(item.payoff, "回收结果未知"),
+        eventIds: deconstructionStringList(item.event_ids),
+      }))
+      : [];
+    foreshadowing.relations = Array.isArray(value.foreshadowing.relations)
+      ? value.foreshadowing.relations.map(normalizeDepthRelation)
+      : [];
+
+    const rhythm = normalizeDepthView(value.rhythm);
+    rhythm.items = Array.isArray(value.rhythm.items)
+      ? value.rhythm.items.map((item) => normalizeDepthItem(item, {
+        narrativeFunction: deconstructionText(item.narrative_function, "叙事功能未知"),
+        sceneSummary: deconstructionText(item.scene_summary, "场景概况未知"),
+        pace: deconstructionNullableNumber(item.pace),
+        tension: deconstructionNullableNumber(item.tension),
+        informationDensity: deconstructionNullableNumber(item.information_density),
+        transition: deconstructionText(item.transition, "转场方式未知"),
+      }))
+      : [];
+
+    const reader = normalizeDepthView(value.reader_experience);
+    reader.items = Array.isArray(value.reader_experience.items)
+      ? value.reader_experience.items.map((item) => normalizeDepthItem(item, {
+        expectation: deconstructionText(item.expectation, "期待变化未知"),
+        informationGap: deconstructionText(item.information_gap, "信息差未知"),
+        emotionalEffect: deconstructionText(item.emotional_effect, "情绪影响未知"),
+        curiosity: deconstructionNullableNumber(item.curiosity),
+        suspense: deconstructionNullableNumber(item.suspense),
+        emotionalValence: deconstructionNullableNumber(item.emotional_valence),
+        payoff: deconstructionText(item.payoff, "回收感未知"),
+      }))
+      : [];
+
+    const technique = normalizeDepthView(value.technique);
+    technique.items = Array.isArray(value.technique.items)
+      ? value.technique.items.map((item) => normalizeDepthItem(item, {
+        technique: deconstructionText(item.technique, "未命名技法"),
+        observation: deconstructionText(item.observation, "观察未知"),
+        mechanism: deconstructionText(item.mechanism, "作用机制未知"),
+        effect: deconstructionText(item.effect, "结构效果未知"),
+        learningNote: deconstructionText(item.learning_note, "学习说明未知"),
+        applicability: deconstructionText(item.applicability, "适用边界未知"),
+        exampleEvidenceIds: deconstructionStringList(item.example_evidence_ids),
+      }))
+      : [];
+
+    return {
+      reportVersion: "2.0",
+      source,
+      chapters,
+      evidence,
+      characters,
+      plot,
+      foreshadowing,
+      rhythm,
+      reader,
+      technique,
+    };
+  }
+
   function normalizeResult(value) {
     if (!value || typeof value !== "object" || value.status !== "completed") return null;
+    const analysisContractVersion = String(value.analysis_contract_version || "1.0");
+    const depthReport = value.report ? normalizeDepthReport(value.report) : null;
+    if (analysisContractVersion === "2.0" && !depthReport) throw new Error("正式深度报告不完整。 ");
+    if (depthReport && analysisContractVersion !== "2.0") throw new Error("深度报告版本不一致。 ");
     return {
       documentId: String(value.document_id || ""),
       sourceVersionId: String(value.source_version_id || ""),
       sourceRevision: deconstructionNumber(value.source_revision),
       sourceHash: String(value.source_hash || ""),
+      analysisContractVersion,
+      depthReport,
       analysisLabel: deconstructionText(value.analysis_label, "服务端结构拆解"),
       overview: normalizeOverview(value.overview),
       timeline: Array.isArray(value.timeline) ? value.timeline.map(normalizeTimelineNode) : [],
@@ -1450,12 +1786,16 @@
 
   function normalizeHistoryItem(value) {
     if (!value || typeof value !== "object") return null;
+    const analysisContractVersion = ["1.0", "2.0"].includes(value.analysis_contract_version)
+      ? value.analysis_contract_version
+      : "unknown";
     return {
       documentId: String(value.document_id || ""),
       status: String(value.status || ""),
       sourceVersionId: String(value.source_version_id || ""),
       sourceRevision: deconstructionNumber(value.source_revision),
       sourceHash: String(value.source_hash || ""),
+      analysisContractVersion,
       retryCount: deconstructionNumber(value.retry_count) || 0,
       analysisLabel: deconstructionText(value.analysis_label, "服务端结构拆解"),
       createdAt: value.created_at || null,
@@ -1497,6 +1837,15 @@
     )) {
       throw new Error("正式结果与当前来源版本不一致。");
     }
+    if (result?.depthReport && (
+      result.depthReport.source.projectId !== String(payload.project_id || "")
+      || result.depthReport.source.versionId !== String(payload.source.version_id || "")
+      || result.depthReport.source.revision !== deconstructionNumber(payload.source.revision)
+      || result.depthReport.source.contentHash !== String(payload.source.hash || "")
+      || result.depthReport.source.documentId !== result.documentId
+    )) {
+      throw new Error("深度报告与当前来源版本不一致。");
+    }
     const error = normalizeDeconstructionError(payload.error);
     return {
       projectId: String(payload.project_id || ""),
@@ -1531,7 +1880,10 @@
   }
 
   function hasDeconstructionResults(data) {
-    return Boolean(data?.result?.overview);
+    return Boolean(
+      data?.result?.analysisContractVersion === "2.0"
+      && data.result.depthReport?.reportVersion === "2.0",
+    );
   }
 
   function formatDeconstructionCount(value, suffix = "") {
@@ -1556,13 +1908,13 @@
   }
 
   function deconstructionEvidenceAttributes(evidence) {
-    return `data-evidence-id="${escapeHtml(evidence.id)}" data-document-id="${escapeHtml(evidence.documentId)}" data-source-version-id="${escapeHtml(evidence.sourceVersionId)}" data-source-revision="${evidence.sourceRevision ?? ""}" data-source-hash="${escapeHtml(evidence.sourceHash)}" data-chapter-id="${escapeHtml(evidence.chapterId)}" data-chapter-number="${evidence.chapterNumber ?? ""}" data-char-start="${evidence.charStart ?? ""}" data-char-end="${evidence.charEnd ?? ""}" data-offset-unit="${escapeHtml(evidence.offsetUnit)}" data-excerpt="${escapeHtml(evidence.excerpt)}"`;
+    return `data-evidence-id="${escapeHtml(evidence.id)}" data-document-id="${escapeHtml(evidence.documentId)}" data-source-version-id="${escapeHtml(evidence.sourceVersionId)}" data-source-revision="${evidence.sourceRevision ?? ""}" data-source-hash="${escapeHtml(evidence.sourceHash)}" data-chapter-id="${escapeHtml(evidence.chapterId)}" data-chapter-number="${evidence.chapterNumber ?? ""}" data-granularity="${escapeHtml(evidence.granularity)}" data-char-start="${evidence.charStart ?? ""}" data-char-end="${evidence.charEnd ?? ""}" data-offset-unit="${escapeHtml(evidence.offsetUnit)}" data-excerpt="${escapeHtml(evidence.excerpt)}"`;
   }
 
   function renderDeconstructionEvidence(refs) {
     const references = Array.isArray(refs) ? refs : [];
     if (!references.length) return `<span class="deconstruction-no-evidence">暂未绑定来源证据</span>`;
-    return `<div class="deconstruction-evidence-list">${references.slice(0, 6).map((evidence, index) => {
+    return `<div class="deconstruction-evidence-list">${references.map((evidence, index) => {
       const chapterNumber = evidence.chapterNumber;
       const label = chapterNumber === null ? `证据 ${index + 1}` : `回到第 ${chapterNumber} 章`;
       const excerpt = evidence.excerpt.replace(/\s+/g, " ").slice(0, 96);
@@ -1588,9 +1940,21 @@
   function deconstructionStatusAction(data) {
     if (data.effectiveStatus === "failed_retryable" && data.actions.retry) return `<button class="button button-primary" type="button" data-action="deconstruction-retry">重试拆解 <span aria-hidden="true">→</span></button>`;
     if (data.effectiveStatus === "stale" && data.actions.rebuild) return `<button class="button button-outline" type="button" data-action="deconstruction-rebuild">根据当前正文重建 <span aria-hidden="true">→</span></button>`;
-    if (data.effectiveStatus === "rebuild_required") return `<button class="button button-outline" type="button" data-action="deconstruction-open-editor">回到正文确认修改 <span aria-hidden="true">→</span></button>`;
+    if (data.effectiveStatus === "rebuild_required") {
+      if (data.actions.rebuild === true) return `<button class="button button-primary" type="button" data-action="deconstruction-rebuild">生成深度拆解 <span aria-hidden="true">→</span></button>`;
+      return `<button class="button button-outline" type="button" data-action="deconstruction-open-editor">回到正文确认修改 <span aria-hidden="true">→</span></button>`;
+    }
     if (data.effectiveStatus === "empty") return `<button class="button button-outline" type="button" data-action="deconstruction-open-editor">回到正文 <span aria-hidden="true">→</span></button>`;
     return "";
+  }
+
+  function deconstructionStatusMessage(data) {
+    if (data.effectiveStatus === "rebuild_required") {
+      if (data.actions.rebuild === true) {
+        return "已有阶段 31 基础拆解，但还没有 2.0 深度报告。生成深度拆解会创建新的服务端运行，旧结果保留为历史只读。";
+      }
+    }
+    return data.message;
   }
 
   function renderDeconstructionStatus(data) {
@@ -1604,59 +1968,256 @@
       ? `SOURCE / ${data.source.versionId.slice(0, 12)} · REV / ${data.source.revision ?? "—"} · HASH / ${data.source.contentHash ? data.source.contentHash.slice(0, 12) : "—"}`
       : "SOURCE / 尚未形成正式稿本";
     return `<section class="deconstruction-state-card is-${escapeHtml(data.effectiveStatus)}" aria-label="拆解状态">
-      <div class="deconstruction-state-copy"><div class="deconstruction-state-kicker"><span class="eyebrow">拆解状态</span><span class="deconstruction-status-note">${escapeHtml(data.runStatus === "none" ? "服务端状态" : `运行 / ${data.runStatus}`)}</span></div><h2>${escapeHtml(deconstructionStatusHeading(data))}</h2><p>${escapeHtml(data.message)}</p><small class="deconstruction-source-line mono">${escapeHtml(sourceLine)}</small></div>
+      <div class="deconstruction-state-copy"><div class="deconstruction-state-kicker"><span class="eyebrow">拆解状态</span><span class="deconstruction-status-note">${escapeHtml(data.runStatus === "none" ? "服务端状态" : `运行 / ${data.runStatus}`)}</span></div><h2>${escapeHtml(deconstructionStatusHeading(data))}</h2><p>${escapeHtml(deconstructionStatusMessage(data))}</p><small class="deconstruction-source-line mono">${escapeHtml(sourceLine)}</small></div>
       <div class="deconstruction-state-side">${working ? `<div class="deconstruction-progress" role="progressbar" aria-label="拆解进度" aria-valuemin="0" aria-valuemax="100" ${data.progress.percent === null ? "" : `aria-valuenow="${Math.round(data.progress.percent)}"`}><span style="width: ${progress}%"></span></div><span class="deconstruction-progress-label">${escapeHtml(progressText)} · ${escapeHtml(data.progress.currentStage)}</span>` : `<span class="deconstruction-state-source">来源 / ${escapeHtml(sourceText)}</span>`}${deconstructionStatusAction(data)}</div>
     </section>`;
   }
 
-  function renderDeconstructionOverview(data) {
-    const overview = data.result.overview;
-    const metrics = [
-      ["正文规模", formatDeconstructionCount(overview.wordCount ?? data.source.wordCount, " 字"), "服务端统计"],
-      ["章节数量", formatDeconstructionCount(overview.chapterCount ?? data.source.chapterCount, " 章"), "来源章节"],
-      ["结构节点", formatDeconstructionCount(data.result.timeline.length, " 个"), "时间线记录"],
-      ["稿本修订", data.source.revision === null ? "—" : `REV / ${data.source.revision}`, "当前来源"],
+  function depthClamp(value, fallback = 0) {
+    const number = deconstructionNumber(value);
+    return number === null ? fallback : Math.max(0, Math.min(100, number));
+  }
+
+  function depthProgressRange(item) {
+    const start = depthClamp(item?.normalizedStart, 0);
+    const end = Math.max(start, depthClamp(item?.normalizedEnd, start));
+    return { start, end };
+  }
+
+  function depthItemVisibleAt(item, progress) {
+    const start = deconstructionNumber(item?.normalizedStart);
+    return start === null || start <= progress + 0.0001;
+  }
+
+  function depthChapterRange(item, report) {
+    const chapters = (item?.chapterIds || [])
+      .map((id) => report.chapters.find((chapter) => chapter.id === id))
+      .filter(Boolean);
+    if (!chapters.length) return "章节待定位";
+    const first = chapters[0].number;
+    const last = chapters[chapters.length - 1].number;
+    return first === last ? `第 ${first} 章` : `第 ${first}–${last} 章`;
+  }
+
+  function depthItemProgress(item) {
+    const { start, end } = depthProgressRange(item);
+    return `${Math.round(start)}–${Math.round(end)}%`;
+  }
+
+  function depthVisibleItems(items, progress) {
+    return (Array.isArray(items) ? items : []).filter((item) => depthItemVisibleAt(item, progress));
+  }
+
+  function depthItemIndex(report) {
+    const all = [
+      ...report.characters.characters,
+      ...report.characters.states,
+      ...report.characters.relations,
+      ...report.plot.plotlines,
+      ...report.plot.events,
+      ...report.plot.relations,
+      ...report.foreshadowing.threads,
+      ...report.foreshadowing.states,
+      ...report.foreshadowing.relations,
+      ...report.rhythm.items,
+      ...report.reader.items,
+      ...report.technique.items,
     ];
-    const observations = overview.structure.map((item) => `<article class="deconstruction-observation"><div><strong>${escapeHtml(item.label)}</strong>${deconstructionConfidenceBadge(item.confidence, true)}</div><p>${escapeHtml(item.text)}</p>${item.uncertainty.length ? `<small class="deconstruction-uncertainty">不确定：${escapeHtml(item.uncertainty.join("；"))}</small>` : ""}${renderDeconstructionEvidence(item.evidenceRefs)}</article>`).join("");
-    const structureUnits = overview.structureUnits.length ? `<div class="deconstruction-tag-row">${overview.structureUnits.slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : `<p class="deconstruction-empty-note">服务端没有返回额外结构标签。</p>`;
-    const characters = overview.mainCharacters.length ? overview.mainCharacters.slice(0, 5).map((item) => `<li><div><strong>${escapeHtml(item.value)}</strong><small>${escapeHtml(item.label)}</small></div>${deconstructionConfidenceBadge(item.confidence, true)}${item.uncertainty.length ? `<p>${escapeHtml(item.uncertainty.join("；"))}</p>` : ""}${renderDeconstructionEvidence(item.evidenceRefs)}</li>`).join("") : `<li class="deconstruction-empty-list">尚未形成主要人物候选。</li>`;
-    const conflicts = overview.coreConflicts.length ? overview.coreConflicts.slice(0, 4).map((item) => `<article class="deconstruction-candidate-card is-conflict"><div><strong>${escapeHtml(item.value)}</strong><small>${escapeHtml(item.label)}</small></div>${deconstructionConfidenceBadge(item.confidence, true)}${item.uncertainty.length ? `<p>${escapeHtml(item.uncertainty.join("；"))}</p>` : ""}${renderDeconstructionEvidence(item.evidenceRefs)}</article>`).join("") : `<p class="deconstruction-empty-note">尚未形成核心冲突候选。</p>`;
-    return `<section class="deconstruction-panel deconstruction-overview-panel" aria-labelledby="deconstructionOverviewTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">从正文实际统计</span><h2 id="deconstructionOverviewTitle">作品概览</h2></div><span class="deconstruction-panel-note">当前稿本 · 已校验来源</span></header><div class="deconstruction-metric-row">${metrics.map(([label, value, note]) => `<div class="deconstruction-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div>`).join("")}</div><div class="deconstruction-overview-lower"><div class="deconstruction-observation-board"><div class="deconstruction-subheading"><h3>结构观察</h3><span>每条判断都应能回到证据</span></div><div class="deconstruction-observation-list">${observations}</div><div class="deconstruction-structure-units"><div class="deconstruction-subheading"><h3>结构标签</h3><span>服务端原样返回</span></div>${structureUnits}</div></div><aside class="deconstruction-candidate-board"><div class="deconstruction-subheading"><h3>主要人物候选</h3><span>尚未等于事实</span></div><ul class="deconstruction-candidate-list">${characters}</ul><div class="deconstruction-conflict-block"><div class="deconstruction-subheading"><h3>核心冲突候选</h3><span>${overview.coreConflicts.length} 条</span></div>${conflicts}</div></aside></div>${overview.uncertainties.length ? `<div class="deconstruction-uncertainty-strip"><strong>仍需保留的不确定项</strong><span>${escapeHtml(overview.uncertainties.join(" · "))}</span></div>` : ""}</section>`;
+    return new Map(all.filter((item) => item.id).map((item) => [item.id, item]));
   }
 
-  function renderDeconstructionTimeline(data) {
-    const nodes = data.result.timeline || [];
-    const nodeMarkup = nodes.length ? nodes.map((node) => {
-      const start = node.normalizedStart;
-      const end = node.normalizedEnd === null ? (start === null ? null : Math.min(100, start + 3)) : node.normalizedEnd;
-      const width = start === null || end === null ? 0 : Math.max(3, end - start);
-      const positioned = start !== null && end !== null;
-      return `<article class="deconstruction-timeline-node ${positioned ? "is-positioned" : "is-unplaced"}" ${positioned ? `style="--node-start: ${start}%; --node-size: ${width}%"` : ""}><div class="deconstruction-timeline-marker" aria-hidden="true"><i></i></div><div class="deconstruction-timeline-copy"><div class="deconstruction-timeline-topline"><span class="mono">${positioned ? `${Math.round(start)}–${Math.round(end)}%` : "百分比待识别"}</span>${deconstructionConfidenceBadge(node.confidence, true)}</div><h3>${escapeHtml(node.title)}</h3><p>${escapeHtml(node.event)}</p><div class="deconstruction-timeline-meta"><span>${escapeHtml(deconstructionAnchorLabel(node))}</span>${node.narrativeFunction ? `<span>${escapeHtml(node.narrativeFunction)}</span>` : ""}</div>${node.characters.length ? `<div class="deconstruction-tag-row">${node.characters.slice(0, 4).map((character) => `<span>${escapeHtml(character)}</span>`).join("")}</div>` : ""}${node.uncertainty.length ? `<small class="deconstruction-uncertainty">不确定：${escapeHtml(node.uncertainty.join("；"))}</small>` : ""}${renderDeconstructionEvidence(node.evidenceRefs)}</div></article>`;
-    }).join("") : `<p class="deconstruction-empty-note">服务端还没有返回可展示的时间线节点。</p>`;
-    return `<section class="deconstruction-panel deconstruction-timeline-panel" aria-labelledby="deconstructionTimelineTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">归一化进度 + 绝对锚点</span><h2 id="deconstructionTimelineTitle">节奏时间线</h2></div><span class="deconstruction-panel-note">0% 起于正文开头，100% 落在正文结尾</span></header><div class="deconstruction-timeline-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div><div class="deconstruction-timeline-rail" aria-label="作品结构节奏节点">${nodes.length ? `<div class="deconstruction-timeline-axis"></div>` : ""}${nodeMarkup}</div><div class="deconstruction-timeline-legend"><span><i class="is-blue"></i>已定位的结构节点</span><span><i class="is-coral"></i>需要回看的不确定项</span><span class="mono">${nodes.length} 个服务端节点</span></div></section>`;
+  function depthEndpointLabel(endpoint, index) {
+    const item = index.get(endpoint?.id);
+    if (!item) return "未命名项";
+    if (item.kind === "character") return item.name;
+    if (item.kind === "character_state") {
+      const character = index.get(item.characterId);
+      return character ? `${character.name}的状态` : "人物状态";
+    }
+    if (item.kind === "plotline") return item.title;
+    if (item.kind === "event") return item.action;
+    if (item.kind === "foreshadowing") return item.label;
+    if (item.kind === "foreshadowing_state") {
+      const thread = index.get(item.foreshadowingId);
+      return thread ? `${thread.label}的状态` : "伏笔状态";
+    }
+    return item.conclusion;
   }
 
-  function deconstructionCell(label, value) {
-    const text = Array.isArray(value) ? value.join("；") : deconstructionText(value, "暂无");
-    return `<div class="deconstruction-table-detail"><span>${escapeHtml(label)}</span><strong>${escapeHtml(text)}</strong></div>`;
+  function depthEvidenceForItem(item, report, ids = null) {
+    const wanted = Array.isArray(ids) ? ids : item?.evidenceIds || [];
+    return wanted
+      .map((id) => report.evidence.find((evidence) => evidence.id === id))
+      .filter(Boolean);
   }
 
-  function renderDeconstructionChapterTable(data) {
-    const chapters = data.result.chapters || [];
-    const rows = chapters.length ? chapters.map((chapter) => `<tr><th scope="row"><span class="mono">${chapter.chapterNumber === null ? "—" : String(chapter.chapterNumber).padStart(2, "0")}</span><strong>${escapeHtml(chapter.title)}</strong><small>${escapeHtml(deconstructionAnchorLabel(chapter))}</small></th><td><p class="deconstruction-table-summary">${escapeHtml(chapter.summary)}</p>${chapter.coreEvents.length ? `<small>${escapeHtml(chapter.coreEvents.join("；"))}</small>` : ""}</td><td>${deconstructionCell("功能", chapter.narrativeFunction)}${deconstructionCell("场景", chapter.scenes)}${deconstructionCell("冲突", chapter.conflict)}</td><td>${deconstructionCell("信息释放", chapter.informationRelease)}${deconstructionCell("关系变化", chapter.relationshipChange)}${deconstructionCell("情绪变化", chapter.emotionalChange)}</td><td>${deconstructionCell("伏笔", chapter.foreshadowing)}${deconstructionCell("开头钩子", chapter.openingHook)}${deconstructionCell("结尾钩子", chapter.endingHook)}</td><td><div class="deconstruction-table-confidence">${deconstructionConfidenceBadge(chapter.confidence)}${chapter.uncertainty.length ? `<small class="deconstruction-uncertainty">不确定：${escapeHtml(chapter.uncertainty.join("；"))}</small>` : ""}</div>${renderDeconstructionEvidence(chapter.evidenceRefs)}</td></tr>`).join("") : `<tr><td colspan="6"><p class="deconstruction-empty-note">服务端尚未返回章节拆解。已有正文也不会被前端临时摘要替代。</p></td></tr>`;
-    return `<section class="deconstruction-panel deconstruction-chapter-panel" aria-labelledby="deconstructionChapterTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">逐章回看</span><h2 id="deconstructionChapterTitle">章节拆解</h2></div><span class="deconstruction-panel-note">${chapters.length ? `${chapters.length} 章已返回` : "等待服务端结果"}</span></header><div class="deconstruction-table-wrap"><table class="deconstruction-table"><caption class="visually-hidden">章节拆解表，包含摘要、结构功能、场景冲突、信息关系、伏笔钩子和证据回链</caption><thead><tr><th scope="col">章节</th><th scope="col">一句话摘要 / 核心事件</th><th scope="col">结构功能 / 场景 / 冲突</th><th scope="col">信息 / 关系 / 情绪</th><th scope="col">伏笔 / 开头 / 结尾</th><th scope="col">置信度 / 证据</th></tr></thead><tbody>${rows}</tbody></table></div><p class="deconstruction-table-footnote">点击证据前会再次校验文档、稿本、修订号和哈希；若只剩历史来源，页面只提供章节级只读提示。</p></section>`;
+  function renderDepthItemMeta(item, report) {
+    return `<div class="depth-item-meta"><span>${escapeHtml(depthChapterRange(item, report))}</span><span class="mono">${escapeHtml(depthItemProgress(item))}</span><span>${escapeHtml(item.category)}</span><span>${escapeHtml(depthEpistemicStatusText[item.epistemicStatus] || "证据状态未知")}</span></div>`;
+  }
+
+  function renderDepthUncertainty(items) {
+    const uncertainty = Array.isArray(items) ? items.filter(Boolean) : [];
+    return uncertainty.length
+      ? `<div class="depth-uncertainty"><strong>不确定性</strong><span>${escapeHtml(uncertainty.join("；"))}</span></div>`
+      : "";
+  }
+
+  function renderDepthItemEvidence(item, report, ids = null) {
+    return renderDeconstructionEvidence(depthEvidenceForItem(item, report, ids));
+  }
+
+  function renderDepthViewIntro(view, id) {
+    return `<header class="depth-view-heading"><div><span class="eyebrow">${escapeHtml(depthPerspectiveMeta[id].label)}</span><h2 id="depthViewHeading-${escapeHtml(id)}">${escapeHtml(depthPerspectiveMeta[id].title)}</h2></div><p>${escapeHtml(view.summary)}</p></header>${renderDepthUncertainty(view.uncertainty)}`;
+  }
+
+  function renderDepthControls(report) {
+    const selectedProgress = depthSelectedProgress(report);
+    const selectedChapterId = state.deconstructionChapterId || "";
+    return `<section class="depth-review-controls" aria-label="深度拆解回看范围"><label for="depthChapterFilter"><span>按章节回看</span><select id="depthChapterFilter" data-action="deconstruction-depth-chapter"><option value="">全书</option>${report.chapters.map((chapter) => `<option value="${escapeHtml(chapter.id)}" ${chapter.id === selectedChapterId ? "selected" : ""}>第 ${escapeHtml(chapter.number)} 章${chapter.title ? ` · ${escapeHtml(chapter.title)}` : ""}</option>`).join("")}</select></label><label class="depth-progress-control" for="depthProgressFilter"><span>按阅读进度回看 <output id="depthProgressOutput" for="depthProgressFilter">${Math.round(selectedProgress)}%</output></span><input id="depthProgressFilter" type="range" min="0" max="100" step="1" value="${Math.round(selectedProgress)}" data-action="deconstruction-depth-progress" aria-label="按阅读进度回看" /></label><p>此处只改变本页的回看位置，不修改服务端报告或正文。</p></section>`;
+  }
+
+  function depthSelectedProgress(report) {
+    if (state.deconstructionChapterId) {
+      const chapter = report.chapters.find((item) => item.id === state.deconstructionChapterId);
+      if (chapter) return depthClamp(chapter.end, 100);
+    }
+    return depthClamp(state.deconstructionProgress, 100);
+  }
+
+  function renderDepthAxis(items, report, progress, kind, title) {
+    const visible = depthVisibleItems(items, progress);
+    const bars = visible.map((item) => {
+      const range = depthProgressRange(item);
+      const width = Math.max(1.5, range.end - range.start);
+      return `<article class="depth-axis-item" style="--depth-start:${range.start}%;--depth-size:${width}%"><div class="depth-axis-bar" aria-hidden="true"></div><div class="depth-axis-item-topline"><span class="mono">${escapeHtml(depthItemProgress(item))}</span>${deconstructionConfidenceBadge(item.confidence, true)}</div><h3>${escapeHtml(kind === "rhythm" ? item.narrativeFunction : item.category)}</h3><p>${escapeHtml(item.conclusion)}</p>${renderDepthItemMeta(item, report)}${renderDepthUncertainty(item.uncertainty)}${renderDepthItemEvidence(item, report)}</article>`;
+    }).join("");
+    return `<section class="depth-axis-panel" aria-labelledby="${escapeHtml(title)}"><div class="depth-section-heading"><div><span class="eyebrow">共享阅读轴</span><h3 id="${escapeHtml(title)}">${escapeHtml(kind === "rhythm" ? "叙事推进" : "读者感受变化")}</h3></div><span class="depth-section-note">截至 ${Math.round(progress)}% · ${visible.length}/${Array.isArray(items) ? items.length : 0} 项</span></div><div class="depth-axis-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div><p class="depth-axis-caption">0% 起于正文开头，100% 落在正文结尾</p><div class="depth-axis-rail" aria-hidden="true"><i></i><i></i><i></i></div><div class="depth-axis-list">${bars || `<p class="depth-empty-note">这个回看位置没有可展示的服务端记录。</p>`}</div></section>`;
+  }
+
+  function renderDepthRelationList(relations, report, progress, index, emptyText) {
+    const visible = depthVisibleItems(relations, progress);
+    if (!visible.length) return `<p class="depth-empty-note">${escapeHtml(emptyText)}</p>`;
+    return `<div class="depth-relation-list">${visible.map((relation) => `<article class="depth-relation-card"><div class="depth-relation-route"><strong>${escapeHtml(depthEndpointLabel(relation.start, index))}</strong><span>${escapeHtml(depthRelationText[relation.relationType] || "关系")}</span><strong>${escapeHtml(depthEndpointLabel(relation.end, index))}</strong></div><p>${escapeHtml(relation.explanation || relation.conclusion)}</p>${renderDepthItemMeta(relation, report)}${renderDepthUncertainty(relation.uncertainty)}${renderDepthItemEvidence(relation, report)}</article>`).join("")}</div>`;
+  }
+
+  function renderDepthStatePreview(character, states, report, progress) {
+    const visible = states.filter((item) => item.characterId === character.id && depthItemVisibleAt(item, progress));
+    visible.sort((left, right) => (left.normalizedStart ?? 0) - (right.normalizedStart ?? 0));
+    const current = visible.at(-1);
+    if (!current) return `<p class="depth-empty-note">截至当前回看位置，还没有人物状态快照。</p>`;
+    return `<div class="depth-state-preview"><div class="depth-card-topline"><span>截至 ${Math.round(progress)}% 的状态</span><span class="mono">${escapeHtml(depthChapterRange(current, report))}</span></div><p>${escapeHtml(current.change)}</p><dl class="depth-fact-list"><div><dt>目标</dt><dd>${escapeHtml(current.goal)}</dd></div><div><dt>信念</dt><dd>${escapeHtml(current.belief)}</dd></div><div><dt>情绪</dt><dd>${escapeHtml(current.emotion)}</dd></div><div><dt>行动</dt><dd>${escapeHtml(current.agency)}</dd></div></dl>${renderDepthItemEvidence(current, report)}</div>`;
+  }
+
+  function renderDepthCharactersView(report, progress) {
+    const view = report.characters;
+    const index = depthItemIndex(report);
+    const cards = depthVisibleItems(view.characters, progress).map((character) => `<article class="depth-entity-card"><div class="depth-card-topline"><span class="depth-card-label">人物候选</span>${deconstructionConfidenceBadge(character.confidence, true)}</div><h3>${escapeHtml(character.name)}</h3><p class="depth-conclusion">${escapeHtml(character.conclusion)}</p>${renderDepthItemMeta(character, report)}<dl class="depth-fact-list"><div><dt>角色</dt><dd>${escapeHtml(character.role)}</dd></div><div><dt>动机</dt><dd>${escapeHtml(character.motivation)}</dd></div><div><dt>内在冲突</dt><dd>${escapeHtml(character.innerConflict)}</dd></div><div><dt>人物弧</dt><dd>${escapeHtml(character.arcSummary)}</dd></div>${character.aliases.length ? `<div><dt>别名</dt><dd>${escapeHtml(character.aliases.join("、"))}</dd></div>` : ""}</dl>${renderDepthStatePreview(character, view.states, report, progress)}${renderDepthUncertainty(character.uncertainty)}${renderDepthItemEvidence(character, report)}</article>`).join("");
+    const states = depthVisibleItems(view.states, progress).map((item) => {
+      const character = index.get(item.characterId);
+      return `<article class="depth-track-item"><div><strong>${escapeHtml(character?.name || "未命名人物")}</strong><span>${escapeHtml(depthChapterRange(item, report))} · ${escapeHtml(depthItemProgress(item))}</span></div><p>${escapeHtml(item.change)}</p><small>目标：${escapeHtml(item.goal)} · 信念：${escapeHtml(item.belief)} · 情绪：${escapeHtml(item.emotion)}</small>${renderDepthItemEvidence(item, report)}</article>`;
+    }).join("");
+    return `${renderDepthViewIntro(view, "characters")}<div class="depth-view-grid depth-entity-grid">${cards || `<p class="depth-empty-note">当前正文没有可靠的人物候选。页面保留无发现，不生成虚假人物。</p>`}</div><section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">按阅读进度</span><h3>人物状态快照</h3></div><span class="depth-section-note">截至 ${Math.round(progress)}%</span></div><div class="depth-scroll-list">${states || `<p class="depth-empty-note">当前回看位置没有人物状态快照。</p>`}</div></section><section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">关系视图</span><h3>人物之间的可读关系</h3></div><span class="depth-section-note">${view.relations.length} 条服务端关系</span></div>${renderDepthRelationList(view.relations, report, progress, index, "当前回看位置没有人物关系记录。")}</section>`;
+  }
+
+  function renderDepthPlotView(report, progress) {
+    const view = report.plot;
+    const index = depthItemIndex(report);
+    const plotlines = depthVisibleItems(view.plotlines, progress).map((line) => `<article class="depth-entity-card"><div class="depth-card-topline"><span class="depth-card-label">剧情线</span>${deconstructionConfidenceBadge(line.confidence, true)}</div><h3>${escapeHtml(line.title)}</h3><p class="depth-conclusion">${escapeHtml(line.conclusion)}</p>${renderDepthItemMeta(line, report)}<dl class="depth-fact-list"><div><dt>核心问题</dt><dd>${escapeHtml(line.centralQuestion)}</dd></div><div><dt>代价</dt><dd>${escapeHtml(line.stakes)}</dd></div><div><dt>结局方向</dt><dd>${escapeHtml(line.resolution)}</dd></div></dl>${renderDepthUncertainty(line.uncertainty)}${renderDepthItemEvidence(line, report)}</article>`).join("");
+    const events = depthVisibleItems(view.events, progress).map((event) => `<article class="depth-track-item"><div><strong>${escapeHtml(event.action)}</strong><span>${escapeHtml(depthChapterRange(event, report))} · ${escapeHtml(depthItemProgress(event))}</span></div><p>${escapeHtml(event.consequence)}</p><small>${escapeHtml(depthTemporalModeText[event.temporalMode] || "故事时间未知")} · ${escapeHtml(depthPlotStatusText[event.plotlineStatus] || "状态未知")}${event.storyOrder === null ? " · 故事顺序未知" : ` · 故事顺序 ${event.storyOrder}`}</small>${renderDepthItemEvidence(event, report)}</article>`).join("");
+    return `${renderDepthViewIntro(view, "plot")}<section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">剧情线</span><h3>每条线在问什么</h3></div><span class="depth-section-note">${view.plotlines.length} 条线</span></div><div class="depth-view-grid">${plotlines || `<p class="depth-empty-note">正文没有可靠的剧情线候选。</p>`}</div></section><section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">事件轴</span><h3>按正文呈现顺序回看事件</h3></div><span class="depth-section-note">截至 ${Math.round(progress)}% · ${events ? depthVisibleItems(view.events, progress).length : 0} 项</span></div><div class="depth-scroll-list">${events || `<p class="depth-empty-note">当前回看位置没有事件记录。</p>`}</div></section><section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">关系视图</span><h3>事件因果与叙述顺序</h3></div><span class="depth-section-note">“先于”不自动等于“导致”</span></div>${renderDepthRelationList(view.relations, report, progress, index, "当前回看位置没有剧情关系记录。")}</section>`;
+  }
+
+  function renderDepthForeshadowingView(report, progress) {
+    const view = report.foreshadowing;
+    const index = depthItemIndex(report);
+    const threads = depthVisibleItems(view.threads, progress).map((thread) => {
+      const states = view.states.filter((item) => item.foreshadowingId === thread.id && depthItemVisibleAt(item, progress));
+      states.sort((left, right) => (left.normalizedStart ?? 0) - (right.normalizedStart ?? 0));
+      const current = states.at(-1);
+      return `<article class="depth-entity-card"><div class="depth-card-topline"><span class="depth-card-label">伏笔线索</span>${deconstructionConfidenceBadge(thread.confidence, true)}</div><h3>${escapeHtml(thread.label)}</h3><p class="depth-conclusion">${escapeHtml(thread.conclusion)}</p>${renderDepthItemMeta(thread, report)}<dl class="depth-fact-list"><div><dt>埋下的细节</dt><dd>${escapeHtml(thread.plantedDetail)}</dd></div><div><dt>预期回收</dt><dd>${escapeHtml(thread.expectedPayoff)}</dd></div><div><dt>当前解释</dt><dd>${escapeHtml(thread.interpretation)}</dd></div></dl><div class="depth-chain"><span class="depth-chain-label">截至 ${Math.round(progress)}% 的状态</span>${current ? `<strong>${escapeHtml(depthForeshadowingStatusText[current.status] || "状态未知")}</strong><p>${escapeHtml(current.payoff)}</p><small>${escapeHtml(depthChapterRange(current, report))}</small>${renderDepthItemEvidence(current, report)}` : `<p class="depth-empty-note">当前回看位置还没有状态快照。</p>`}</div>${renderDepthUncertainty(thread.uncertainty)}${renderDepthItemEvidence(thread, report)}</article>`;
+    }).join("");
+    const states = depthVisibleItems(view.states, progress).map((item) => {
+      const thread = index.get(item.foreshadowingId);
+      return `<article class="depth-track-item"><div><strong>${escapeHtml(thread?.label || "未命名伏笔")}</strong><span>${escapeHtml(depthForeshadowingStatusText[item.status] || "状态未知")} · ${escapeHtml(depthChapterRange(item, report))}</span></div><p>${escapeHtml(item.payoff)}</p>${renderDepthItemEvidence(item, report)}</article>`;
+    }).join("");
+    return `${renderDepthViewIntro(view, "foreshadowing")}<section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">回收轨迹</span><h3>伏笔如何改变状态</h3></div><span class="depth-section-note">截至 ${Math.round(progress)}%</span></div><div class="depth-view-grid">${threads || `<p class="depth-empty-note">当前正文没有可靠的伏笔候选。页面保留无发现，不把普通细节硬判为伏笔。</p>`}</div></section><section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">状态快照</span><h3>按章节查看铺垫与回收</h3></div><span class="depth-section-note">${depthVisibleItems(view.states, progress).length} 项已发生</span></div><div class="depth-scroll-list">${states || `<p class="depth-empty-note">当前回看位置没有伏笔状态记录。</p>`}</div></section><section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">关系视图</span><h3>事件与伏笔的链路</h3></div><span class="depth-section-note">${view.relations.length} 条服务端关系</span></div>${renderDepthRelationList(view.relations, report, progress, index, "当前回看位置没有伏笔关系记录。")}</section>`;
+  }
+
+  function depthMetric(value, label, formatter = (number) => `${Math.round(number * 100)}%`) {
+    const number = deconstructionNumber(value);
+    if (number === null) return `<div class="depth-metric is-unknown"><span>${escapeHtml(label)}</span><strong>未知</strong><small>证据不足，未绘制数值曲线</small></div>`;
+    return `<div class="depth-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatter(number))}</strong><small>服务端指标</small></div>`;
+  }
+
+  function renderDepthRhythmView(report, progress) {
+    const view = report.rhythm;
+    const items = depthVisibleItems(view.items, progress);
+    const cards = items.map((item) => `<article class="depth-analysis-card"><div class="depth-card-topline"><span class="depth-card-label">${escapeHtml(item.narrativeFunction)}</span>${deconstructionConfidenceBadge(item.confidence, true)}</div><h3>${escapeHtml(item.conclusion)}</h3>${renderDepthItemMeta(item, report)}<p>${escapeHtml(item.sceneSummary)}</p><div class="depth-metric-grid">${depthMetric(item.pace, "推进速度")}${depthMetric(item.tension, "张力")}${depthMetric(item.informationDensity, "信息密度")}</div><p class="depth-detail-line"><span>转场</span>${escapeHtml(item.transition)}</p>${renderDepthUncertainty(item.uncertainty)}${renderDepthItemEvidence(item, report)}</article>`).join("");
+    return `${renderDepthViewIntro(view, "rhythm")}${renderDepthAxis(view.items, report, progress, "rhythm", "rhythmAxisTitle")}<section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">逐段观察</span><h3>节奏指标与章节结构</h3></div><span class="depth-section-note">${items.length}/${view.items.length} 项</span></div><div class="depth-view-grid">${cards || `<p class="depth-empty-note">当前回看位置没有节奏记录。</p>`}</div></section>`;
+  }
+
+  function renderDepthReaderView(report, progress) {
+    const view = report.reader;
+    const items = depthVisibleItems(view.items, progress);
+    const cards = items.map((item) => `<article class="depth-analysis-card"><div class="depth-card-topline"><span class="depth-card-label">读者体验</span>${deconstructionConfidenceBadge(item.confidence, true)}</div><h3>${escapeHtml(item.conclusion)}</h3>${renderDepthItemMeta(item, report)}<dl class="depth-fact-list"><div><dt>期待</dt><dd>${escapeHtml(item.expectation)}</dd></div><div><dt>信息差</dt><dd>${escapeHtml(item.informationGap)}</dd></div><div><dt>情绪影响</dt><dd>${escapeHtml(item.emotionalEffect)}</dd></div><div><dt>回收感</dt><dd>${escapeHtml(item.payoff)}</dd></div></dl><div class="depth-metric-grid">${depthMetric(item.curiosity, "好奇心")}${depthMetric(item.suspense, "悬念")}${depthMetric(item.emotionalValence, "情绪倾向", (number) => `${number > 0 ? "+" : ""}${number.toFixed(2)}`)}</div>${renderDepthUncertainty(item.uncertainty)}${renderDepthItemEvidence(item, report)}</article>`).join("");
+    return `${renderDepthViewIntro(view, "reader")}${renderDepthAxis(view.items, report, progress, "reader", "readerAxisTitle")}<section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">逐段观察</span><h3>期待、信息差与情绪效果</h3></div><span class="depth-section-note">${items.length}/${view.items.length} 项</span></div><div class="depth-view-grid">${cards || `<p class="depth-empty-note">当前回看位置没有读者体验记录。</p>`}</div></section>`;
+  }
+
+  function renderDepthTechniqueView(report, progress) {
+    const view = report.technique;
+    const items = depthVisibleItems(view.items, progress);
+    const cards = items.map((item) => `<article class="depth-technique-card"><div class="depth-card-topline"><span class="depth-card-label">${escapeHtml(item.technique)}</span>${deconstructionConfidenceBadge(item.confidence, true)}</div><h3>${escapeHtml(item.conclusion)}</h3>${renderDepthItemMeta(item, report)}<dl class="depth-fact-list"><div><dt>观察</dt><dd>${escapeHtml(item.observation)}</dd></div><div><dt>作用机制</dt><dd>${escapeHtml(item.mechanism)}</dd></div><div><dt>效果</dt><dd>${escapeHtml(item.effect)}</dd></div><div><dt>学习说明</dt><dd>${escapeHtml(item.learningNote)}</dd></div><div class="depth-boundary"><dt>适用边界</dt><dd>${escapeHtml(item.applicability)}</dd></div></dl><div class="depth-example-block"><strong>例证</strong>${renderDepthItemEvidence(item, report, item.exampleEvidenceIds)}</div>${renderDepthUncertainty(item.uncertainty)}</article>`).join("");
+    return `${renderDepthViewIntro(view, "technique")}<section class="depth-subsection"><div class="depth-section-heading"><div><span class="eyebrow">可学习的观察</span><h3>技法、例证与边界</h3></div><span class="depth-section-note">${items.length}/${view.items.length} 项</span></div><div class="depth-view-grid depth-technique-grid">${cards || `<p class="depth-empty-note">当前回看位置没有技法记录。</p>`}</div></section>`;
   }
 
   function renderDeconstructionHistory(data) {
     if (!data.history.length) return "";
-    const items = data.history.slice().reverse().slice(0, 6).map((item) => `<li><div><strong>${escapeHtml(deconstructionStatusText[item.status] || item.status || "历史运行")}</strong><small>${escapeHtml(item.analysisLabel)} · REV / ${escapeHtml(item.sourceRevision ?? "—")}</small></div><span class="mono">${escapeHtml(item.sourceHash ? item.sourceHash.slice(0, 12) : "—")}</span></li>`).join("");
+    const items = data.history.slice().reverse().slice(0, 6).map((item) => {
+      const versionLabel = item.analysisContractVersion === "2.0"
+        ? "深度 2.0"
+        : item.analysisContractVersion === "1.0" ? "基础 1.0" : "版本未知";
+      return `<li><div><strong>${escapeHtml(deconstructionStatusText[item.status] || item.status || "历史运行")}</strong><small>${escapeHtml(versionLabel)} · ${escapeHtml(item.analysisLabel)} · REV / ${escapeHtml(item.sourceRevision ?? "—")}</small></div><span class="mono">${escapeHtml(item.sourceHash ? item.sourceHash.slice(0, 12) : "—")}</span></li>`;
+    }).join("");
     return `<section class="deconstruction-history-panel" aria-labelledby="deconstructionHistoryTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">运行历史 / 只读</span><h2 id="deconstructionHistoryTitle">旧稿记录仍然可辨认</h2></div><span class="deconstruction-panel-note">不回链当前正文</span></header><ul>${items}</ul><p>历史运行只用于说明来源，不会跳到当前同编号章节伪装成精确证据。</p></section>`;
   }
 
+  function renderDeconstructionOverview(data) {
+    const report = data.result.depthReport;
+    const counts = [
+      ["人物候选", report.characters.characters.length, "人物弧与状态"],
+      ["剧情事件", report.plot.events.length, "事件因果与叙述顺序"],
+      ["伏笔线索", report.foreshadowing.threads.length, "铺垫与回收状态"],
+      ["正文证据", report.evidence.length, "最小可回链片段"],
+    ];
+    const summaries = depthPerspectiveOrder.slice(1).map((id) => {
+      const view = id === "reader" ? report.reader : report[id];
+      const count = id === "characters" ? view.characters.length : id === "plot" ? view.events.length : id === "foreshadowing" ? view.threads.length : view.items.length;
+      return `<button class="depth-overview-link" type="button" data-action="deconstruction-depth-tab" data-depth-tab="${escapeHtml(id)}"><span class="depth-overview-link-topline"><strong>${escapeHtml(depthPerspectiveMeta[id].label)}</strong><span class="mono">${count} 项</span></span><span>${escapeHtml(view.summary)}</span><b aria-hidden="true">→</b></button>`;
+    }).join("");
+    return `<section class="deconstruction-panel depth-overview-panel" aria-labelledby="deconstructionOverviewTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">深度报告 / 2.0</span><h2 id="deconstructionOverviewTitle">作品总览</h2></div><span class="deconstruction-panel-note">六个视角共享同一稿本、阅读轴和证据池</span></header><div class="deconstruction-metric-row">${counts.map(([label, value, note]) => `<div class="deconstruction-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatDeconstructionCount(value))}</strong><small>${escapeHtml(note)}</small></div>`).join("")}</div><div class="depth-overview-source"><div><span class="eyebrow">来源范围</span><strong>${escapeHtml(formatDeconstructionCount(report.chapters.length, " 章"))} · 当前稿本 REV / ${escapeHtml(data.source.revision ?? "—")}</strong></div><p>所有结论只来自作者正式正文。章节回看按阅读顺序，故事世界中的时间关系会单独标注。</p></div><div class="depth-overview-links">${summaries}</div>${renderDepthUncertainty([...report.characters.uncertainty, ...report.plot.uncertainty, ...report.foreshadowing.uncertainty, ...report.rhythm.uncertainty, ...report.reader.uncertainty, ...report.technique.uncertainty])}</section>`;
+  }
+
+  function renderDepthTabNavigation(activeView) {
+    return `<div class="depth-tablist" role="tablist" aria-label="作品拆解六个视角"><button class="depth-tab" type="button" role="tab" id="deconstructionTab-overview" aria-controls="deconstructionPanel-overview" aria-selected="${activeView === "overview"}" tabindex="${activeView === "overview" ? "0" : "-1"}" data-action="deconstruction-depth-tab" data-depth-tab="overview">总览</button>${depthPerspectiveOrder.slice(1).map((id) => `<button class="depth-tab" type="button" role="tab" id="deconstructionTab-${escapeHtml(id)}" aria-controls="deconstructionPanel-${escapeHtml(id)}" aria-label="${escapeHtml(depthPerspectiveMeta[id].label)}视角" aria-selected="${activeView === id}" tabindex="${activeView === id ? "0" : "-1"}" data-action="deconstruction-depth-tab" data-depth-tab="${escapeHtml(id)}">${escapeHtml(depthPerspectiveMeta[id].label)}</button>`).join("")}</div>`;
+  }
+
+  function renderDepthPerspectivePanel(report, activeView, progress) {
+    let body = renderDeconstructionOverview(state.deconstructionWorkspace);
+    if (activeView === "characters") body = renderDepthCharactersView(report, progress);
+    if (activeView === "plot") body = renderDepthPlotView(report, progress);
+    if (activeView === "foreshadowing") body = renderDepthForeshadowingView(report, progress);
+    if (activeView === "rhythm") body = renderDepthRhythmView(report, progress);
+    if (activeView === "reader") body = renderDepthReaderView(report, progress);
+    if (activeView === "technique") body = renderDepthTechniqueView(report, progress);
+    return `<section class="depth-tabpanel" id="deconstructionPanel-${escapeHtml(activeView)}" role="tabpanel" aria-labelledby="deconstructionTab-${escapeHtml(activeView)}" tabindex="0">${body}</section>`;
+  }
+
   function renderDeconstructionResult(data) {
-    const result = data.result;
-    if (!result) return "";
-    return `<div class="deconstruction-result">${renderDeconstructionOverview(data)}${renderDeconstructionTimeline(data)}${renderDeconstructionChapterTable(data)}<section class="deconstruction-panel deconstruction-evidence-card"><header class="deconstruction-panel-heading"><div><span class="eyebrow">证据回链 / 正文最小片段</span><h2>每个结论都能回到原文</h2></div><span class="deconstruction-panel-note">${result.evidenceRefs.length} 条</span></header>${result.evidenceRefs.length ? `<div class="deconstruction-evidence-grid">${result.evidenceRefs.map((ref) => `<article class="deconstruction-evidence-item"><div class="deconstruction-evidence-item-head"><span class="mono">第 ${Number(ref.chapterNumber || 0)} 章</span><span>${escapeHtml(ref.label)}</span></div><blockquote>${escapeHtml(ref.excerpt || "正文片段未保留，请回到章节查看。")}</blockquote><div class="deconstruction-evidence-item-foot"><span>位移 ${Number(ref.charStart || 0).toLocaleString("zh-CN")}–${Number(ref.charEnd || 0).toLocaleString("zh-CN")} · UTF-16</span>${renderDeconstructionEvidence([ref])}</div></article>`).join("")}</div>` : `<p class="deconstruction-muted">服务端没有返回可回链证据。</p>`}</section><footer class="deconstruction-result-footer"><span>${escapeHtml(result.analysisLabel)}</span><span class="mono">DOCUMENT / ${escapeHtml(result.documentId.slice(0, 16))} · SOURCE / ${escapeHtml(result.sourceVersionId.slice(0, 16))} · REV / ${escapeHtml(result.sourceRevision ?? "—")}</span></footer></div>`;
+    const report = data.result?.depthReport;
+    if (!report || report.reportVersion !== "2.0") return "";
+    const activeView = depthPerspectiveMeta[state.deconstructionView] ? state.deconstructionView : "overview";
+    const progress = depthSelectedProgress(report);
+    return `<div class="deconstruction-depth-result"><div class="depth-result-intro"><div><span class="eyebrow">可回证的深度拆解</span><h2>从总览进入六个视角</h2></div><p>点击任一结论下的证据按钮，会从服务端重新读取证据；历史稿本始终保持只读。</p></div>${renderDepthTabNavigation(activeView)}${renderDepthControls(report)}${renderDepthPerspectivePanel(report, activeView, progress)}</div>`;
   }
 
   function renderDeconstructionPage(data) {
@@ -1674,11 +2235,16 @@
     } else if (hasDeconstructionResults(data) && data.effectiveStatus === "completed" && data.sourceMatch) {
       content.push(renderDeconstructionResult(data));
     } else if (data.effectiveStatus === "completed") {
-      content.push(`<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>服务端还没有返回可引用内容</h2><p>当前响应没有正式结果，页面保留空白，不将不完整响应冒充分析完成。</p></section>`);
+      const legacy = data.result?.analysisContractVersion === "1.0";
+      content.push(legacy
+        ? `<section class="deconstruction-working-panel is-upgrade-required"><div class="deconstruction-empty-mark">↗</div><h2>基础拆解已有，深度拆解可生成</h2><p>当前是分析合同 1.0 的基础结果，不会在六个视角中冒充完成。请从服务端提供的升级入口生成 2.0 深度报告；旧结果会保留为历史只读。</p>${data.actions.rebuild ? `<button class="button button-primary" type="button" data-action="deconstruction-rebuild">生成深度拆解 <span aria-hidden="true">→</span></button>` : ""}</section>`
+        : `<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>服务端还没有返回可引用内容</h2><p>当前响应没有正式结果，页面保留空白，不将不完整响应冒充分析完成。</p></section>`);
     } else if (data.effectiveStatus === "stale") {
       content.push(`<section class="deconstruction-working-panel is-stale"><div class="deconstruction-empty-mark">↻</div><h2>当前稿本已经超过这版结果</h2><p>旧结果不会沿同编号章节跳转。确认当前正文没有待处理修改后，可以从这里重建一版。</p></section>`);
     } else if (data.effectiveStatus === "rebuild_required") {
-      content.push(`<section class="deconstruction-working-panel is-stale"><div class="deconstruction-empty-mark">⌁</div><h2>先回正文处理待确认修改</h2><p>作品拆解不会越过作者确认直接读取这批旧章修改。处理完成后，再回到这里查看服务端状态。</p></section>`);
+      content.push(data.actions.rebuild
+        ? `<section class="deconstruction-working-panel is-upgrade-required"><div class="deconstruction-empty-mark">↗</div><h2>基础拆解已就绪，等待生成深度报告</h2><p>这版 1.0 基础结果仍是历史参考。生成 2.0 深度报告后，人物、剧情、伏笔、节奏、读者体验和文笔才会进入完成态。</p><button class="button button-primary" type="button" data-action="deconstruction-rebuild">生成深度拆解 <span aria-hidden="true">→</span></button></section>`
+        : `<section class="deconstruction-working-panel is-stale"><div class="deconstruction-empty-mark">⌁</div><h2>先回正文处理待确认修改</h2><p>作品拆解不会越过作者确认直接读取这批旧章修改。处理完成后，再回到这里查看服务端状态。</p></section>`);
     } else {
       content.push(`<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>结果会在这里出现</h2><p>任务在服务端继续运行；离开页面或刷新后，重新读取即可恢复。</p></section>`);
     }
@@ -1929,7 +2495,7 @@
     const current = state.deconstructionWorkspace;
     const allowed = action === "retry"
       ? current?.effectiveStatus === "failed_retryable" && current.actions.retry
-      : current?.effectiveStatus === "stale" && current.actions.rebuild;
+      : (current?.effectiveStatus === "stale" || current?.effectiveStatus === "rebuild_required") && current.actions.rebuild;
     if (!allowed) return;
     const buttons = $$(`[data-action="deconstruction-${action}"]`, elements.deconstructionPageContent);
     buttons.forEach((button) => { button.disabled = true; });
@@ -1966,6 +2532,7 @@
       sourceHash: actionNode.dataset.sourceHash || "",
       chapterId: actionNode.dataset.chapterId || "",
       chapterNumber: deconstructionNumber(actionNode.dataset.chapterNumber),
+      granularity: actionNode.dataset.granularity === "chapter" ? "chapter" : "span",
       charStart: deconstructionNumber(actionNode.dataset.charStart),
       charEnd: deconstructionNumber(actionNode.dataset.charEnd),
       offsetUnit: actionNode.dataset.offsetUnit || "",
@@ -1976,7 +2543,7 @@
 
   function deconstructionEvidenceIdentityMatches(left, right) {
     if (!left || !right) return false;
-    return ["id", "documentId", "sourceVersionId", "sourceRevision", "sourceHash", "chapterId", "chapterNumber", "charStart", "charEnd", "offsetUnit"]
+    return ["id", "documentId", "sourceVersionId", "sourceRevision", "sourceHash", "chapterId", "chapterNumber", "granularity", "charStart", "charEnd", "offsetUnit"]
       .every((key) => left[key] === right[key]);
   }
 
@@ -2001,12 +2568,62 @@
     );
   }
 
-  function showHistoricalDeconstructionEvidence(payload, reason) {
-    const evidence = payload?.evidence || {};
+  function openDeconstructionEvidenceDialog() {
+    const dialog = elements.deconstructionEvidenceDialog;
+    if (!dialog) return;
+    rememberDialogFocus(dialog);
+    if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }
+
+  function closeDeconstructionEvidenceDialog({ clear = true } = {}) {
+    const dialog = elements.deconstructionEvidenceDialog;
+    if (dialog?.open && typeof dialog.close === "function") dialog.close();
+    else dialog?.removeAttribute("open");
+    if (clear) {
+      state.deconstructionEvidenceRequestToken += 1;
+      state.pendingEvidence = null;
+    }
+  }
+
+  function renderDeconstructionEvidenceLoading() {
+    elements.deconstructionEvidenceTitle.textContent = "正在读取证据";
+    elements.deconstructionEvidenceContent.innerHTML = `<div class="deconstruction-evidence-dialog-loading" role="status">正在从服务端读取这条证据……</div>`;
+    elements.locateDeconstructionEvidenceButton.disabled = true;
+    elements.locateDeconstructionEvidenceButton.textContent = "等待证据校验";
+  }
+
+  function renderDeconstructionEvidenceDialog(payload, fallbackEvidence = null, current = false, reason = "") {
+    const rawEvidence = payload?.evidence || fallbackEvidence || {};
+    const evidence = normalizeEvidenceRef(rawEvidence) || fallbackEvidence;
     const chapter = payload?.chapter || {};
-    const chapterNumber = evidence.chapter_number || chapter.chapter_number || "—";
-    const excerpt = evidence.excerpt || "正文片段未保留。";
-    setWorkspaceNoticeHtml(elements.deconstructionNotice, `<strong>证据只读 / 未跳转当前正文</strong><span>第 ${escapeHtml(chapterNumber)} 章 · ${escapeHtml(chapter.title || "历史稿本章节")}</span><blockquote>“${escapeHtml(excerpt)}”</blockquote><small>${escapeHtml(reason || "来源版本、修订号或哈希未通过校验；当前页面只保留章节级回看。")}</small>`, "red");
+    const chapterNumber = evidence?.chapterNumber ?? deconstructionNumber(chapter.chapter_number);
+    const chapterTitle = deconstructionText(chapter.title, "来源章节");
+    const sourceIsCurrent = current
+      && payload?.source_matches_current === true
+      && payload?.historical === false
+      && chapter.source_available !== false;
+    const precise = Boolean(
+      sourceIsCurrent
+      && evidence
+      && evidence.granularity === "span"
+      && evidence.offsetUnit === DECONSTRUCTION_OFFSET_UNIT
+      && evidence.charStart !== null
+      && evidence.charStart >= 0
+      && evidence.charEnd !== null
+      && evidence.charEnd >= evidence.charStart,
+    );
+    elements.deconstructionEvidenceTitle.textContent = sourceIsCurrent ? "证据回链" : "历史证据回链";
+    elements.deconstructionEvidenceContent.innerHTML = `<article class="deconstruction-evidence-dialog-card ${sourceIsCurrent ? "is-current" : "is-historical"}"><div class="depth-card-topline"><span class="depth-card-label">${sourceIsCurrent ? "当前稿本 · 只读" : "历史稿本 · 只读"}</span><span class="mono">${chapterNumber === null ? "章节待定位" : `第 ${escapeHtml(chapterNumber)} 章`}</span></div><h3>${escapeHtml(evidence?.label || "正文证据")}</h3><p class="deconstruction-evidence-dialog-chapter">${escapeHtml(chapterTitle)}</p>${evidence?.excerpt ? `<blockquote>“${escapeHtml(evidence.excerpt)}”</blockquote>` : `<p class="depth-empty-note">这条证据只提供章节级定位，没有保留正文片段。</p>`}<dl class="depth-fact-list"><div><dt>定位精度</dt><dd>${precise ? "UTF-16 字符位移已校验" : "章节级回看"}</dd></div>${precise ? `<div><dt>字符范围</dt><dd>${escapeHtml(`${evidence.charStart}–${evidence.charEnd}`)} · UTF-16 code unit</dd></div>` : ""}<div><dt>回看边界</dt><dd>${sourceIsCurrent ? "仅可定位到当前稿本，不会改写正文" : "历史来源只读，不跳转当前同编号章节"}</dd></div></dl>${reason ? `<p class="depth-evidence-reason">${escapeHtml(reason)}</p>` : ""}</article>`;
+    elements.locateDeconstructionEvidenceButton.disabled = !precise;
+    elements.locateDeconstructionEvidenceButton.textContent = precise ? "在当前正文中定位" : "当前仅可章节级回看";
+    elements.locateDeconstructionEvidenceButton.title = precise ? "按 UTF-16 字符位移在当前稿本定位" : "历史或章节级证据不能定位当前正文";
+    state.pendingEvidence = sourceIsCurrent && evidence ? { ...evidence, projectId: state.deconstructionProjectId } : null;
+  }
+
+  function showHistoricalDeconstructionEvidence(payload, reason) {
+    renderDeconstructionEvidenceDialog(payload, null, false, reason || "来源版本、修订号或哈希未通过校验；当前页面只保留章节级回看。");
+    openDeconstructionEvidenceDialog();
   }
 
   async function openDeconstructionEvidence(actionNode) {
@@ -2015,30 +2632,54 @@
     const clickedEvidence = deconstructionEvidenceFromNode(actionNode);
     if (!clickedEvidence.id) return;
     state.pendingEvidence = clickedEvidence;
+    const requestToken = ++state.deconstructionEvidenceRequestToken;
+    openDeconstructionEvidenceDialog();
+    renderDeconstructionEvidenceLoading();
     let current;
     let endpoint;
     try {
-      // 点击后先重新读取 canonical source，再读取证据端点，避免用页面旧快照直接定位正文。
+      // 点击后只把 evidence id 发给真实端点；先重读 canonical source，避免用旧页面快照定位正文。
       current = await deconstructionApi.read(projectId);
       endpoint = await deconstructionApi.readEvidence(projectId, clickedEvidence.id);
     } catch (error) {
+      if (requestToken !== state.deconstructionEvidenceRequestToken) return;
       state.pendingEvidence = null;
-      setWorkspaceNotice(elements.deconstructionNotice, error.message || "证据回链读取失败，请稍后重试。", "red");
+      elements.deconstructionEvidenceTitle.textContent = "证据暂时读不到";
+      elements.deconstructionEvidenceContent.innerHTML = `<p class="depth-evidence-reason">${escapeHtml(error.message || "证据回链读取失败，请稍后重试。")} </p>`;
+      elements.locateDeconstructionEvidenceButton.disabled = true;
       return;
     }
-    const currentEvidence = current.result?.evidenceRefs?.find((item) => item.id === clickedEvidence.id) || null;
+    if (requestToken !== state.deconstructionEvidenceRequestToken) return;
+    const currentEvidence = current.result?.depthReport?.evidence?.find((item) => item.id === clickedEvidence.id)
+      || current.result?.evidenceRefs?.find((item) => item.id === clickedEvidence.id)
+      || null;
     const endpointEvidence = normalizeEvidenceRef(endpoint?.evidence);
-    const endpointIsCurrent = endpoint?.source_matches_current === true && endpoint?.historical === false;
+    const endpointIsCurrent = endpoint?.source_matches_current === true
+      && endpoint?.historical === false
+      && endpoint?.chapter?.source_available === true;
     const precondition = deconstructionEvidenceMatchesSource(current, currentEvidence, current.result)
       && deconstructionEvidenceIdentityMatches(clickedEvidence, currentEvidence)
       && deconstructionEvidenceIdentityMatches(currentEvidence, endpointEvidence)
       && endpointIsCurrent;
     if (!precondition) {
       state.pendingEvidence = null;
-      showHistoricalDeconstructionEvidence(endpoint, current.sourceMatch ? "这条证据的文档、来源版本、修订号或哈希未通过校验。" : "当前正文已经变化，这条证据属于历史稿本。 ");
+      showHistoricalDeconstructionEvidence(endpoint, current.sourceMatch ? "这条证据的文档、来源版本、修订号或哈希未通过校验。" : "当前正文已经变化，这条证据属于历史稿本。");
       return;
     }
-    state.pendingEvidence = currentEvidence;
+    renderDeconstructionEvidenceDialog(endpoint, currentEvidence, true);
+  }
+
+  async function locateDeconstructionEvidence() {
+    const projectId = state.deconstructionProjectId;
+    const evidence = state.pendingEvidence;
+    if (!projectId || !evidence) return;
+    const current = state.deconstructionWorkspace;
+    if (!deconstructionEvidenceMatchesSource(current, evidence, current?.result)) {
+      closeDeconstructionEvidenceDialog();
+      setWorkspaceNotice(elements.deconstructionNotice, "当前正文已经变化，这条证据只保留章节级回看。", "red");
+      return;
+    }
+    closeDeconstructionEvidenceDialog({ clear: false });
     const navigated = await navigate(`/independent/${encodeURIComponent(projectId)}`);
     if (!navigated) {
       state.pendingEvidence = null;
@@ -2047,7 +2688,6 @@
     state.editorMode = "independent";
     await loadIndependentWorkspace(projectId);
     const version = activeEditorVersion();
-    const evidence = state.pendingEvidence;
     let afterNavigation = null;
     try {
       afterNavigation = await deconstructionApi.read(projectId);
@@ -2076,16 +2716,19 @@
       && evidence.charStart >= 0
       && evidence.charStart <= content.length;
     const validEnd = validStart && evidence.charEnd !== null && evidence.charEnd >= evidence.charStart && evidence.charEnd <= content.length;
-    if (validEnd) {
+    const excerptMatches = validEnd && deconstructionEvidenceExcerptMatches(evidence, content);
+    if (excerptMatches) {
       elements.chapterEditor.focus({ preventScroll: true });
       elements.chapterEditor.setSelectionRange(evidence.charStart, evidence.charEnd);
     } else {
       elements.chapterEditor.focus({ preventScroll: true });
     }
-    const anchorText = validEnd
+    const anchorText = excerptMatches
       ? `已按 UTF-16 字符位移选择正文中的第 ${evidence.charStart}–${evidence.charEnd} 位。`
       : sourceStillMatches
-        ? "当前证据只提供章节级定位，未伪装成精确字符高亮。"
+        ? evidence.excerpt
+          ? "正文片段与证据摘录不一致，已降级为章节级回看。"
+          : "当前证据未提供正文片段，已降级为章节级回看。"
         : "证据来自另一稿本，当前只保留章节级回看。";
     setEditorNoticeHtml(`<strong>已回到来源证据。</strong> 第 ${chapter.chapter_number} 章 · ${escapeHtml(anchorText)}${evidence.excerpt ? `<span class="editor-evidence-excerpt">“${escapeHtml(evidence.excerpt)}”</span>` : ""}`, "blue");
     state.pendingEvidence = null;
@@ -2402,6 +3045,60 @@
     loadArchiveWorkspace(state.aiProjectId);
   }
 
+  function rerenderDeconstructionDepth(focusId = "") {
+    const data = state.deconstructionWorkspace;
+    if (!data || !hasDeconstructionResults(data)) return;
+    renderDeconstructionPage(data);
+    if (focusId) document.getElementById(focusId)?.focus();
+  }
+
+  function handleDeconstructionDepthInput(event) {
+    const actionNode = event.target.closest?.("[data-action]");
+    if (!actionNode) return;
+    if (actionNode.dataset.action === "deconstruction-depth-progress") {
+      state.deconstructionChapterId = "";
+      const progress = depthClamp(actionNode.value, 100);
+      state.deconstructionProgress = progress;
+      const output = document.getElementById("depthProgressOutput");
+      if (output) output.textContent = `${Math.round(progress)}%`;
+    }
+  }
+
+  function handleDeconstructionDepthChange(event) {
+    const actionNode = event.target.closest?.("[data-action]");
+    if (!actionNode) return;
+    if (actionNode.dataset.action === "deconstruction-depth-progress") {
+      state.deconstructionChapterId = "";
+      state.deconstructionProgress = depthClamp(actionNode.value, 100);
+      rerenderDeconstructionDepth("depthProgressFilter");
+      return;
+    }
+    if (actionNode.dataset.action !== "deconstruction-depth-chapter") return;
+    state.deconstructionChapterId = actionNode.value || "";
+    const report = state.deconstructionWorkspace?.result?.depthReport;
+    const chapter = report?.chapters?.find((item) => item.id === state.deconstructionChapterId);
+    state.deconstructionProgress = chapter ? chapter.end : 100;
+    rerenderDeconstructionDepth("depthChapterFilter");
+  }
+
+  function handleDeconstructionTabKeydown(event) {
+    const tab = event.target.closest?.('[role="tab"][data-depth-tab]');
+    if (!tab) return;
+    const tabs = $$('[role="tab"][data-depth-tab]', elements.deconstructionPageContent);
+    const index = tabs.indexOf(tab);
+    if (index < 0) return;
+    let nextIndex = index;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % tabs.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = tabs.length - 1;
+    if (nextIndex === index) return;
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    state.deconstructionView = next.dataset.depthTab;
+    rerenderDeconstructionDepth(next.id);
+  }
+
   async function handleAction(event) {
     const actionNode = event.target.closest("[data-action]");
     if (!actionNode) return;
@@ -2494,7 +3191,16 @@
     if (action === "deconstruction-refresh") loadDeconstructionWorkspace(state.deconstructionProjectId);
     if (action === "deconstruction-retry") runDeconstructionAction("retry");
     if (action === "deconstruction-rebuild") runDeconstructionAction("rebuild");
-    if (action === "open-deconstruction-evidence") openDeconstructionEvidence(actionNode);
+    if (action === "deconstruction-depth-tab") {
+      const view = actionNode.dataset.depthTab;
+      if (depthPerspectiveMeta[view]) {
+        state.deconstructionView = view;
+        rerenderDeconstructionDepth(`deconstructionTab-${view}`);
+      }
+    }
+    if (action === "open-deconstruction-evidence") await openDeconstructionEvidence(actionNode);
+    if (action === "close-deconstruction-evidence") closeDeconstructionEvidenceDialog();
+    if (action === "locate-deconstruction-evidence") await locateDeconstructionEvidence();
     if (action === "ai-open-studio") openAIStudio();
     if (action === "ai-open-director") openAIDirector();
     if (action === "ai-open-editor") openAIEditor();
@@ -2531,6 +3237,15 @@
     elements.versionHistoryContent?.addEventListener("click", handleAction);
     elements.archivePageContent?.addEventListener("click", handleAction);
     elements.deconstructionScreen?.addEventListener("click", handleAction);
+    elements.deconstructionPageContent?.addEventListener("input", handleDeconstructionDepthInput);
+    elements.deconstructionPageContent?.addEventListener("change", handleDeconstructionDepthChange);
+    elements.deconstructionPageContent?.addEventListener("keydown", handleDeconstructionTabKeydown);
+    elements.deconstructionEvidenceDialog?.addEventListener("click", handleAction);
+    elements.deconstructionEvidenceDialog?.addEventListener("close", () => restoreDialogFocus(elements.deconstructionEvidenceDialog));
+    elements.deconstructionEvidenceDialog?.addEventListener("cancel", () => {
+      state.deconstructionEvidenceRequestToken += 1;
+      state.pendingEvidence = null;
+    });
     elements.directorPageContent?.addEventListener("click", handleAction);
     elements.notificationsList.addEventListener("click", handleAction);
     elements.notificationsList.addEventListener("keydown", (event) => {
