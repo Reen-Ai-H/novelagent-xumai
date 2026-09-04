@@ -174,6 +174,16 @@ class Stage32AcceptanceTest(unittest.TestCase):
     def test_single_chapter_is_supported(self):
         self.import_story(["小雨推开门，听见屋里有人唱歌。“你还在吗？”她问。歌声停了。"])
 
+    def test_text_without_people_or_setup_does_not_invent_entities(self):
+        _, payload, _ = self.import_story(["雨落在空庭。天色暗了。石阶上积起了水。"])
+        report = payload["result"]["report"]
+        self.assertFalse(report["characters"]["characters"])
+        self.assertFalse(report["characters"]["states"])
+        self.assertTrue(report["characters"]["uncertainty"])
+        self.assertFalse(report["foreshadowing"]["threads"])
+        self.assertFalse(report["foreshadowing"]["states"])
+        self.assertTrue(report["foreshadowing"]["uncertainty"])
+
     def test_ordinary_multichapter_without_character_markers(self):
         self.import_story(["周砚沿河走到码头，拿出一张船票。", "阿岚把绳索抛给周砚，两人一起把船拖到岸边。"])
 
