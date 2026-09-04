@@ -11,6 +11,7 @@
 - GitHub：初始管理提交 `562513b`、基线修复 `a90682d` 已推送至阶段分支；Draft PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4)。`a90682d` 的 [CI run](https://github.com/Reen-Ai-H/novelagent-xumai/actions/runs/33897641025) Ubuntu/Windows 均 success，仅证明此时基线修复通过。
 - 验收基础：新增隔离浏览器服务（真实 app/worker、临时测试账户和自有合成正文、禁止模型调用）；Edge 152 已实测视口 1440×900、根 scrollWidth=1440。新的六视角浏览器测试已红测：完成真实登录/创建/导入/后台拆解后，旧前端缺人物 tab，另有 favicon 404 控制台错误；留给前端实现修复，不屏蔽日志。
 - 自动门禁入口 `tests/run_quality_gates.py` 已实跑 `135 tests / 0 failed / 0 skipped`（10.245s）、OpenAPI 58/61、旧 `/novel` 16/19，静态通过；CI 改为无需 `.env` 或环境 key，并强制零 skipped 和路由下限。
+- 用户更新协作方式：停止隐藏子 Agent，改为侧栏可见的独立对话任务，统一使用 `gpt-5.6-luna` / `max`。原架构执行者已停止关闭，已落盘 schema/24项契约测试保存为 `c59b1a2`（未冻结），交可见架构任务接续；合同冻结后创建可见后端/前端任务，集成后创建可见独立审计任务。每个任务保持隔离 worktree，由管理任务统一集成和 GitHub 交付。
 
 ## 阶段 31J：Windows 零上下文接棒任务书（2026-09-05）
 
