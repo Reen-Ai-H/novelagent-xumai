@@ -359,9 +359,13 @@ class DepthAnalysisEngine:
 
     _negation_markers = (
         "并没有", "没有", "未曾", "未能", "并未", "从未", "不曾", "并不", "并非",
-        "不是", "拒绝", "拒不", "反对", "不肯", "不愿", "不想", "不敢", "不去", "不让", "不许",
-        "不准", "不必", "不应", "不该", "不得", "不要", "不再", "无法", "无从",
+        "不是", "拒绝", "拒不", "反对", "不可能", "不可以", "不允许", "不能够", "不肯", "不愿",
+        "不想", "不敢", "不去", "不让", "不许", "不准", "不必", "不应", "不该", "不得", "不要",
+        "不再", "禁止", "没有办法", "没办法", "没法", "没有能力", "无能力", "不可", "无法", "无从",
         "无力", "无须", "不能", "不会", "不太", "没能", "别", "没", "未",
+    )
+    _lexical_negation_exceptions = (
+        "不可思议", "不可避免", "不可否认", "不可或缺", "不可一世",
     )
     _negation_pattern = re.compile(
         "|".join(re.escape(item) for item in sorted(_negation_markers, key=len, reverse=True))
@@ -407,7 +411,17 @@ class DepthAnalysisEngine:
 
         boundary = max((text.rfind(mark, 0, start) for mark in cls._clause_boundaries), default=-1)
         prefix = text[boundary + 1:start]
-        negation_positions = [match.start() for match in cls._negation_pattern.finditer(prefix)]
+        negation_positions = [
+            match.start()
+            for match in cls._negation_pattern.finditer(prefix)
+            if not (
+                match.group() == "不可"
+                and any(
+                    text.startswith(exception, boundary + 1 + match.start())
+                    for exception in cls._lexical_negation_exceptions
+                )
+            )
+        ]
         # Bare 不 is only a negator when it is immediately adjacent to the
         # predicate.  This avoids treating lexical words such as 不久、不但、
         # 无意间 and 无论 as clause-level negation.
@@ -461,7 +475,19 @@ class DepthAnalysisEngine:
     def _has_prevention(cls, text: str) -> bool:
         """Return whether a positive blocking action controls a later verb."""
 
-        return cls._has_positive(text, cls._prevention_pattern)
+        return any(
+            not cls._is_lexical_prevention(text, match.start())
+            and not cls._is_negated_at(text, match.start())
+            for match in re.finditer(cls._prevention_pattern, text)
+        )
+
+    @staticmethod
+    def _is_lexical_prevention(text: str, start: int) -> bool:
+        return (
+            start >= 2
+            and text[start - 2:start + 2] == "不可避免"
+            and text[start:start + 2] == "避免"
+        )
 
     @classmethod
     def _is_prevented_at(cls, text: str, start: int) -> bool:
@@ -471,7 +497,8 @@ class DepthAnalysisEngine:
         prefix = text[boundary + 1:start]
         preventions = [
             match for match in re.finditer(cls._prevention_pattern, prefix)
-            if not cls._is_negated_at(text, boundary + 1 + match.start())
+            if not cls._is_lexical_prevention(text, boundary + 1 + match.start())
+            and not cls._is_negated_at(text, boundary + 1 + match.start())
         ]
         if not preventions:
             return False
