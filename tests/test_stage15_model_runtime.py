@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -118,9 +120,9 @@ print({
 })
 """
         result = subprocess.run(
-            [str(root / ".venv/bin/python"), "-c", script],
+            [sys.executable, "-c", script],
             cwd="/tmp",
-            env={"PYTHONPATH": str(root)},
+            env={**os.environ, "PYTHONPATH": str(root)},
             capture_output=True,
             text=True,
             check=True,
