@@ -5,9 +5,9 @@
 ## 当前基线
 
 - 本任务书的阶段 31 产品基线：`e55ee722bc755c0f2562895e18f36e39803c8af0`；后续接棒始终以 GitHub 最新 `main` 为准，不按该 SHA 回退。阶段 31 作品拆解 MVP 已完成并通过独立审计。
-- 现役阶段 32 候选门禁：204 tests、0 failed、0 skipped；OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations；Ubuntu 与 Windows CI 均通过，独立审计 P0/P1/P2/P3 均为 0。
+- 阶段 32 已合并至当前 `origin/main=ec2f31a`：204 tests、0 failed、0 skipped；OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations；Ubuntu 与 Windows CI 均通过，独立审计 P0/P1/P2/P3 均为 0。
 - 已实现：独立创作、故事档案、版本恢复、六视角深度作品拆解、AI 辅助写作基本闭环。
-- 未完成：阶段 32 合并、独立创作体验收口、类型与文笔引擎、真实质量增益、AI 暂停介入后的隐形恢复、生产化。
+- 未完成：独立创作体验收口、类型与文笔引擎、真实质量增益、AI 暂停介入后的隐形恢复、生产化。阶段 33 产品/架构/验收合同已冻结，功能实现尚未开始。
 
 ## 明确顺序
 
@@ -40,3 +40,7 @@
 - `.env`、`.novel_*`、审计现场、真实作者数据和受版权保护的原文语料不进入 GitHub。
 - 不把固定热门模板强套到所有小说；事实、推断和不确定性分开，重要结论必须能回到来源证据。
 - 正式支付、管理员、多人协作、公开分享、云同步和生产部署均需另行决策。
+
+## 阶段 33 接棒
+
+阶段 33 以当前 `origin/main=ec2f31a` 为基线，先冻结独立创作体验合同，再由不重叠的后端、前端、浏览器集成和独立审计任务实现。执行入口是 [STAGE_33_INDEPENDENT_EXPERIENCE.md](goals/STAGE_33_INDEPENDENT_EXPERIENCE.md)；合同覆盖真实 100 章作者流程、保存/章末/档案/版本/拆解上下文、失败恢复、账户隔离、键盘与双尺寸浏览器验收。阶段 32 schema、证据和七态边界不得被阶段 33 改写。

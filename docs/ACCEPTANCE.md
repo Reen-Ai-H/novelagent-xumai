@@ -130,3 +130,37 @@
 - 阶段任务书列出的六类授权/合成样本、基线门禁、Windows/Ubuntu CI 和独立审计全部通过；P0/P1/P2/P3 均为 0 才能合并。
 
 阶段 32 验收证据：独立审计 HEAD `a631606`，P0/P1/P2/P3 均为 0；全量 204 tests、0 failed、0 skipped，阶段 32 专项 69 项，OpenAPI 58/61、旧 `/novel` 16/19；Edge 152 在 1440×900 与 1024×900 完成六视角和当前/历史证据流程，控制台 error/warn 为 0；同一候选的 Ubuntu/Windows CI 均通过。
+
+## 9. 独立创作体验收口（阶段 33）
+
+阶段 33 的范围和实现拆分见 [STAGE_33_INDEPENDENT_EXPERIENCE.md](goals/STAGE_33_INDEPENDENT_EXPERIENCE.md)。本节冻结验收设计，不代表实现或独立审计已完成。
+
+### 9.1 真实作者主流程
+
+- 使用授权或合成的中文长篇文本完成至少 100 章的导入预览、确认、章节编辑、保存、完成本章、故事档案、章节快照和作品拆解流程；标题、章节数、字数和正文在服务端与页面逐字一致。
+- 编辑标题与正文，验证 dirty/saving/saved/failed/conflict 状态、服务器 revision、保存失败后的真实重试和刷新恢复；保存冲突不能覆盖服务器正文，独立创作不能出现 AI 续写/改写/代写入口。
+- 完成本章后离开页面，验证任务、通知、章节快照、档案和拆解 outbox 的状态可在刷新/重登后恢复；重复请求只产生一份任务、快照、通知和拆解事件，失败后正文保留且可重试。
+- 修改第 3、20、67 章，验证只有一个待确认批次；取消保留改动，忽略保留当前稿本并标明旧来源，全文重建创建唯一新 active 稿本且旧稿本保留 30 天可恢复。批次过期必须重新读取后确认，不能按旧摘要结算。
+- 版本记录必须先提供只读预览和影响摘要；取消恢复无副作用，确认一次只创建一份新的当前稿本，目标历史内容不变；确认过期、active 变化和版本过期分别返回安全冲突/过期状态。
+- `latest`、章节 `snapshot`、历史稿本、重建中/失败状态和阶段 32 六视角 evidence 的稿本、revision/hash、`read_only`、source_match 与状态互相一致；历史证据不得跳到当前同编号章节。
+
+### 9.2 API、并发与数据安全
+
+- 保存、完成、批次确认、重建/重试和恢复确认都校验当前 version、chapter/batch revision 或预览确认身份；同幂等键同 payload 可安全重试，不重复写入或创建新 active。
+- 并发旧写入返回 409；锁不可用返回可重试的 503；服务重启可恢复 queued/running/outbox；后台发布前重新校验 source/CAS，不覆盖作者新 revision。
+- 未登录返回 401，跨账户资源返回 404；workspace/archive/version/task/deconstruction/evidence 的公开响应、OpenAPI、DOM 和错误 body 不含账户归属、内部 CAS/锁、幂等键、prompt、raw completion、private memory、路径、堆栈或拆解整章正文。
+- 阶段 32 的 `report_version="2.0"`、七种 canonical 状态、source token、证据 UTF-16 定位和历史只读合同不得回退；正文/版本/拆解结果使用临时隔离数据和确定性 runtime 验证。
+
+### 9.3 可访问性与真实浏览器
+
+- Microsoft Edge + Playwright 真实启动 FastAPI 和 worker，不使用 route/mock fetch/fixture response/page.setContent/browser storage；在 1440×900、1024×900 两个真实 viewport 完成主流程和失败恢复。
+- 章节目录、档案快照、版本记录、待确认修改、恢复预览、六视角 tabs、证据抽屉和重试入口全程键盘可达；对话框焦点进入、Escape/关闭可退出且焦点回收，确认中按钮禁用，状态通过 `aria-live` 表达。
+- `prefers-reduced-motion` 下不依赖动画；长中文、emoji、连续文本和错误信息不遮挡；`document.documentElement.scrollWidth` 与 `document.body.scrollWidth` 不超过实际 viewport；console error/warn、pageerror、requestfailed 均为 0。
+- 每个 viewport 输出 JSON、关键页面截图和 API/DOM 断言；截图只作辅助证据，不能替代持久化、幂等、source token、只读和账户隔离断言。
+
+### 9.4 工程、反作弊与完成条件
+
+- 新增专项、全量回归、compileall、`node --check frontend/app.js`、OpenAPI 数字、`git diff --check` 和失败反向验证均可复跑；`failed=0`、`skipped=0`，测试总数不低于阶段 32 的 204。
+- 不得用 skip/todo/expected failure、放宽或删除旧断言、吞异常、静态结果/前端数组、手改 `.novel_*`、固定 sleep、成功/失败哨兵、只断言 HTTP 200、裁切/隐藏 overflow 或只截图制造通过。
+- 相关文档、阶段分支、提交、推送、Draft PR 和 Ubuntu/Windows CI 证据齐全，独立审计 P0/P1/P2/P3 均为 0 后才可合并。
+- 阶段 33 通过不等于文学质量、真实生成质量增益、Q3 A/B 或生产部署通过；这些状态继续保持 pending。

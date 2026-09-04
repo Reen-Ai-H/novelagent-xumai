@@ -12,7 +12,7 @@
 - 开发与运维：[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 - 文档索引：[docs/README.md](docs/README.md)
 - 长期路线：[docs/ROADMAP.md](docs/ROADMAP.md)
-- 下一阶段任务书：[docs/goals/STAGE_32_DECONSTRUCTION_DEPTH.md](docs/goals/STAGE_32_DECONSTRUCTION_DEPTH.md)
+- 下一阶段任务书：[docs/goals/STAGE_33_INDEPENDENT_EXPERIENCE.md](docs/goals/STAGE_33_INDEPENDENT_EXPERIENCE.md)
 - 阶段状态：[PROGRESS.md](PROGRESS.md)、[BLOCKED.md](BLOCKED.md)
 
 ## 技术与命令
@@ -39,4 +39,4 @@
 - 不用 skip、放宽断言、吞异常或假数据制造通过；保留既有 dirty worktree 并区分归属。
 - 每个阶段使用独立的 `codex/stage-<编号>-<主题>` 分支；完成本阶段门禁后必须提交并推送到 GitHub，并在 PROGRESS.md 记录分支、提交和 PR。需要复核的阶段保持 Draft PR，不得只留在本地。
 - GitHub `main` 是当前 V1 开发基线：阶段 27 独立审计已通过；离线质量门 Q2 已验证，但真实生成质量增益与产品集成仍 pending；未部署生产。
-- Windows 新管理任务从 `docs/ROADMAP.md` 恢复长期顺序，从 `docs/goals/STAGE_32_DECONSTRUCTION_DEPTH.md` 执行下一阶段；聊天记录不是唯一任务来源。
+- Windows 新管理任务从 `docs/ROADMAP.md` 恢复长期顺序，从 `docs/goals/STAGE_33_INDEPENDENT_EXPERIENCE.md` 执行下一阶段；聊天记录不是唯一任务来源。

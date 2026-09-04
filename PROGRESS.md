@@ -1,6 +1,17 @@
 # 当前任务进度
 
-## 阶段 32：深度作品拆解（审计通过，待合并，2026-09-05）
+## 阶段 33：独立创作体验收口合同冻结（文档/测试设计，2026-09-05）
+
+- 基线：当前 `origin/main=ec2f31a`；阶段 32 已审计通过并合并，2.0 深度拆解、七种 canonical 状态、source token、证据回链、项目锁和 CAS 合同继续有效。
+- 本轮完成：完整复核阶段 32 合同、独立 API/服务/前端/浏览器测试设计与编辑器、章末、档案、版本、拆解实现接缝；先把产品裁决写入 `docs/DECISIONS.md`，再新增阶段 33 任务书并同步产品规格、用户流程、验收、架构、路线、索引、用户指南、开发手册和阻塞记录。
+- 冻结范围：真实 100 章中文作者路径、标题/正文同次保存、保存/完成/批次/恢复幂等、统一稿本上下文、失败与重启恢复、账户隔离、键盘/焦点/reduced-motion、1440×900 与 1024×900 Edge 验收及反作弊门禁。
+- 非目标：AI 创作室、类型/质量引擎、公共语料、分享/云同步/多人协作/支付/管理员/移动端/生产部署、第二条正文，以及阶段 32 schema 或证据单位改写。
+- 未实现：本分支没有改 `app/**`、`schemas/**`、`frontend/**` 或本地业务数据；实现应按任务书拆分后由管理任务集成，独立审计任务不得由本合同任务自证。
+- 实际门禁：隔离 `.venv` 使用 `requirements.txt` 安装完成；`tests/run_quality_gates.py` 为 `204 tests / 0 failed / 0 skipped`，OpenAPI `58 paths / 61 operations`、旧 `/novel` `16 paths / 19 operations`；compileall、`node --check frontend/app.js`、`git diff --check` 和变更文档本地链接检查均通过。系统 Python 的首次尝试仅因缺依赖产生导入错误，不作为代码回归结果。
+- 未执行且不宣称：阶段 33 功能实现、真实 Edge 双尺寸流程、失败反向浏览器证据、CI 和独立审计；这些属于后续管理/实现任务。
+- 分支：`codex/stage-33-independent-experience-contract`；提交 SHA、远端分支和 Draft PR 将在提交推送后补录。
+
+## 阶段 32：深度作品拆解（审计通过，已合并，2026-09-05）
 
 - 最新里程碑：集成候选 `a631606` 已通过同一独立审计任务最终复验，P0/P1/P2/P3 均为 0。全量 `204 tests / 0 failed / 0 skipped`，阶段 32 专项 69 项，阶段 31 回归 28 项，并发回归 44 项；OpenAPI 58/61、旧 `/novel` 16/19，compileall、Node 与 diff check 均通过。
 - 真实界面：Microsoft Edge 152 在 1440×900 与 1024×900 完成登录、导入、后台拆解、总览和六视角、当前证据精确定位、历史证据只读、刷新/重登及修改后重建；两个视口均 0 console error/warn、无整页横向溢出。
@@ -18,7 +29,7 @@
 - 管理分支：`codex/stage-32-deconstruction-depth`，从最新 `origin/main=223b414` 建立隔离工作区；原 main 工作区的测试改动、启动脚本和本地数据全部保留。
 - 已执行：`git fetch origin main`、`git merge --ff-only origin/main`、`git rev-list --left-right --count HEAD...origin/main`，主线一致（0/0）；完整读取规则、路线、任务书、进度与阻塞。
 - 顺序：架构冻结公开合同；后端与前端使用独立工作区并行；管理集成后交独立审计，缺陷回派原实现任务复验。
-- 当前未完成：仅剩现役文档提交、该提交对应的 GitHub 双平台 CI 和 PR 合并；六视角实现、专项/全量/浏览器门禁与独立审计均已完成。
+- 当前未完成：阶段 32 已进入主线；后续以阶段 33 合同冻结和实现接棒为准。六视角实现、专项/全量/浏览器门禁与独立审计均已完成。
 - 基线发现：阶段 15 dotenv 测试依赖开发目录已有 `.env` 与有效 key，需改为隔离配置夹具，真实验证跨 cwd 加载，不通过注入环境 key 制造通过。
 - 基线复验：干净工作区全量 `135 tests / 1 failure / 0 skipped`，唯一失败为不存在开发 `.env`。改为临时项目布局执行原配置模块、移除继承的模型变量、给无关 cwd 放置反例配置后，全量 `135 tests / 0 failed / 0 skipped`（9.483s）。compileall、node 语法与 diff 检查通过；没有读取或修改用户 `.env`。
 - GitHub：初始管理提交 `562513b`、基线修复 `a90682d` 已推送至阶段分支；Draft PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4)。`a90682d` 的 [CI run](https://github.com/Reen-Ai-H/novelagent-xumai/actions/runs/33897641025) Ubuntu/Windows 均 success，仅证明此时基线修复通过。
