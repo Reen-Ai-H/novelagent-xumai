@@ -45,7 +45,7 @@ from schemas.independent import (
 )
 
 
-def _snapshot(texts: list[str]) -> DepthSnapshot:
+def _snapshot(texts: list[str], character_names: tuple[str, ...] = ()) -> DepthSnapshot:
     chapters = tuple(
         ChapterInput(f"c{index}", index, f"第{index}章", text)
         for index, text in enumerate(texts, 1)
@@ -57,6 +57,7 @@ def _snapshot(texts: list[str]) -> DepthSnapshot:
         source_revision=1,
         source_hash="a" * 64,
         chapters=chapters,
+        character_names=character_names,
     )
 
 
@@ -202,6 +203,80 @@ class Stage32BackendSafetyTest(unittest.TestCase):
                 event = report.plot.events[0]
                 self.assertEqual(event.plotline_status, "resolved")
                 self.assertIn("明确展示了该行动带来的下一步推进", event.consequence)
+
+    def test_negated_object_does_not_bypass_affirmative_action_gate(self) -> None:
+        cases = [
+            "林舟没有找到答案。",
+            "周砚没有找到答案。",
+            "顾遥终于没有找到答案。",
+            "阿岚并未打开门。",
+            "林舟没有解释线索。",
+        ]
+        for text in cases:
+            with self.subTest(text=text):
+                report = DepthAnalysisEngine(_snapshot([text])).build()
+                event = report.plot.events[0]
+                reader = report.reader_experience.items[0]
+                self.assertNotEqual(event.plotline_status, "resolved")
+                self.assertNotIn("明确展示了该行动带来的下一步推进", event.consequence)
+                self.assertLessEqual(reader.emotional_valence or 0.0, 0.0)
+                self.assertNotIn("阶段性回应或情绪缓解", reader.payoff)
+
+        mixed = DepthAnalysisEngine(_snapshot(["林舟没有找到答案，但后来打开了门。"])).build()
+        self.assertEqual(mixed.plot.events[0].plotline_status, "resolved")
+        self.assertIn("明确展示了该行动带来的下一步推进", mixed.plot.events[0].consequence)
+        self.assertIn("同时呈现了未完成或受阻尝试，以及后续肯定行动", mixed.plot.events[0].conclusion)
+
+    def test_refused_transfer_cannot_become_allies(self) -> None:
+        report = DepthAnalysisEngine(_snapshot([
+            "林舟拒绝把钥匙交给顾遥。",
+        ], character_names=("林舟", "顾遥"))).build()
+        self.assertFalse(any(relation.relation_type == "allies" for relation in report.characters.relations))
+        self.assertTrue(any(relation.relation_type == "opposes" for relation in report.characters.relations))
+
+    def test_blocking_verbs_do_not_count_as_completion_transfer_or_payoff(self) -> None:
+        for blocker in ("阻止", "阻拦", "制止", "避免", "防止", "不让"):
+            with self.subTest(blocker=blocker):
+                report = DepthAnalysisEngine(_snapshot([
+                    "顾遥把钥匙交给林舟。",
+                    f"林舟{blocker}顾遥用钥匙打开门。",
+                ])).build()
+                event = report.plot.events[-1]
+                self.assertEqual(event.plotline_status, "turning")
+                self.assertNotIn("明确展示了该行动带来的下一步推进", event.consequence)
+                self.assertFalse(any(relation.relation_type == "enables" for relation in report.plot.relations))
+                self.assertFalse(any(state.status == "paid_off" for state in report.foreshadowing.states))
+                reader = report.reader_experience.items[-1]
+                self.assertLessEqual(reader.emotional_valence or 0.0, 0.0)
+                self.assertNotIn("阶段性回应或情绪缓解", reader.payoff)
+
+        independent = DepthAnalysisEngine(_snapshot([
+            "林舟阻止顾遥打开门，后来自己打开了门。",
+        ])).build()
+        self.assertEqual(independent.plot.events[0].plotline_status, "resolved")
+        self.assertIn("明确展示了该行动带来的下一步推进", independent.plot.events[0].consequence)
+
+    def test_noun_and_waiting_sentences_do_not_create_completion_or_reader_payoff(self) -> None:
+        for text in ("答案仍在桌上。", "林舟等待答案。"):
+            with self.subTest(text=text):
+                report = DepthAnalysisEngine(_snapshot([text])).build()
+                event = report.plot.events[0]
+                reader = report.reader_experience.items[0]
+                self.assertNotEqual(event.plotline_status, "resolved")
+                self.assertNotIn("明确展示了该行动带来的下一步推进", event.consequence)
+                self.assertLessEqual(reader.emotional_valence or 0.0, 0.0)
+                self.assertNotIn("阶段性回应或情绪缓解", reader.payoff)
+
+    def test_mixed_polarity_cause_describes_each_side_without_inventing_negative_later_state(self) -> None:
+        report = DepthAnalysisEngine(_snapshot([
+            "因为门没有打开，所以林舟进入房间。",
+        ])).build()
+        causes = [relation for relation in report.plot.relations if relation.relation_type == "causes"]
+        self.assertEqual(len(causes), 1)
+        self.assertIn("前一状态未发生或未完成", causes[0].conclusion)
+        self.assertIn("后一事件仍按正文呈现", causes[0].conclusion)
+        self.assertNotIn("后一负向状态", causes[0].conclusion)
+        self.assertIn("负向因果", causes[0].explanation)
 
     def test_required_depth_text_fields_reject_whitespace_but_empty_chapter_title_is_allowed(self) -> None:
         base = {
