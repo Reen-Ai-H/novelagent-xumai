@@ -61,6 +61,14 @@ git diff --check
 - 事务卡在 projecting：重启服务让 worker/reconcile 接管；公开入口必须在有限步骤内显示旧完整状态或新完整状态。
 - 页面显示 demo/live/failed 不一致：先确认会话恢复和 `/api/ai/.../workspace` 的服务端状态，不以浏览器 storage 作为真相。
 
+## 作品拆解前端集成
+
+独立作品拆解的 canonical 入口是 `/independent/{project_id}?view=deconstruction`，API 为 `GET /api/independent/projects/{project_id}/deconstruction`，重试、重建和证据回链使用同一作品路径下的 POST/GET 合同。前端只轮询读取，后台推进由 FastAPI worker 完成。
+
+验证页面时依次检查：空正文提示、服务端排队/运行进度、完成结果、可重试失败、过期结果和待确认修改；再刷新深链确认作品标题、来源 revision/hash 与状态仍来自服务端。宽表格必须在窄屏容器内横向滚动，不得让整页横向溢出。
+
+阶段 31E 的前端集成顺序固定为 `8028865` → `341bad8`，在阶段 31B 后分别落为 `d614118`、`be6fde2`；若需要回溯，保留这两个提交的父子关系，不使用并行草稿提交。
+
 ## 发布边界
 
 GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 27 功能独立审计通过；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。

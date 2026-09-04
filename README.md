@@ -119,9 +119,10 @@ LLM_TEMPERATURE=0.7
 ## 开发状态
 
 - 阶段 27 独立审计：P0/P1/P2/P3 均为 0。
-- 自动化基线：107 tests，0 failed，0 skipped。
-- API 基线：OpenAPI 54 paths / 57 operations；旧 `/novel` 16 paths / 19 operations。
+- GitHub main 历史基线：107 tests，0 failed，0 skipped；当前作品拆解候选集成：133 tests，0 failed，0 skipped。
+- API 基线：OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations。
 - 真实 DeepSeek 连续三章链路已验证。
+- 独立作品拆解工作区已接入：完成正文后可查看概览、节奏时间线、逐章结构和可回链证据；结果状态与恢复均来自服务端。
 - 离线质量门研究 Q2 已验证：36 例脱敏黄金集，宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过，外部请求/Token/费用为 0；真实生成质量增益及产品集成仍 pending，Q3 未执行。
 - 文学质量阶段 23B 结论为 C；功能审计通过不等于小说质量通过。
 
