@@ -25,7 +25,7 @@ from app.core.entry_service import EntryService
 from app.core.independent_service import IndependentWorkspaceService
 from app.core.independent_store import IndependentStore
 from app.core.project_store import JsonProjectStore
-from schemas.deconstruction import DeconstructionResponse
+from schemas.deconstruction import DeconstructionDocument, DeconstructionResponse
 
 
 NATURAL = [
@@ -63,7 +63,7 @@ class Stage32AcceptanceTest(unittest.TestCase):
             item.stop()
         self.temporary.cleanup()
 
-    def import_story(self, chapters):
+    def prepare_import(self, chapters):
         created = self.client.post("/api/library/projects", json={"title": "管理验收合成作品", "mode": "independent"})
         self.assertEqual(created.status_code, 200)
         project_id = created.json()["project"]["project_id"]
@@ -73,7 +73,10 @@ class Stage32AcceptanceTest(unittest.TestCase):
         self.assertEqual(preview.status_code, 200)
         confirmed = self.client.post(f"/api/independent/projects/{project_id}/imports/{preview.json()['preview']['preview_id']}/confirm")
         self.assertEqual(confirmed.status_code, 200)
-        return self.analyze_project(project_id)
+        return project_id
+
+    def import_story(self, chapters):
+        return self.analyze_project(self.prepare_import(chapters))
 
     def write_story(self, chapters):
         created = self.client.post("/api/library/projects", json={"title": "逐字正文验收", "mode": "independent"})
@@ -201,6 +204,58 @@ class Stage32AcceptanceTest(unittest.TestCase):
         _, payload, _ = self.import_story(["林舟在院子里给花浇水。", "远处的顾遥在书店读书。"])
         causes = [r for r in payload["result"]["report"]["plot"]["relations"] if r["relation_type"] in {"causes", "enables", "prevents"}]
         self.assertFalse(causes, "Narrative adjacency alone does not establish causal edges")
+
+    def test_existing_stage31_result_can_upgrade_without_losing_history(self):
+        project_id = self.prepare_import(NATURAL)
+        endpoint = f"/api/independent/projects/{project_id}/deconstruction"
+        queued = self.client.get(endpoint)
+        self.assertEqual(queued.status_code, 200)
+        record = self.service.store.load(project_id)
+        self.assertIsNotNone(record)
+        source = queued.json()["source"]
+        manuscript = self.independent.workspace(project_id, self.account_id)["active_version"]
+        chapter = manuscript.chapters[0]
+        # A persisted, pre-upgrade stage31 sidecar is input data, not a mocked
+        # analyzer result. Only historical fields are supplied so future report
+        # or pipeline defaults cannot accidentally make this a depth result.
+        old = DeconstructionDocument.model_validate({
+            "document_id": record.active_document_id,
+            "project_id": project_id,
+            "account_id": self.account_id,
+            "source_version_id": source["version_id"],
+            "source_revision": source["revision"],
+            "source_hash": source["hash"],
+            "idempotency_key": record.documents[0].idempotency_key,
+            "status": "completed", "progress_percent": 100,
+            "current_stage": "拆解完成", "overview": {"title": "旧版基础拆解", "chapter_count": 3},
+            "evidence": [{
+                "evidence_id": "legacy-stage31-evidence",
+                "document_id": record.active_document_id,
+                "source_version_id": source["version_id"],
+                "source_revision": source["revision"],
+                "source_hash": source["hash"],
+                "chapter_id": chapter.chapter_id, "chapter_number": 1,
+                "start_offset": 0, "end_offset": 2, "excerpt": "林舟",
+            }],
+        })
+        record.documents = [old]
+        record.active_document_id = old.document_id
+        self.service.store.save(record)
+        old_snapshot = old.model_dump(mode="json")
+        # Exercise real loading, explicit rebuild and worker execution against
+        # unchanged manuscript hashes. Legacy overview reuse must not dead-end.
+        self.assertEqual(self.client.get(endpoint).status_code, 200)
+        self.assertEqual(self.client.post(endpoint + "/rebuild").status_code, 200)
+        _, payload, _ = self.analyze_project(project_id)
+        self.assertNotEqual(payload["result"]["document_id"], old.document_id)
+        retained = self.service.store.load(project_id)
+        historical = next(item for item in retained.documents if item.document_id == old.document_id)
+        self.assertEqual(historical.model_dump(mode="json"), old_snapshot)
+        self.assertIn(old.document_id, [item["document_id"] for item in payload["history"]])
+        ref = self.client.get(endpoint + "/evidence/legacy-stage31-evidence")
+        self.assertEqual(ref.status_code, 200)
+        self.assertTrue(ref.json()["chapter"]["read_only"])
+        self.assertEqual(ref.json()["evidence"]["excerpt"], "林舟")
 
     def test_retry_recreation_and_historical_evidence_preserve_source(self):
         project_id, payload, before = self.import_story(NATURAL)

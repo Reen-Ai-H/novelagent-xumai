@@ -15,6 +15,7 @@
 - 可见架构任务“阶段32 架构合同冻结”已确认 active，在独立 `codex/stage-32-architecture-visible` 分支接上 `a53030e` checkpoint，继续审查和编写冻结合同。新建任务列表曾未及时显示，已通过实际任务读取确认运行，未重复创建。
 - 管理侧新增 `tests/test_stage32_acceptance.py` 的 9 项黑盒验收，覆盖六类自然/合成正文、真实结构化结果、人物变化/因果/伏笔语义、假因果与假回收反例、来源证据、幂等重建与历史隔离。初始红测 9/9 失败均为现有 stage31 缺少深度 `report`；这是未实现证据，禁止 skip 或改断言转绿。
 - 验收复核：导入会 strip 章节边缘空白，因此前导空白/emoji 改由真实 start→draft→complete 写入，逐字断言保存/正式正文后再检查证据；新增首尾/中间空白章用例。专项现为 10 tests / 10 expected failures / 0 skipped（0.552s），均停在尚无深度 report。`a1260a4` 双平台 CI 的 144 tests / 9 failures / 0 skipped 与当时同一缺口一致，不把红测误报为平台故障。
+- 旧数据升级红测：新增阶段 31 已完成侧车夹具，经真实读取、显式 rebuild、worker 要获得新版 report，同时保留旧文档/证据和作者正文；旧实现仅按来源哈希去重，不能完成升级。专项实际 `11 tests / 11 failures / 0 skipped`（0.607s），均为尚无深度 report；`git diff --check` 通过。升级身份与公开状态规则已交回可见架构任务冻结，不删除旧结果。
 
 ## 阶段 31J：Windows 零上下文接棒任务书（2026-09-05）
 
