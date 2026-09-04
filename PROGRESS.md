@@ -9,7 +9,7 @@
 - 未实现：本分支没有改 `app/**`、`schemas/**`、`frontend/**` 或本地业务数据；实现应按任务书拆分后由管理任务集成，独立审计任务不得由本合同任务自证。
 - 实际门禁：隔离 `.venv` 使用 `requirements.txt` 安装完成；`tests/run_quality_gates.py` 为 `204 tests / 0 failed / 0 skipped`，OpenAPI `58 paths / 61 operations`、旧 `/novel` `16 paths / 19 operations`；compileall、`node --check frontend/app.js`、`git diff --check` 和变更文档本地链接检查均通过。系统 Python 的首次尝试仅因缺依赖产生导入错误，不作为代码回归结果。
 - 未执行且不宣称：阶段 33 功能实现、真实 Edge 双尺寸流程、失败反向浏览器证据、CI 和独立审计；这些属于后续管理/实现任务。
-- 分支：`codex/stage-33-independent-experience-contract`；提交 SHA、远端分支和 Draft PR 将在提交推送后补录。
+- 交付记录：分支 `codex/stage-33-independent-experience-contract`，提交 `ea62a51`，已推送至 `origin`；Draft PR [#7](https://github.com/Reen-Ai-H/novelagent-xumai/pull/7) 面向 `main`，等待后续 CI/实现集成/独立审计。
 
 ## 阶段 32：深度作品拆解（审计通过，已合并，2026-09-05）
 

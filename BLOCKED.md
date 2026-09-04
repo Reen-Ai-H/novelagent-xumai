@@ -8,6 +8,8 @@
 
 本轮实际门禁：隔离 `.venv` 安装依赖后，`tests/run_quality_gates.py` 为 204 tests、0 failed、0 skipped，OpenAPI 58/61、旧 `/novel` 16/19；compileall、Node 语法、diff 和变更文档本地链接检查通过。阶段 33 功能、Edge、CI 和独立审计尚未执行，不能据此宣称完成。
 
+交付记录：`codex/stage-33-independent-experience-contract` 已推送，合同提交为 `ea62a51`，Draft PR [#7](https://github.com/Reen-Ai-H/novelagent-xumai/pull/7) 等待后续复核；本分支没有把待执行的实现、浏览器或审计门禁写成通过。
+
 保护项：`.env`、`.novel_*`、浏览器现场、审计证据、质量研究 quarantine 和其他 worktree 均保留；这些内容不是本阶段实现输入，不得读取输出、批量改写或删除。
 
 ## 阶段 32（审计通过，已合并，2026-09-05）
