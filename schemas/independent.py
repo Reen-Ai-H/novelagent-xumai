@@ -187,6 +187,18 @@ class AnalysisTask(BaseModel):
     error_message: str | None = None
 
 
+class DeconstructionOutboxItem(BaseModel):
+    """与正文同文件落盘的拆解触发事件，不携带正文或模型材料。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    reason: str = Field(default="正文更新", max_length=120)
+    created_at: datetime
+    attempts: int = Field(default=0, ge=0)
+    last_error_code: str | None = Field(default=None, max_length=80)
+
+
 class NotificationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -212,6 +224,7 @@ class IndependentProjectRecord(BaseModel):
     tasks: list[AnalysisTask] = Field(default_factory=list)
     notifications: list[NotificationRecord] = Field(default_factory=list)
     change_history: list[str] = Field(default_factory=list)
+    deconstruction_outbox: list[DeconstructionOutboxItem] = Field(default_factory=list, max_length=50)
 
 
 class StartIndependentRequest(BaseModel):

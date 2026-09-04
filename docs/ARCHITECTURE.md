@@ -84,3 +84,11 @@ DeconstructionService
 - `app/deconstruction_routes.py` 提供 `GET /api/independent/projects/{project_id}/deconstruction`、`POST .../deconstruction/rebuild`、`POST .../deconstruction/retry` 和 evidence 定位接口；入口复用邮箱会话、作品归属和独立模式门禁，跨账户不暴露侧车。
 - `main.py` 生命周期启动独立拆解 worker，扫描 `queued/running` 记录并在服务重启后继续；前端只读取服务端状态，不驱动分析进度。导入确认、完成本章、全文重建和历史恢复会自动排队。
 - 读取不回写旧正文；作者未确认修改不会被拆解任务覆盖。已有历史项目即使没有拆解侧车，在拥有至少一章正式正文时首次读取会进入排队状态，材料不足则诚实返回 `empty`。
+
+### 阶段 31B：锁顺序、outbox 与公开状态
+
+正文侧车记录 `deconstruction_outbox` 与正文/稿本变更同次保存。事件只含稳定 `event_id`、原因、创建时间、重试次数和安全错误码，不含正文、提示词或内部材料。`DeconstructionService.reconcile_outbox()` 在服务启动、worker 扫描、拆解读取和重试入口运行；先读取正文来源，再短暂写拆解侧车，释放拆解锁后才确认 outbox 事件。这样固定为“作者写门禁 → 正文侧车”和“拆解短锁 → 拆解侧车”，不会出现 `deconstruction → independent` 的反向锁嵌套。
+
+拆解运行先以 `queued/running` 保存，再在锁外构造确定性结果，完成前重新检查稿本版本、revision/hash。任意可预期或意外分析异常都会保存为 `failed_retryable`，不暴露异常原文；单个损坏侧车只被扫描器跳过，不阻断其他项目。正文侧车和拆解侧车均采用临时文件、替换、文件刷盘及目录刷盘，保证 outbox 触发在重启后可被发现。
+
+四个拆解接口的公开合同由 `DeconstructionResponse` 与 `DeconstructionEvidenceResponse` 强制校验。`effective_status` 是用户动作状态，`run_status` 是运行状态，`source_match` 是结果来源门禁；兼容旧字段必须与 canonical state 相等，只有 `effective_status=completed`、`run_status=completed` 且 `source_match=true` 时才返回 `result`。证据绑定 `document_id + source_version_id + source_revision + source_hash`，偏移单位为 UTF-16 code unit；历史来源只返回只读定位，不重绑当前章节。

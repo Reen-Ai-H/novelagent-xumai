@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 DeconstructionStatus = Literal[
@@ -22,6 +22,8 @@ DeconstructionStatus = Literal[
     "stale",
     "rebuild_required",
 ]
+DeconstructionEffectiveStatus = DeconstructionStatus
+DeconstructionRunStatus = Literal["none", "queued", "running", "completed", "failed_retryable"]
 
 
 def utc_now() -> datetime:
@@ -34,11 +36,15 @@ class EvidenceRef(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     evidence_id: str
+    document_id: str = ""
     source_version_id: str
+    source_revision: int = Field(default=0, ge=0)
+    source_hash: str = ""
     chapter_id: str
     chapter_number: int = Field(..., ge=1)
     start_offset: int = Field(default=0, ge=0)
     end_offset: int = Field(default=0, ge=0)
+    offset_unit: Literal["utf16_code_unit"] = "utf16_code_unit"
     excerpt: str = Field(default="", max_length=180)
     label: str = Field(default="正文证据", max_length=120)
     target_path: str | None = Field(default=None, max_length=500)
@@ -161,14 +167,153 @@ class DeconstructionProjectRecord(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class DeconstructionActions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    retry: bool = False
+    rebuild: bool = False
+
+
+class DeconstructionProgress(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    percent: int = Field(default=0, ge=0, le=100)
+    current_stage: str = Field(default="等待拆解", max_length=120)
+
+
+class DeconstructionSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version_id: str | None = None
+    revision: int | None = Field(default=None, ge=0)
+    hash: str | None = None
+    match: bool = False
+    chapter_count: int = Field(default=0, ge=0)
+    total_word_count: int = Field(default=0, ge=0)
+
+
+class DeconstructionError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+    retryable: bool = False
+
+
+class DeconstructionActiveRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    run_status: DeconstructionRunStatus
+    source_version_id: str
+    source_revision: int = Field(default=0, ge=0)
+    source_hash: str
+    retry_count: int = Field(default=0, ge=0)
+    idempotency_key: str
+    analysis_label: str = "确定性结构拆解（无模型）"
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+
+class DeconstructionDocumentPublic(BaseModel):
+    """阶段 31A 兼容投影；不含内部 account_id。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    project_id: str
+    source_version_id: str
+    source_revision: int = Field(default=0, ge=0)
+    source_hash: str
+    status: DeconstructionStatus
+    progress_percent: int = Field(default=0, ge=0, le=100)
+    current_stage: str = Field(default="等待拆解", max_length=120)
+    idempotency_key: str
+    retry_count: int = Field(default=0, ge=0)
+    analysis_label: str = "确定性结构拆解（无模型）"
+    overview: DeconstructionOverview | None = None
+    timeline: list[TimelineNode] = Field(default_factory=list)
+    chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
+    evidence: list[EvidenceRef] = Field(default_factory=list)
+    uncertainty: list[str] = Field(default_factory=list, max_length=40)
+    error_message: str | None = Field(default=None, max_length=500)
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+
+class DeconstructionResult(BaseModel):
+    """只承载与当前 source 匹配的已完成结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    status: Literal["completed"] = "completed"
+    source_version_id: str
+    source_revision: int = Field(default=0, ge=0)
+    source_hash: str
+    analysis_label: str = "确定性结构拆解（无模型）"
+    overview: DeconstructionOverview
+    timeline: list[TimelineNode] = Field(default_factory=list)
+    chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
+    evidence: list[EvidenceRef] = Field(default_factory=list)
+    uncertainty: list[str] = Field(default_factory=list, max_length=40)
+
+
+class DeconstructionHistoryItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    status: DeconstructionStatus
+    source_version_id: str
+    source_revision: int = Field(default=0, ge=0)
+    source_hash: str
+    retry_count: int = Field(default=0, ge=0)
+    analysis_label: str = "确定性结构拆解（无模型）"
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+
+class DeconstructionState(BaseModel):
+    """兼容旧客户端的嵌套投影；字段与顶层 canonical state 保持一致。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    effective_status: DeconstructionEffectiveStatus
+    run_status: DeconstructionRunStatus
+    source_match: bool
+    progress: DeconstructionProgress
+    current_stage: str = Field(default="等待拆解", max_length=120)
+    source: DeconstructionSource
+    active_run: DeconstructionActiveRun | None = None
+    result: DeconstructionResult | None = None
+    actions: DeconstructionActions
+    error: DeconstructionError | None = None
+
+
 class DeconstructionResponse(BaseModel):
     """浏览器/客户端合同，省略账户归属和内部协调字段。"""
 
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal["1.0"] = "1.0"
     project_id: str
     title: str
-    status: DeconstructionStatus
+    mode: Literal["independent"] = "independent"
+    effective_status: DeconstructionEffectiveStatus
+    run_status: DeconstructionRunStatus = "none"
+    source_match: bool = False
+    progress: DeconstructionProgress = Field(default_factory=DeconstructionProgress)
+    source: DeconstructionSource = Field(default_factory=DeconstructionSource)
+    active_run: DeconstructionActiveRun | None = None
+    result: DeconstructionResult | None = None
+    error: DeconstructionError | None = None
+    actions: DeconstructionActions = Field(default_factory=DeconstructionActions)
+    history: list[DeconstructionHistoryItem] = Field(default_factory=list)
+    # 兼容阶段 31A 客户端；这些字段始终由 canonical state 同步生成。
+    status: DeconstructionEffectiveStatus
     progress_percent: int = Field(default=0, ge=0, le=100)
     current_stage: str = "等待拆解"
     source_version_id: str | None = None
@@ -179,11 +324,42 @@ class DeconstructionResponse(BaseModel):
     error_message: str | None = None
     retryable: bool = False
     initialized: bool = False
-    actions: dict[str, bool] = Field(default_factory=dict)
-    deconstruction: dict[str, object] = Field(default_factory=dict)
+    deconstruction: DeconstructionState | None = None
     # 路由使用去除 account_id 的公开投影；内部文档模型不能直接作为浏览器合同。
-    document: dict[str, object] | None = None
-    history: list[dict[str, object]] = Field(default_factory=list)
+    document: DeconstructionDocumentPublic | None = None
+
+    @model_validator(mode="after")
+    def validate_canonical_projection(self) -> "DeconstructionResponse":
+        """拒绝顶层兼容字段与 canonical state 互相矛盾的公开响应。"""
+
+        if self.status != self.effective_status:
+            raise ValueError("status 必须与 effective_status 一致")
+        if self.progress_percent != self.progress.percent or self.current_stage != self.progress.current_stage:
+            raise ValueError("兼容进度字段必须与 progress 一致")
+        if (
+            self.source_version_id != self.source.version_id
+            or self.source_revision != self.source.revision
+            or self.source_hash != self.source.hash
+            or self.source_match != self.source.match
+        ):
+            raise ValueError("兼容来源字段必须与 source 一致")
+        if self.effective_status != "completed" and self.result is not None:
+            raise ValueError("非 completed 状态不得返回正式 result")
+        if self.result is not None and (not self.source_match or self.run_status != "completed"):
+            raise ValueError("result 必须绑定当前来源且运行已完成")
+        if self.deconstruction is not None:
+            if (
+                self.deconstruction.effective_status != self.effective_status
+                or self.deconstruction.run_status != self.run_status
+                or self.deconstruction.source_match != self.source_match
+                or self.deconstruction.result != self.result
+            ):
+                raise ValueError("嵌套 deconstruction 必须与顶层 canonical state 一致")
+        if self.active_run is not None and self.active_run.run_status != self.run_status:
+            raise ValueError("active_run 必须与 run_status 一致")
+        if self.effective_status in {"empty", "stale", "rebuild_required"} and self.document is not None:
+            raise ValueError("空态或来源非当前状态不得返回当前 document")
+        return self
 
 
 class DeconstructionEvidenceResponse(BaseModel):
@@ -193,3 +369,14 @@ class DeconstructionEvidenceResponse(BaseModel):
     title: str
     evidence: EvidenceRef
     chapter: dict[str, object]
+    source_matches_current: bool = False
+    historical: bool = True
+
+
+class DeconstructionActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    idempotency_key: str | None = Field(default=None, max_length=160)
+    expected_source_version_id: str | None = Field(default=None, max_length=160)
+    expected_source_revision: int | None = Field(default=None, ge=0)
+    expected_source_hash: str | None = Field(default=None, min_length=16, max_length=128)

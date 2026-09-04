@@ -6,6 +6,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app import entry_routes, independent_routes
 from app.core.deconstruction_service import DeconstructionService, DeconstructionServiceError
+from schemas.deconstruction import (
+    DeconstructionActionRequest,
+    DeconstructionEvidenceResponse,
+    DeconstructionResponse,
+)
 
 
 router = APIRouter(prefix="/api/independent", tags=["deconstruction"])
@@ -43,7 +48,7 @@ def _service() -> DeconstructionService:
     return deconstruction_service
 
 
-@router.get("/projects/{project_id}/deconstruction")
+@router.get("/projects/{project_id}/deconstruction", response_model=DeconstructionResponse)
 async def read_deconstruction(project_id: str, request: Request) -> dict[str, object]:
     account = _current_independent_account(request, project_id)
     try:
@@ -52,29 +57,57 @@ async def read_deconstruction(project_id: str, request: Request) -> dict[str, ob
         _raise_service_error(exc)
     raise AssertionError("unreachable")
 
-@router.post("/projects/{project_id}/deconstruction/rebuild")
-async def rebuild_deconstruction(project_id: str, request: Request) -> dict[str, object]:
+@router.post("/projects/{project_id}/deconstruction/rebuild", response_model=DeconstructionResponse)
+async def rebuild_deconstruction(
+    project_id: str,
+    request: Request,
+    payload: DeconstructionActionRequest | None = None,
+) -> dict[str, object]:
     account = _current_independent_account(request, project_id)
     try:
-        _service().enqueue_for_project(project_id, account.account_id, reason="作者主动更新")
+        action = payload or DeconstructionActionRequest()
+        _service().enqueue_for_project(
+            project_id,
+            account.account_id,
+            reason="作者主动更新",
+            idempotency_key=action.idempotency_key,
+            expected_source_version_id=action.expected_source_version_id,
+            expected_source_revision=action.expected_source_revision,
+            expected_source_hash=action.expected_source_hash,
+        )
         return _service().read(project_id, account.account_id)
     except DeconstructionServiceError as exc:
         _raise_service_error(exc)
     raise AssertionError("unreachable")
 
 
-@router.post("/projects/{project_id}/deconstruction/retry")
-async def retry_deconstruction(project_id: str, request: Request) -> dict[str, object]:
+@router.post("/projects/{project_id}/deconstruction/retry", response_model=DeconstructionResponse)
+async def retry_deconstruction(
+    project_id: str,
+    request: Request,
+    payload: DeconstructionActionRequest | None = None,
+) -> dict[str, object]:
     account = _current_independent_account(request, project_id)
     try:
-        _service().retry(project_id, account.account_id)
+        action = payload or DeconstructionActionRequest()
+        _service().retry(
+            project_id,
+            account.account_id,
+            idempotency_key=action.idempotency_key,
+            expected_source_version_id=action.expected_source_version_id,
+            expected_source_revision=action.expected_source_revision,
+            expected_source_hash=action.expected_source_hash,
+        )
         return _service().read(project_id, account.account_id)
     except DeconstructionServiceError as exc:
         _raise_service_error(exc)
     raise AssertionError("unreachable")
 
 
-@router.get("/projects/{project_id}/deconstruction/evidence/{evidence_id}")
+@router.get(
+    "/projects/{project_id}/deconstruction/evidence/{evidence_id}",
+    response_model=DeconstructionEvidenceResponse,
+)
 async def read_deconstruction_evidence(
     project_id: str,
     evidence_id: str,

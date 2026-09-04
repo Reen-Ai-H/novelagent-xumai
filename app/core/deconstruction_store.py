@@ -7,16 +7,23 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import RLock
+
+from pydantic import ValidationError
 
 from schemas.deconstruction import DeconstructionProjectRecord
 
 
 DECONSTRUCTION_DATA_DIR = Path(__file__).resolve().parents[2] / ".novel_deconstruction"
 PROJECT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+class DeconstructionStoreError(Exception):
+    """单个拆解侧车不可读取/写入时的安全内部错误。"""
 
 
 class DeconstructionStore:
@@ -37,8 +44,11 @@ class DeconstructionStore:
         with self._lock:
             if not path.exists():
                 return None
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            return DeconstructionProjectRecord.model_validate(raw)
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                return DeconstructionProjectRecord.model_validate(raw)
+            except (OSError, UnicodeError, json.JSONDecodeError, ValidationError) as exc:
+                raise DeconstructionStoreError("拆解侧车暂时不可读取。") from exc
 
     def save(self, record: DeconstructionProjectRecord) -> DeconstructionProjectRecord:
         path = self._path(record.project_id)
@@ -52,8 +62,19 @@ class DeconstructionStore:
             ) as temp:
                 json.dump(record.model_dump(mode="json"), temp, ensure_ascii=False, indent=2)
                 temp.write("\n")
+                temp.flush()
+                os.fsync(temp.fileno())
                 temp_path = Path(temp.name)
             temp_path.replace(path)
+            try:
+                directory = os.open(self.base_dir, os.O_RDONLY)
+            except OSError:
+                directory = None
+            if directory is not None:
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
             return record
 
     def list_records(self) -> list[DeconstructionProjectRecord]:
@@ -64,6 +85,11 @@ class DeconstructionStore:
         records: list[DeconstructionProjectRecord] = []
         with self._lock:
             for path in sorted(self.base_dir.glob("*.json")):
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                records.append(DeconstructionProjectRecord.model_validate(raw))
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                    records.append(DeconstructionProjectRecord.model_validate(raw))
+                except (OSError, UnicodeError, json.JSONDecodeError, ValidationError):
+                    # 单个侧车损坏不能阻断其他作品；公开读取由 service 将该项目
+                    # 视为暂不可用，避免把损坏文件静默当作新任务覆盖。
+                    continue
         return records

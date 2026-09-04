@@ -7,10 +7,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import RLock
+
+from pydantic import ValidationError
 
 from schemas.independent import IndependentProjectRecord
 
@@ -52,6 +55,32 @@ class IndependentStore:
             ) as temp:
                 json.dump(project.model_dump(mode="json"), temp, ensure_ascii=False, indent=2)
                 temp.write("\n")
+                temp.flush()
+                os.fsync(temp.fileno())
                 temp_path = Path(temp.name)
             temp_path.replace(path)
+            try:
+                directory = os.open(self.base_dir, os.O_RDONLY)
+            except OSError:
+                directory = None
+            if directory is not None:
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
             return project
+
+    def list_records(self) -> list[IndependentProjectRecord]:
+        """供后台 outbox 扫描使用；单个损坏文件不阻断其他作品恢复。"""
+
+        if not self.base_dir.exists():
+            return []
+        records: list[IndependentProjectRecord] = []
+        with self._lock:
+            for path in sorted(self.base_dir.glob("*.json")):
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                    records.append(IndependentProjectRecord.model_validate(raw))
+                except (OSError, UnicodeError, json.JSONDecodeError, ValidationError):
+                    continue
+        return records
