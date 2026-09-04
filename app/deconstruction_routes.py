@@ -1,0 +1,88 @@
+"""独立创作内部的作品拆解 API。"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Request
+
+from app import entry_routes, independent_routes
+from app.core.deconstruction_service import DeconstructionService, DeconstructionServiceError
+
+
+router = APIRouter(prefix="/api/independent", tags=["deconstruction"])
+deconstruction_service = DeconstructionService(independent=independent_routes.independent_service)
+independent_routes.independent_service.deconstruction_service = deconstruction_service
+
+
+def _raise_service_error(error: DeconstructionServiceError) -> None:
+    raise HTTPException(
+        status_code=error.status_code,
+        detail={"code": error.code, "message": error.message, "data": error.data},
+    ) from error
+
+
+def _current_independent_account(request: Request, project_id: str):
+    account = entry_routes._current_account(request)
+    link = next((item for item in account.project_links if item.project_id == project_id), None)
+    if link is None:
+        raise HTTPException(status_code=404, detail={"code": "project_missing", "message": "作品不存在。"})
+    if link.mode != "independent":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "mode_mismatch", "message": "作品拆解目前位于独立创作内部。"},
+        )
+    return account
+
+
+def _service() -> DeconstructionService:
+    """让隔离测试替换 independent service 时，路由仍使用同一份侧车。"""
+
+    current = independent_routes.independent_service
+    if deconstruction_service.independent is not current:
+        deconstruction_service.independent = current
+        current.deconstruction_service = deconstruction_service
+    return deconstruction_service
+
+
+@router.get("/projects/{project_id}/deconstruction")
+async def read_deconstruction(project_id: str, request: Request) -> dict[str, object]:
+    account = _current_independent_account(request, project_id)
+    try:
+        return _service().read(project_id, account.account_id)
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
+    raise AssertionError("unreachable")
+
+@router.post("/projects/{project_id}/deconstruction/rebuild")
+async def rebuild_deconstruction(project_id: str, request: Request) -> dict[str, object]:
+    account = _current_independent_account(request, project_id)
+    try:
+        _service().enqueue_for_project(project_id, account.account_id, reason="作者主动更新")
+        return _service().read(project_id, account.account_id)
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
+    raise AssertionError("unreachable")
+
+
+@router.post("/projects/{project_id}/deconstruction/retry")
+async def retry_deconstruction(project_id: str, request: Request) -> dict[str, object]:
+    account = _current_independent_account(request, project_id)
+    try:
+        _service().retry(project_id, account.account_id)
+        return _service().read(project_id, account.account_id)
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
+    raise AssertionError("unreachable")
+
+
+@router.get("/projects/{project_id}/deconstruction/evidence/{evidence_id}")
+async def read_deconstruction_evidence(
+    project_id: str,
+    evidence_id: str,
+    request: Request,
+) -> dict[str, object]:
+    account = _current_independent_account(request, project_id)
+    try:
+        return _service().evidence(project_id, account.account_id, evidence_id)
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
+    raise AssertionError("unreachable")

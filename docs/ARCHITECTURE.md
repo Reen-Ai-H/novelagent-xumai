@@ -63,3 +63,24 @@ AI 正式章节提交使用 durable journal、staging payload 和 commit marker�
 ## 保护边界
 
 不新增分享、发布、支付、管理员、多人协作、平行正文或生产部署。设计原型只作 A 版视觉基准；本地数据、审计证据、浏览器现场和项目外质量研究不属于公开源码发布清单。
+
+## 作品拆解侧车（阶段 31）
+
+作品拆解是独立创作内部的版本化派生侧车，不改变既有正文和故事档案文件：
+
+```text
+独立稿本正式正文
+        ↓ source_version_id + source_revision + source_hash
+DeconstructionService
+        ↓ queued → running → completed / failed_retryable / rebuild_required
+.novel_deconstruction/{project_id}.json
+        ↓ 单次 GET
+作品概览 · 0–100% 节奏时间线 · 章节拆解 · EvidenceRef 回链
+```
+
+- `schemas/deconstruction.py` 定义拆解运行、概览观察、候选、时间线节点、章节拆解和证据定位合同。结果只保存最小证据摘录，不保存整本正文、prompt 或内部分析过程。
+- `app/core/deconstruction_store.py` 按作品原子保存当前运行和历史运行；该目录是本地运行数据，继承 `.novel_*` 保护规则，不加入 Git。
+- `app/core/deconstruction_service.py` 读取独立稿本的正式正文，计算绑定来源的 hash，执行可审计确定性结构拆解，并为每个判断附 `EvidenceRef`、confidence 与 uncertainty。正文/版本来源变化时不覆盖旧结果，而返回 `stale`；作者有未确认修改时返回 `rebuild_required`。
+- `app/deconstruction_routes.py` 提供 `GET /api/independent/projects/{project_id}/deconstruction`、`POST .../deconstruction/rebuild`、`POST .../deconstruction/retry` 和 evidence 定位接口；入口复用邮箱会话、作品归属和独立模式门禁，跨账户不暴露侧车。
+- `main.py` 生命周期启动独立拆解 worker，扫描 `queued/running` 记录并在服务重启后继续；前端只读取服务端状态，不驱动分析进度。导入确认、完成本章、全文重建和历史恢复会自动排队。
+- 读取不回写旧正文；作者未确认修改不会被拆解任务覆盖。已有历史项目即使没有拆解侧车，在拥有至少一章正式正文时首次读取会进入排队状态，材料不足则诚实返回 `empty`。

@@ -89,10 +89,19 @@ class IndependentWorkspaceService:
         # 公开读取必须先尊重已写入的 durable commit marker。
         self.transaction_coordinator: Any | None = None
         self._write_lock_depth = 0
+        # 由拆解路由装配；保持可选，便于旧调用方和阶段 2 测试继续独立运行。
+        self.deconstruction_service: Any | None = None
 
     @staticmethod
     def _now() -> datetime:
         return datetime.now(timezone.utc)
+
+    def _request_deconstruction(self, project_id: str, account_id: str, *, reason: str) -> None:
+        """在正式正文可用后排队拆解；没有装配拆解侧车时保持旧合同。"""
+
+        service = self.deconstruction_service
+        if service is not None:
+            service.enqueue_for_project(project_id, account_id, reason=reason)
 
     @staticmethod
     def _word_count(text: str) -> int:
@@ -522,6 +531,7 @@ class IndependentWorkspaceService:
         preview.status = "confirmed"
         record.updated_at = now
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="首次导入确认")
         return record
 
     @_author_write_method
@@ -1092,6 +1102,7 @@ class IndependentWorkspaceService:
         record.updated_at = now
         self._sync_pending_changes(record, version)
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="完成本章")
         return task
 
     def task(self, project_id: str, account_id: str, task_id: str) -> AnalysisTask:
@@ -1418,6 +1429,7 @@ class IndependentWorkspaceService:
         self._notify(record, "version_created", f"已创建 {new_version.label}；旧稿本保留至 {version.recoverable_until.date()}。")
         record.updated_at = now
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="全文重建")
         return {"decision": decision, "task": task, "version": new_version, "old_version": version}
 
     def _clone_as_active(self, source: ManuscriptVersion, *, label: str, source_version_id: str) -> ManuscriptVersion:
@@ -1473,6 +1485,7 @@ class IndependentWorkspaceService:
         self._notify(record, "version_created", f"已从 {selected.label} 创建新的当前稿本。")
         record.updated_at = now
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="恢复历史稿本")
         return {"task": task, "version": new_version, "restored_from": selected}
 
     def trial_sketch(self, project_id: str, account_id: str, *, style: str, confirm: bool) -> dict[str, Any]:

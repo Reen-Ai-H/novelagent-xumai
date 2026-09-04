@@ -27,6 +27,7 @@ data/
 .novel_transactions/
 .novel_memory/
 .novel_projects/
+.novel_deconstruction/
 *.log
 logs/
 playwright-report/

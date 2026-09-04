@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import ai_routes
+from app import deconstruction_routes
 from app.entry_routes import router as entry_router
 from app.ai_routes import router as ai_router
 from app.archive_routes import router as archive_router
@@ -33,15 +34,33 @@ async def _ai_background_worker() -> None:
         await asyncio.sleep(0.15)
 
 
+async def _deconstruction_background_worker() -> None:
+    """服务端拆解 worker：导入/完成章节后离页仍会继续，重启会恢复。"""
+
+    while True:
+        try:
+            await deconstruction_routes.deconstruction_service.process_background_tasks_async()
+        except Exception:  # pragma: no cover - worker 必须保持存活，业务错误已持久化
+            logger.exception("作品拆解后台任务扫描失败，下一轮将继续恢复")
+        await asyncio.sleep(0.2)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     worker = asyncio.create_task(_ai_background_worker(), name="xumai-ai-worker")
+    deconstruction_worker = asyncio.create_task(
+        _deconstruction_background_worker(),
+        name="xumai-deconstruction-worker",
+    )
     try:
         yield
     finally:
         worker.cancel()
+        deconstruction_worker.cancel()
         with suppress(asyncio.CancelledError):
             await worker
+        with suppress(asyncio.CancelledError):
+            await deconstruction_worker
 
 
 app = FastAPI(
@@ -56,6 +75,7 @@ app.include_router(chat_router)
 app.include_router(novel_router)
 app.include_router(entry_router)
 app.include_router(independent_router)
+app.include_router(deconstruction_routes.router)
 app.include_router(ai_router)
 app.include_router(archive_router)
 
