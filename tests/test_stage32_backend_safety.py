@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 from datetime import datetime, timezone
+from pydantic import ValidationError
 
 from app.core.deconstruction_depth import (
     ChapterInput,
@@ -25,7 +26,17 @@ from app.core.independent_service import IndependentWorkspaceService
 from app.core.independent_store import IndependentStore
 from app.core.project_lock import ProjectLockError, ProjectLockStore
 from app.core.transaction_store import TransactionStore
-from schemas.deconstruction import DeconstructionProjectRecord
+from schemas.deconstruction import (
+    DeconstructionProjectRecord,
+    DepthAnalysisItem,
+    DepthChapter,
+    DepthCharacter,
+    DepthEvidence,
+    DepthForeshadowing,
+    DepthPlotline,
+    DepthTechnique,
+    DepthView,
+)
 from schemas.independent import (
     ChapterDocument,
     IndependentProjectRecord,
@@ -128,6 +139,210 @@ class Stage32BackendSafetyTest(unittest.TestCase):
             "阿岚把绳索抛给周砚，两人一起把船拖到岸边。",
         ]))
         self.assertEqual(set(engine.names), {"周砚", "阿岚"})
+
+    def test_negative_predicates_do_not_create_positive_relations_or_payoffs(self) -> None:
+        negative = DepthAnalysisEngine(_snapshot([
+            "林舟没有把钥匙交给顾遥，他只是拒绝了顾遥的请求。",
+            "顾遥没有用钥匙打开门，她把钥匙放回桌上。",
+            "因为门没有打开，所以林舟没有进入房间。",
+        ])).build()
+        self.assertFalse(any(event.plotline_status == "resolved" for event in negative.plot.events))
+        self.assertTrue(all("明确展示了该行动带来的下一步推进" not in event.consequence for event in negative.plot.events))
+        self.assertFalse(any(relation.relation_type == "enables" for relation in negative.plot.relations))
+        self.assertFalse(any(relation.relation_type == "allies" for relation in negative.characters.relations))
+        self.assertFalse(negative.foreshadowing.threads)
+        self.assertFalse(any(state.status == "paid_off" for state in negative.foreshadowing.states))
+        self.assertTrue(any(relation.relation_type == "causes" for relation in negative.plot.relations))
+        negative_causes = [
+            relation for relation in negative.plot.relations if relation.relation_type == "causes"
+        ]
+        self.assertTrue(all("负向因果" in relation.explanation for relation in negative_causes))
+        self.assertTrue(all(item.emotional_valence is None or item.emotional_valence <= 0
+                            for item in negative.reader_experience.items))
+        self.assertTrue(all("尚未显示完整回收" in item.payoff for item in negative.reader_experience.items))
+
+    def test_positive_controls_keep_affirmative_status_transfer_and_payoff(self) -> None:
+        positive = DepthAnalysisEngine(_snapshot([
+            "林舟把钥匙交给顾遥。",
+            "顾遥用钥匙打开门。",
+            "因为门打开了，所以林舟进入房间。",
+        ])).build()
+        self.assertTrue(any(event.plotline_status == "resolved" for event in positive.plot.events))
+        self.assertTrue(any(relation.relation_type == "enables" for relation in positive.plot.relations))
+        self.assertTrue(any(state.status == "paid_off" for state in positive.foreshadowing.states))
+        self.assertTrue(any(relation.relation_type == "causes" for relation in positive.plot.relations))
+        self.assertTrue(any("明确展示了该行动带来的下一步推进" in event.consequence
+                            for event in positive.plot.events))
+
+    def test_local_negation_variants_and_lexical_not_controls(self) -> None:
+        negative_texts = [
+            "林舟未找到钥匙。",
+            "林舟并未打开门。",
+            "林舟从未进入房间。",
+            "林舟不曾帮助顾遥。",
+            "林舟拒绝合作。",
+        ]
+        for text in negative_texts:
+            with self.subTest(text=text):
+                report = DepthAnalysisEngine(_snapshot([text])).build()
+                event = report.plot.events[0]
+                self.assertNotEqual(event.plotline_status, "resolved")
+                self.assertNotIn("明确展示了该行动带来的下一步推进", event.consequence)
+
+        affirmative_texts = [
+            "无意间找到钥匙。",
+            "不久后打开门。",
+            "无论如何都要找到答案。",
+            "不但帮助还公开真相。",
+            "不是没有找到钥匙。",
+        ]
+        for text in affirmative_texts:
+            with self.subTest(text=text):
+                report = DepthAnalysisEngine(_snapshot([text])).build()
+                event = report.plot.events[0]
+                self.assertEqual(event.plotline_status, "resolved")
+                self.assertIn("明确展示了该行动带来的下一步推进", event.consequence)
+
+    def test_required_depth_text_fields_reject_whitespace_but_empty_chapter_title_is_allowed(self) -> None:
+        base = {
+            "item_id": "item1",
+            "kind": "character",
+            "category": "人物",
+            "conclusion": "有证据的结论",
+            "epistemic_status": "unknown",
+            "chapter_ids": ["c1"],
+            "normalized_start": 0.0,
+            "normalized_end": 100.0,
+            "evidence_ids": [],
+            "related_item_ids": [],
+            "confidence": 0.0,
+            "uncertainty": ["信息不足"],
+        }
+        for field, value in (
+            ("category", " \t\n"),
+            ("conclusion", " \t\n"),
+        ):
+            payload = {**base, field: value}
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError):
+                    DepthAnalysisItem.model_validate(payload)
+        with self.assertRaises(ValidationError):
+            DepthView.model_validate({"summary": " \t\n", "uncertainty": []})
+        with self.assertRaises(ValidationError):
+            DepthView.model_validate({"summary": "总结", "uncertainty": [" \t\n"]})
+
+        character = {
+            **base,
+            "name": "人物",
+            "aliases": [],
+            "role": "角色",
+            "motivation": "动机",
+            "inner_conflict": "冲突",
+            "arc_summary": "弧线",
+        }
+        with self.assertRaises(ValidationError):
+            DepthCharacter.model_validate({**character, "name": " \t\n"})
+
+        plotline = {
+            **{**base, "item_id": "line1", "kind": "plotline"},
+            "title": "剧情",
+            "central_question": "问题",
+            "stakes": "代价",
+            "resolution": "未定",
+            "character_ids": [],
+        }
+        with self.assertRaises(ValidationError):
+            DepthPlotline.model_validate({**plotline, "title": "\n\t"})
+
+        foreshadowing = {
+            **{**base, "item_id": "thread1", "kind": "foreshadowing"},
+            "label": "线索",
+            "planted_detail": "种下",
+            "expected_payoff": "回收",
+            "interpretation": "解释",
+        }
+        with self.assertRaises(ValidationError):
+            DepthForeshadowing.model_validate({**foreshadowing, "label": " \n"})
+
+        evidence = {
+            "project_id": "project32",
+            "document_id": "document32",
+            "source_version_id": "version32",
+            "source_revision": 1,
+            "source_hash": "a" * 64,
+            "evidence_id": "ev1",
+            "chapter_id": "c1",
+            "chapter_number": 1,
+            "granularity": "span",
+            "start_offset": 0,
+            "end_offset": 1,
+            "excerpt": "证",
+            "label": "证据",
+        }
+        with self.assertRaises(ValidationError):
+            DepthEvidence.model_validate({**evidence, "label": "\t\r\n"})
+
+        technique = {
+            **{**base, "item_id": "tech1", "kind": "technique", "evidence_ids": ["ev1"]},
+            "technique": "动作",
+            "observation": "观察",
+            "mechanism": "机制",
+            "effect": "效果",
+            "learning_note": "学习",
+            "applicability": "适用",
+            "example_evidence_ids": ["ev1"],
+        }
+        with self.assertRaises(ValidationError):
+            DepthTechnique.model_validate({**technique, "technique": " \n"})
+
+        empty_title = DepthChapter.model_validate({
+            "chapter_id": "c1",
+            "chapter_number": 1,
+            "title": "",
+            "utf16_length": 0,
+            "normalized_start": 0.0,
+            "normalized_end": 0.0,
+        })
+        self.assertEqual(empty_title.title, "")
+
+    def test_depth_ids_are_span_anchored_and_order_independent(self) -> None:
+        snapshot = _snapshot([
+            "林舟把钥匙交给顾遥。顾遥决定打开门。",
+            "顾遥找到旧信。林舟公开真相。",
+        ])
+        first = DepthAnalysisEngine(snapshot)
+        first._build_events()  # noqa: SLF001 - inspect deterministic event anchors.
+        first_event_ids = {event.event_id for event in first.events}
+        second = DepthAnalysisEngine(snapshot)
+        second.segments_by_chapter = {
+            chapter_id: list(reversed(segments))
+            for chapter_id, segments in second.segments_by_chapter.items()
+        }
+        second._build_events()  # noqa: SLF001 - reorder only internal traversal.
+        second_event_ids = {event.event_id for event in second.events}
+        self.assertEqual(first_event_ids, second_event_ids)
+        self.assertEqual(len(first_event_ids), len(first.events))
+
+        first_report = DepthAnalysisEngine(snapshot).build()
+        reversed_snapshot = DepthSnapshot(
+            project_id=snapshot.project_id,
+            document_id=snapshot.document_id,
+            source_version_id=snapshot.source_version_id,
+            source_revision=snapshot.source_revision,
+            source_hash=snapshot.source_hash,
+            chapters=tuple(reversed(snapshot.chapters)),
+        )
+        reversed_report = DepthAnalysisEngine(reversed_snapshot).build()
+        self.assertEqual(
+            {item.item_id for item in first_report.analysis_items()},
+            {item.item_id for item in reversed_report.analysis_items()},
+        )
+
+        evidence_engine = DepthAnalysisEngine(_snapshot(["林舟打开门。"]))
+        chapter = evidence_engine.chapters[0]
+        left = evidence_engine.evidence.span(chapter, 0, 2, "片段")
+        right = evidence_engine.evidence.span(chapter, 2, 5, "片段")
+        self.assertNotEqual(left, right)
 
     def test_scene_and_colour_repetition_do_not_invent_people_or_paid_off_thread(self) -> None:
         scenery = DepthAnalysisEngine(_snapshot(["雨落在空庭。天色暗了。石阶上积起了水。"])).build()

@@ -13,7 +13,7 @@ import json
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 
 DeconstructionStatus = Literal[
@@ -157,9 +157,23 @@ class ChapterBreakdown(BaseModel):
 
 
 # Stage 32 is opt-in through report, never an in-place migration of stage 31.
+def _require_nonblank(value: str) -> str:
+    """Normalize required human text while rejecting whitespace-only values."""
+
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("required text must not be blank")
+    return normalized
+
+
 DepthID = Annotated[str, Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")]
-DepthCategory = Annotated[str, Field(min_length=1, max_length=80, pattern=r"\S")]
-DepthText = Annotated[str, Field(min_length=1, max_length=1200, pattern=r"\S")]
+DepthCategory = Annotated[str, Field(min_length=1, max_length=80), AfterValidator(_require_nonblank)]
+DepthText = Annotated[str, Field(min_length=1, max_length=1200), AfterValidator(_require_nonblank)]
+DepthName = Annotated[str, Field(min_length=1, max_length=80), AfterValidator(_require_nonblank)]
+DepthTitle = Annotated[str, Field(min_length=1, max_length=160), AfterValidator(_require_nonblank)]
+DepthLabel = Annotated[str, Field(min_length=1, max_length=160), AfterValidator(_require_nonblank)]
+DepthEvidenceLabel = Annotated[str, Field(min_length=1, max_length=120), AfterValidator(_require_nonblank)]
+DepthTechniqueName = Annotated[str, Field(min_length=1, max_length=160), AfterValidator(_require_nonblank)]
 DepthScore = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 DepthProgress = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
 DepthHash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -219,7 +233,7 @@ class DepthEvidence(DepthSource):
     end_offset: int | None = Field(default=None, ge=0)
     offset_unit: Literal["utf16_code_unit"] = "utf16_code_unit"
     excerpt: str = Field(default="", max_length=180)
-    label: str = Field(min_length=1, max_length=120)
+    label: DepthEvidenceLabel
 
     @model_validator(mode="after")
     def offsets(self) -> "DepthEvidence":
@@ -264,7 +278,7 @@ class DepthAnalysisItem(DepthModel):
 
 class DepthCharacter(DepthAnalysisItem):
     kind: Literal["character"] = "character"
-    name: str = Field(min_length=1, max_length=80)
+    name: DepthName
     aliases: list[DepthText] = Field(max_length=40)
     role: DepthText
     motivation: DepthText
@@ -285,7 +299,7 @@ class DepthCharacterState(DepthAnalysisItem):
 
 class DepthPlotline(DepthAnalysisItem):
     kind: Literal["plotline"] = "plotline"
-    title: str = Field(min_length=1, max_length=160)
+    title: DepthTitle
     central_question: DepthText
     stakes: DepthText
     resolution: DepthText
@@ -312,7 +326,7 @@ class DepthEvent(DepthAnalysisItem):
 
 class DepthForeshadowing(DepthAnalysisItem):
     kind: Literal["foreshadowing"] = "foreshadowing"
-    label: str = Field(min_length=1, max_length=160)
+    label: DepthLabel
     planted_detail: DepthText
     expected_payoff: DepthText
     interpretation: DepthText
@@ -357,7 +371,7 @@ class DepthReaderExperience(DepthAnalysisItem):
 
 class DepthTechnique(DepthAnalysisItem):
     kind: Literal["technique"] = "technique"
-    technique: str = Field(min_length=1, max_length=160)
+    technique: DepthTechniqueName
     observation: DepthText
     mechanism: DepthText
     effect: DepthText
