@@ -1557,6 +1557,16 @@ class IndependentWorkspaceService:
             return {"decision": decision, "task": None, "version": version}
 
         old_version_id = version.version_id
+        # The active version carries the author's pending draft while the
+        # decision is open.  Clone that current text into the new active
+        # version first; the recoverable history must then be normalized back
+        # to its last formal snapshot so a historical preview/restore cannot
+        # accidentally expose the unconfirmed draft as old manuscript text.
+        new_version = self._clone_as_active(
+            version,
+            label=f"稿本 {len(record.versions) + 1} · 全文重建",
+            source_version_id=old_version_id,
+        )
         version.status = "recoverable"
         version.recoverable_until = now + timedelta(days=RECOVERY_DAYS)
         for task in record.tasks:
@@ -1564,7 +1574,12 @@ class IndependentWorkspaceService:
                 task.status = "cancelled"
                 task.error_message = "原稿本已进入历史恢复区，原分析任务失效。"
                 task.updated_at = now
-        new_version = self._clone_as_active(version, label=f"稿本 {len(record.versions) + 1} · 全文重建", source_version_id=old_version_id)
+        for chapter in version.chapters:
+            if chapter.formal_content or chapter.last_completed_hash is not None:
+                chapter.content = chapter.formal_content
+                chapter.title = chapter.formal_title or chapter.title
+                chapter.word_count = chapter.formal_word_count
+                chapter.status = "ready" if chapter.formal_content else "drafting"
         record.versions.append(new_version)
         record.active_version_id = new_version.version_id
         record.pending_changes = None
@@ -1612,8 +1627,37 @@ class IndependentWorkspaceService:
             raise IndependentServiceError("version_already_active", "当前已经是当前稿本。", status_code=409)
         if selected.recoverable_until is not None and selected.recoverable_until <= self._now():
             raise IndependentServiceError("version_expired", "这个历史稿本已超过 30 天恢复期限，但仍保留为历史记录。", status_code=410)
-        now = self._now()
         old_active = self._active(record)
+        # A retried request for the same historical target must be a no-op
+        # while that target is still the exact source of the current version.
+        # If the author has since changed the active text or another version
+        # became current, the comparison fails and a deliberate new restore
+        # remains possible.
+        same_as_selected = [
+            (chapter.chapter_number, chapter.title, chapter.content)
+            for chapter in old_active.chapters
+        ] == [
+            (chapter.chapter_number, chapter.title, chapter.content)
+            for chapter in selected.chapters
+        ]
+        if old_active.source_version_id == selected.version_id and same_as_selected:
+            existing_task = next(
+                (
+                    task
+                    for task in record.tasks
+                    if task.kind == "restore"
+                    and task.version_id == old_active.version_id
+                    and task.status != "cancelled"
+                ),
+                None,
+            )
+            if existing_task is not None:
+                return {
+                    "task": existing_task,
+                    "version": old_active,
+                    "restored_from": selected,
+                }
+        now = self._now()
         old_active.status = "recoverable"
         old_active.recoverable_until = now + timedelta(days=RECOVERY_DAYS)
         new_version = self._clone_as_active(selected, label=f"稿本 {len(record.versions) + 1} · 从历史恢复", source_version_id=selected.version_id)
