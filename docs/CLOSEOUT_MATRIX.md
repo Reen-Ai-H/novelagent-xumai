@@ -17,10 +17,10 @@
 | 文学质量 | pending | 阶段 23B 结论为 C；功能审计通过不等于小说质量门通过。 |
 | 生产部署、支付、管理员、云同步 | out-of-scope | 本开发版不部署、不接正式支付、不提供管理员和公网云同步。 |
 | Windows 迁移与跨平台 CI | changed-and-verified | `docs/WINDOWS_MIGRATION.md` 提供 PowerShell 启动/数据迁移边界；`.github/workflows/ci.yml` 覆盖 Ubuntu/Windows、Python 3.12、Node LTS；不加载 `.env`。 |
-| GitHub 开发版交付 | changed-and-verified | `codex/stage-31-independent-deconstruction-release` 已推送，Draft PR [#1](https://github.com/Reen-Ai-H/novelagent-xumai/pull/1) 的当前 head CI 已通过；最终 `main` SHA 以本阶段 GitHub 回读为准。 |
+| GitHub 开发版交付 | changed-and-verified | `codex/stage-31-independent-deconstruction-release` 已推送，PR [#1](https://github.com/Reen-Ai-H/novelagent-xumai/pull/1) 已合并；`origin/main` 为 `8e42cb6486e6baa66afd7f463448cb39eb51dc3d`，其树与最终候选一致，Ubuntu/Windows CI 均通过。 |
 
 ## 公开发布原则
 
 公开分支只包含源码、schema、测试、权威文档、规则、无值 `.env.example` 和设计参考。真实 Key、账户、正文、模型缓存、usage 数据、审计截图报告、浏览器 profile、`.codex` 和项目外质量研究全部排除。
 
-GitHub `main` 是 V1 开发基线。阶段31候选已审计，阶段31I 通过 PR [#1](https://github.com/Reen-Ai-H/novelagent-xumai/pull/1) 作为新仓库主线集成记录；后续阶段仍必须在独立 `codex/stage-<编号>-<主题>` 分支完成提交和推送，仍待审计或质量复核的变更以 Draft PR 交接。
+GitHub `main` 是 V1 开发基线。阶段31候选已审计，阶段31I 已通过 PR [#1](https://github.com/Reen-Ai-H/novelagent-xumai/pull/1) 合并到新仓库主线；后续阶段仍必须在独立 `codex/stage-<编号>-<主题>` 分支完成提交和推送，仍待审计或质量复核的变更以 Draft PR 交接。
