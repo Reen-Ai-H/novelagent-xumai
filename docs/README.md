@@ -32,6 +32,7 @@
 | `templates/` | 任务级进度与阻塞模板 | 模板结构改变时 |
 | `goals/V1_IMPLEMENTATION.md` | 已排队的 A 版首版实现目标 | 首版范围或完成状态改变时 |
 | `goals/STAGE_32_DECONSTRUCTION_DEPTH.md` | Windows 接棒后可直接执行的阶段 32 任务书 | 阶段 32 范围、顺序或验收改变时 |
+| `goals/STAGE_33_INDEPENDENT_EXPERIENCE.md` | 阶段 33 独立创作连续写作与恢复体验合同 | 阶段 33 范围、顺序或验收改变时 |
 | `STAGE_32_CONTRACT.md` | 阶段 32 冻结的版本化 schema、证据、状态、锁与前后端接缝 | 架构合同经复核调整时 |
 
 ## 当前状态
