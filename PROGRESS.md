@@ -3,6 +3,8 @@
 ## 阶段 32：深度作品拆解（进行中，2026-09-05）
 
 - 最新里程碑：可见架构任务已完成冻结提交 `ce49277`，管理按 checkpoint → freeze 顺序接入为 `52ca221`、`1272673`。完整阅读合同并复核一致性后，管理全量实际 `180 tests / 12 failures / 0 skipped`（11.676s）：168 项既有/合同检查通过，12 项引擎黑盒验收仍缺 report。六视角 schema 冻结，不代表功能完成；下一步按同一基线创建可见 Luna/max 后端和前端任务并行。
+- 并行研发已启动：可见“阶段32 深度拆解后端引擎”使用 `codex/stage-32-backend-depth`；“阶段32 六视角前端体验”使用 `codex/stage-32-frontend-depth`。两者已核实 active，且均 fast-forward 到冻结管理基线 `de736c2`，模型/推理均为 Luna/max。后端不改前端，前端不改后端，管理验收/文档/CI不交给执行任务改写；待集成后再建独立审计。
+- 冻结后验收对齐：旧版夹具使用独立的 legacy 文档身份，避免借用新引擎排队 ID；补首读 `rebuild_required`/可升级、旧证据历史只读以及响应不含内部 CAS/去重字段断言。升级单测实跑 1 failure / 0 skipped（0.065s），旧引擎仍误报 completed，确认下一步由后端修复；diff 检查通过。
 
 - 管理分支：`codex/stage-32-deconstruction-depth`，从最新 `origin/main=223b414` 建立隔离工作区；原 main 工作区的测试改动、启动脚本和本地数据全部保留。
 - 已执行：`git fetch origin main`、`git merge --ff-only origin/main`、`git rev-list --left-right --count HEAD...origin/main`，主线一致（0/0）；完整读取规则、路线、任务书、进度与阻塞。
