@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -110,27 +111,59 @@ class Stage15ConfigAndRuntimeTest(unittest.TestCase):
         script = """
 from core.config import DOTENV_PATH, settings
 from urllib.parse import urlparse
-print({
+import json
+import os
+print(json.dumps({
     'env_file_exists': DOTENV_PATH.is_file(),
-    'dotenv_loaded': bool(settings.effective_api_key) and DOTENV_PATH.is_file(),
+    'dotenv_loaded': settings.effective_api_key == 'isolated-dotenv-test-secret',
+    'environment_key_absent': not os.environ.get('OPENAI_API_KEY') and not os.environ.get('DASHSCOPE_API_KEY'),
+    'root_resolved': DOTENV_PATH.parent.name == 'fixture-project',
     'key_configured': bool(settings.effective_api_key),
     'key_source_name': 'OPENAI_API_KEY' if settings.openai_api_key else 'DASHSCOPE_API_KEY' if settings.dashscope_api_key else '',
     'base_url_host': urlparse(settings.effective_base_url or '').hostname or '',
     'model': settings.effective_model,
-})
+}))
 """
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=tempfile.gettempdir(),
-            env={**os.environ, "PYTHONPATH": str(root)},
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        self.assertIn("'env_file_exists': True", result.stdout)
-        self.assertIn("'dotenv_loaded': True", result.stdout)
+        # Execute the unchanged production module in an isolated project layout.
+        # Never read or modify the developer's .env, and never substitute an env
+        # key for the dotenv source this test is supposed to exercise.
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "fixture-project"
+            (fixture / "core").mkdir(parents=True)
+            shutil.copy2(root / "core" / "config.py", fixture / "core" / "config.py")
+            (fixture / "core" / "__init__.py").touch()
+            (fixture / ".env").write_text(
+                "OPENAI_API_KEY=isolated-dotenv-test-secret\n"
+                "OPENAI_BASE_URL=https://dotenv.example.test/v1\n"
+                "LLM_MODEL=isolated-dotenv-model\n",
+                encoding="utf-8",
+            )
+            outside = Path(temporary) / "unrelated-cwd"
+            outside.mkdir()
+            (outside / ".env").write_text("OPENAI_API_KEY=wrong-cwd-secret\n", encoding="utf-8")
+            environment = {
+                key: value for key, value in os.environ.items()
+                if not key.upper().startswith(("OPENAI_", "DASHSCOPE_", "LLM_", "PYTHONPATH"))
+            }
+            environment["PYTHONPATH"] = str(fixture)
+            result = subprocess.run(
+                [sys.executable, "-c", script], cwd=outside, env=environment,
+                capture_output=True, text=True, check=True,
+            )
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["env_file_exists"])
+        self.assertTrue(payload["dotenv_loaded"])
+        self.assertTrue(payload["environment_key_absent"])
+        self.assertTrue(payload["root_resolved"])
+        self.assertTrue(payload["key_configured"])
+        self.assertEqual(payload["key_source_name"], "OPENAI_API_KEY")
+        self.assertEqual(payload["base_url_host"], "dotenv.example.test")
+        self.assertEqual(payload["model"], "isolated-dotenv-model")
         self.assertNotIn("OPENAI_API_KEY=", result.stdout)
         self.assertNotIn("DASHSCOPE_API_KEY=", result.stdout)
+        self.assertNotIn("isolated-dotenv-test-secret", result.stdout + result.stderr)
+        self.assertNotIn("wrong-cwd-secret", result.stdout + result.stderr)
+        self.assertEqual(result.stderr, "")
 
     def test_dashscope_alias_and_openai_explicit_settings_are_safe(self) -> None:
         dash = Settings(_env_file=None, DASHSCOPE_API_KEY="fake-dashscope")
