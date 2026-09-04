@@ -151,7 +151,8 @@ class Stage32AcceptanceTest(unittest.TestCase):
             self.assertTrue(item["learning_note"].strip())
             self.assertTrue(item["evidence_ids"] or item["epistemic_status"] == "unknown")
         serialized = json.dumps(payload)
-        for forbidden_key in ("account_id", "private_memory", "raw_completion", "prompt", "content", "formal_content"):
+        for forbidden_key in ("account_id", "record_revision", "idempotency_key", "private_memory",
+                              "raw_completion", "prompt", "content", "formal_content"):
             self.assertNotIn(f'"{forbidden_key}":', serialized)
 
     def test_natural_multiline_story_yields_supported_connected_analysis(self):
@@ -229,18 +230,18 @@ class Stage32AcceptanceTest(unittest.TestCase):
         # analyzer result. Only historical fields are supplied so future report
         # or pipeline defaults cannot accidentally make this a depth result.
         old = DeconstructionDocument.model_validate({
-            "document_id": record.active_document_id,
+            "document_id": "legacy-stage31-document",
             "project_id": project_id,
             "account_id": self.account_id,
             "source_version_id": source["version_id"],
             "source_revision": source["revision"],
             "source_hash": source["hash"],
-            "idempotency_key": record.documents[0].idempotency_key,
+            "idempotency_key": "legacy-stage31-run",
             "status": "completed", "progress_percent": 100,
             "current_stage": "拆解完成", "overview": {"title": "旧版基础拆解", "chapter_count": 3},
             "evidence": [{
                 "evidence_id": "legacy-stage31-evidence",
-                "document_id": record.active_document_id,
+                "document_id": "legacy-stage31-document",
                 "source_version_id": source["version_id"],
                 "source_revision": source["revision"],
                 "source_hash": source["hash"],
@@ -254,7 +255,11 @@ class Stage32AcceptanceTest(unittest.TestCase):
         old_snapshot = old.model_dump(mode="json")
         # Exercise real loading, explicit rebuild and worker execution against
         # unchanged manuscript hashes. Legacy overview reuse must not dead-end.
-        self.assertEqual(self.client.get(endpoint).status_code, 200)
+        upgrade = self.client.get(endpoint)
+        self.assertEqual(upgrade.status_code, 200)
+        self.assertEqual(upgrade.json()["effective_status"], "rebuild_required")
+        self.assertIsNone(upgrade.json()["result"])
+        self.assertTrue(upgrade.json()["actions"]["rebuild"])
         self.assertEqual(self.client.post(endpoint + "/rebuild").status_code, 200)
         _, payload, _ = self.analyze_project(project_id)
         self.assertNotEqual(payload["result"]["document_id"], old.document_id)
@@ -264,6 +269,8 @@ class Stage32AcceptanceTest(unittest.TestCase):
         self.assertIn(old.document_id, [item["document_id"] for item in payload["history"]])
         ref = self.client.get(endpoint + "/evidence/legacy-stage31-evidence")
         self.assertEqual(ref.status_code, 200)
+        self.assertTrue(ref.json()["historical"])
+        self.assertFalse(ref.json()["source_matches_current"])
         self.assertTrue(ref.json()["chapter"]["read_only"])
         self.assertEqual(ref.json()["evidence"]["excerpt"], "林舟")
 
