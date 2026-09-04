@@ -372,9 +372,9 @@ class DepthAnalysisEngine:
     )
     _scope_predicate_pattern = re.compile(
         r"交给|递给|给了|转交|交予|帮助|合作|守住|保护|打开|找到|解释|公开|"
-        r"进入|离开|寻找|收到|遇见|拿出|决定|追赶|阻止|阻拦|制止|避免|防止|"
+        r"进入|离开|寻找|收到|遇见|拿出|拿|带|用|决定|追赶|阻止|阻拦|制止|避免|防止|"
         r"等待|发现|解决|兑现|回答|回应|说明|记录|带走|抛给|拖动|推开|拿起|放回|"
-        r"留下|提到|说|答应|回收|揭示|揭开|确认|得到|获得|完成|实现|达成"
+        r"留下|提到|说|答应|赶来|一起|保护|守住|回收|揭示|揭开|确认|得到|获得|完成|实现|达成"
     )
     _negative_event_pattern = re.compile(
         r"拒绝|拒不|不肯|不愿|反对|失败|落空|未能|没能|未果|落败|无效"
@@ -422,11 +422,41 @@ class DepthAnalysisEngine:
                 )
             )
         ]
-        # Bare 不 is only a negator when it is immediately adjacent to the
-        # predicate.  This avoids treating lexical words such as 不久、不但、
-        # 无意间 and 无论 as clause-level negation.
-        if prefix.endswith("不"):
-            negation_positions.append(len(prefix) - 1)
+        # Count a bare 不 when it is adjacent to the target or introduces a
+        # 把/将 object.  The latter keeps scope-level double negation intact
+        # in forms such as “不可能不把钥匙交给” and “不得不把钥匙交给”.
+        # Lexical prefixes such as 不久、不但、无意间 and 无论 do not satisfy
+        # this shape, so they remain affirmative controls.  Consecutive bare
+        # 不 characters are counted individually, which preserves triple
+        # negation instead of collapsing it to a double negation.
+        covered_negations = [
+            (match.start(), match.end())
+            for match in cls._negation_pattern.finditer(prefix)
+        ]
+        for position, character in enumerate(prefix):
+            if character != "不" or any(
+                start <= position < end for start, end in covered_negations
+            ):
+                continue
+            next_position = position + 1
+            if (
+                next_position == len(prefix)
+                or prefix[next_position] in {"把", "将"}
+                or cls._scope_predicate_pattern.match(prefix, next_position)
+            ):
+                negation_positions.append(position)
+                continue
+            if prefix[next_position] != "不":
+                continue
+            run_end = next_position
+            while run_end < len(prefix) and prefix[run_end] == "不":
+                run_end += 1
+            if (
+                run_end == len(prefix)
+                or prefix[run_end] in {"把", "将"}
+                or cls._scope_predicate_pattern.match(prefix, run_end)
+            ):
+                negation_positions.append(position)
         if not negation_positions:
             return False
         predicates = list(cls._scope_predicate_pattern.finditer(prefix))
