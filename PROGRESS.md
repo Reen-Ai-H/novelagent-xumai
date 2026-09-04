@@ -1,5 +1,15 @@
 # 当前任务进度
 
+## 阶段 31J：Windows 零上下文接棒任务书（2026-09-05）
+
+- 目标：补齐 GitHub 中缺失的下一阶段正式任务书与长期研发顺序，让 Windows 新管理任务不依赖 Mac 聊天记录即可继续。
+- 基线：远端 `main=e55ee722bc755c0f2562895e18f36e39803c8af0`；阶段 31 为 135 tests、0 failed、0 skipped，OpenAPI 58/61、旧 `/novel` 16/19，Windows/Ubuntu CI 通过。
+- 发现：现役文档只分散写有“阶段 32+”方向，没有一份同时包含具体范围、角色分工、依赖顺序、反作弊门禁和完成条件的阶段 32 任务书；长期阶段顺序也没有唯一入口。
+- 处理：新增 `docs/ROADMAP.md` 和 `docs/goals/STAGE_32_DECONSTRUCTION_DEPTH.md`，同步规则、索引、决策、规格与验收；本阶段只改知识与交接面，不进入阶段 32 研发。
+- 分支：`codex/stage-31j-windows-handoff-plan`。完成文档链接、全量基线和 GitHub PR/CI 后再记录最终 SHA 与合并结果。
+- 本地门禁：现役 Markdown 本地链接检查通过；全量 135 tests、0 failed、0 skipped；compileall、`node --check frontend/app.js`、`git diff --check` 均通过。
+- GitHub 交付：任务书提交 `820dc0e` 已推送；PR [#3](https://github.com/Reen-Ai-H/novelagent-xumai/pull/3) 已创建，Ubuntu/Windows 两组 CI 均通过。PR 合并状态以 GitHub 为准，Windows 接棒前必须从最新 `main` 拉取。
+
 ## 阶段 31I：Windows 迁移收口与 GitHub 发布（2026-09-04）
 
 - 目标：不新增产品功能，把阶段31审计候选迁移到 `Reen-Ai-H/novelagent-xumai`，补 Windows 手册与双平台 CI，发布到新仓库 `main`。

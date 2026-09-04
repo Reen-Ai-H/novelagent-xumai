@@ -24,12 +24,14 @@
 | `DECISIONS.md` | 已确认决定和延期事项 | 每次产品讨论拍板后 |
 | `ACCEPTANCE.md` | 首版可交付标准 | 版本范围或验收改变时 |
 | `AGENT_WORKFLOW.md` | 长任务如何开始、续跑和交接 | 协作方式改变时 |
+| `ROADMAP.md` | 后续阶段顺序、依赖和完成门槛 | 长期优先级或阶段顺序改变时 |
 | `USER_GUIDE.md` | 面向作者的安装、操作、备份和常见问题 | 用户流程或限制改变时 |
 | `ARCHITECTURE.md` | 当前分层、数据、事务和隐私边界 | 架构合同改变时 |
 | `DEVELOPMENT.md` | 本地开发、检查、恢复与发布边界 | 工程流程改变时 |
 | `CLOSEOUT_MATRIX.md` | 代码、运行态、文档、规则和质量事实矩阵 | 收口状态改变时 |
 | `templates/` | 任务级进度与阻塞模板 | 模板结构改变时 |
 | `goals/V1_IMPLEMENTATION.md` | 已排队的 A 版首版实现目标 | 首版范围或完成状态改变时 |
+| `goals/STAGE_32_DECONSTRUCTION_DEPTH.md` | Windows 接棒后可直接执行的阶段 32 任务书 | 阶段 32 范围、顺序或验收改变时 |
 
 ## 当前状态
 
@@ -42,6 +44,7 @@
 - A、B、C 共 21 张探索图保留；A 是现役实现基准，B/C 只作后续灵感参考。
 - Windows 迁移步骤见 `WINDOWS_MIGRATION.md`；CI 覆盖 Ubuntu/Windows、Python 3.12 和 Node LTS。
 - 后续每个阶段必须在独立 `codex/stage-<编号>-<主题>` 分支提交并推送；需复核的阶段保持 Draft PR，通过后再合并主线。
+- 下一阶段及长期顺序以 `ROADMAP.md` 为唯一入口；当前应执行 `goals/STAGE_32_DECONSTRUCTION_DEPTH.md`，不得仅凭聊天记录推断范围。
 
 ## 给新智能体的最短入口
 
