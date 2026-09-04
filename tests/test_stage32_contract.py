@@ -7,9 +7,11 @@ import unittest
 from pydantic import ValidationError
 
 from schemas.deconstruction import (
+    DECONSTRUCTION_STATUS_TRANSITIONS,
     DeconstructionDepthReport, DeconstructionDocument, DeconstructionDocumentPublic,
     DeconstructionProjectRecord, DeconstructionResponse, DeconstructionResult,
     DeconstructionEvidenceResponse, DepthSource, depth_stable_id, validate_depth_report_source,
+    is_valid_deconstruction_transition,
 )
 
 
@@ -41,9 +43,11 @@ def report_payload():
                        normalized_start=index * 50.0, normalized_end=(index + 1) * 50.0)
                   for index, (key, text) in enumerate(TEXTS.items())],
         evidence=[dict(**SOURCE, evidence_id="ev1", chapter_id="c1", chapter_number=1,
-                       granularity="span", start_offset=4, end_offset=6, excerpt="阿岚", label="交出钥匙者"),
+                       granularity="span", start_offset=4, end_offset=13,
+                       excerpt="阿岚把钥匙交给周砚", label="交出钥匙者"),
                   dict(**SOURCE, evidence_id="ev2", chapter_id="c2", chapter_number=2,
-                       granularity="span", start_offset=0, end_offset=2, excerpt="周砚", label="开门者")],
+                       granularity="span", start_offset=0, end_offset=8,
+                       excerpt="周砚用钥匙打开门", label="开门者")],
         characters=view(
             characters=[claim(key, "character", name=name, aliases=[], role="行动参与者",
                               motivation="借助钥匙接近旧信", inner_conflict="正文尚未明示", arc_summary="交接后选择行动")
@@ -76,8 +80,9 @@ def report_payload():
                                             curiosity=0.5, suspense=0.4, emotional_valence=None, payoff="开门兑现局部期待")]),
         technique=view(items=[claim("tech1", "technique", technique="物件衔接", observation="两章以钥匙连接",
                                      mechanism="先交出物件，再展示用途", effect="使动作之间可追踪",
-                                     learning_note="检查前章物件是否在后续承担叙事功能",
-                                     applicability="适合需要保持动作连续性的片段，不要求所有道具都回收")]),
+                                      learning_note="检查前章物件是否在后续承担叙事功能",
+                                      applicability="适合需要保持动作连续性的片段，不要求所有道具都回收",
+                                      example_evidence_ids=["ev1", "ev2"])]),
     )
     payload["rhythm"]["items"][0]["related_item_ids"] = ["event1", "reader1"]
     # State snapshots use reading position, independent of story order.
@@ -90,7 +95,8 @@ def report_payload():
 
 def document_payload(report=None):
     document = DeconstructionDocument(**SOURCE, account_id="private-account", status="completed",
-                                       idempotency_key="key32", overview={}, report=report)
+                                       idempotency_key="key32", overview={}, report=report,
+                                       analysis_contract_version="2.0" if report is not None else "1.0")
     return document.model_dump(mode="json")
 
 
@@ -99,7 +105,7 @@ def response_payload(report=None):
     public = {key: value for key, value in document.items() if key != "account_id"}
     result = {key: value for key, value in public.items() if key in DeconstructionResult.model_fields}
     run = {key: public[key] for key in ("document_id", "source_version_id", "source_revision", "source_hash",
-                                       "idempotency_key", "created_at", "updated_at")}
+                                       "analysis_contract_version", "idempotency_key", "created_at", "updated_at")}
     run["run_status"] = "completed"
     return dict(schema_version="1.0", project_id=SOURCE["project_id"], title="合同示例",
                 effective_status="completed", status="completed", run_status="completed", source_match=True,
@@ -157,7 +163,7 @@ class Stage32ContractTest(unittest.TestCase):
             if definition.get("type") == "object":
                 self.assertIs(definition.get("additionalProperties"), False, name)
         serialized = json.dumps(schema)
-        for key in ("account_id", "private_memory", "raw_completion", "prompt"):
+        for key in ("account_id", "idempotency_key", "private_memory", "raw_completion", "prompt"):
             self.assertNotIn(f'"{key}"', serialized)
         required = schema["$defs"]["DeconstructionDepthReport"]["required"]
         self.assertTrue(set(("characters", "plot", "foreshadowing", "rhythm", "reader_experience", "technique")) <= set(required))
@@ -359,6 +365,113 @@ class Stage32ContractTest(unittest.TestCase):
             report = DeconstructionDepthReport.model_validate(payload)
             validate_depth_report_source(report, source=DepthSource(**SOURCE), chapters=texts)
             self.assertEqual(len(report.chapters), count)
+
+    def test_source_gate_rejects_span_beyond_actual_utf16_length(self):
+        payload = report_payload()
+        payload["evidence"][1].update(end_offset=999, excerpt=TEXTS["c2"])
+        with self.assertRaises((ValidationError, ValueError)):
+            report = DeconstructionDepthReport.model_validate(payload)
+            validate_depth_report_source(report, source=DepthSource(**SOURCE), chapters=TEXTS)
+
+    def test_each_completed_perspective_needs_supported_depth_not_only_unknown(self):
+        primary_fields = {
+            "rhythm": "items",
+            "reader_experience": "items",
+            "technique": "items",
+        }
+        for view, field in primary_fields.items():
+            payload = report_payload()
+            primary = payload[view][field]
+            for item in primary:
+                item.update(epistemic_status="unknown", evidence_ids=[], confidence=0.0,
+                            uncertainty=["当前正文证据不足以支持该视角结论。"])
+            with self.subTest(view=view):
+                with self.assertRaises(ValidationError):
+                    DeconstructionDepthReport.model_validate(payload)
+
+    def test_technique_examples_must_be_bounded_evidence_ids(self):
+        self.assert_invalid(lambda p: p["technique"]["items"][0].update(example_evidence_ids=["missing"]))
+
+    def test_stage31_opaque_run_token_is_parse_only_and_never_serialized(self):
+        parsed = DeconstructionResponse.model_validate(response_payload())
+        serialized = parsed.model_dump_json()
+        self.assertNotIn("idempotency_key", serialized)
+        self.assertNotIn("private-account", serialized)
+        active = parsed.active_run
+        self.assertIsNotNone(active)
+        self.assertEqual(active.idempotency_key, "key32")
+        self.assertNotIn("idempotency_key", active.model_dump_json())
+
+    def test_legacy_completed_result_and_new_depth_result_can_share_source_history(self):
+        payload = report_payload()
+        depth_document_id = "depth-document"
+        payload["source"]["document_id"] = depth_document_id
+        for evidence in payload["evidence"]:
+            evidence["document_id"] = depth_document_id
+        report = DeconstructionDepthReport.model_validate(payload)
+        legacy = DeconstructionDocument(
+            document_id="legacy-document", project_id=SOURCE["project_id"], account_id="private-account",
+            source_version_id=SOURCE["source_version_id"], source_revision=SOURCE["source_revision"],
+            source_hash=SOURCE["source_hash"], status="completed", idempotency_key="legacy-key",
+            overview={}, analysis_contract_version="1.0",
+        )
+        depth = DeconstructionDocument(
+            document_id=depth_document_id, project_id=SOURCE["project_id"], account_id="private-account",
+            source_version_id=SOURCE["source_version_id"], source_revision=SOURCE["source_revision"],
+            source_hash=SOURCE["source_hash"], status="completed", idempotency_key="depth-key",
+            overview={}, report=report, analysis_contract_version="2.0",
+        )
+        record = DeconstructionProjectRecord(
+            project_id=SOURCE["project_id"], account_id="private-account",
+            active_document_id=depth_document_id, documents=[legacy, depth], record_revision=7,
+        )
+        self.assertEqual([item.analysis_contract_version for item in record.documents], ["1.0", "2.0"])
+        self.assertEqual(record.record_revision, 7)
+
+    def test_depth_report_cannot_be_attached_to_legacy_contract_document(self):
+        report = DeconstructionDepthReport.model_validate(report_payload())
+        with self.assertRaises(ValidationError):
+            DeconstructionDocument(
+                **SOURCE, account_id="private-account", status="completed", idempotency_key="key32",
+                overview={}, report=report, analysis_contract_version="1.0",
+            )
+
+    def test_canonical_transition_table_is_explicit_and_idempotent(self):
+        self.assertEqual(set(DECONSTRUCTION_STATUS_TRANSITIONS), {
+            "empty", "queued", "running", "completed", "failed_retryable", "stale", "rebuild_required",
+        })
+        for status, transitions in DECONSTRUCTION_STATUS_TRANSITIONS.items():
+            self.assertIn(status, transitions)
+            self.assertTrue(is_valid_deconstruction_transition(status, status))
+        self.assertFalse(is_valid_deconstruction_transition("completed", "running"))
+        self.assertTrue(is_valid_deconstruction_transition("failed_retryable", "queued"))
+
+    def test_event_story_order_is_separate_from_narrative_order(self):
+        payload = report_payload()
+        payload["plot"]["events"][0].update(story_order=None, uncertainty=[])
+        with self.assertRaises(ValidationError):
+            DeconstructionDepthReport.model_validate(payload)
+        payload = report_payload()
+        payload["plot"]["events"][0].update(temporal_mode="flashback", story_order=None)
+        DeconstructionDepthReport.model_validate(payload)
+
+    def test_absent_characters_and_foreshadowing_are_explicitly_unknown(self):
+        payload = report_payload()
+        payload["characters"].update(characters=[], states=[], relations=[],
+                                      uncertainty=["当前正文未提供可可靠识别的人物证据。"])
+        payload["foreshadowing"].update(threads=[], states=[], relations=[],
+                                         uncertainty=["当前正文未提供可可靠识别的伏笔证据。"])
+        for item in payload["plot"]["plotlines"]:
+            item["character_ids"] = []
+        for item in payload["plot"]["events"]:
+            item["character_ids"] = []
+        payload["plot"]["relations"] = []
+        report = DeconstructionDepthReport.model_validate(payload)
+        self.assertEqual(report.characters.characters, [])
+        self.assertEqual(report.foreshadowing.threads, [])
+        payload["characters"]["uncertainty"] = []
+        with self.assertRaises(ValidationError):
+            DeconstructionDepthReport.model_validate(payload)
 
 
 if __name__ == "__main__":

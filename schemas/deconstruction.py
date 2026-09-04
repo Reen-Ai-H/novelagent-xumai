@@ -1,4 +1,4 @@
-"""作品拆解 MVP 的持久化与 API 数据合同。
+"""作品拆解阶段 31 兼容与阶段 32 深度报告的数据合同。
 
 作品拆解是独立创作内部的一项可回溯分析，不是第三条顶层创作路径。
 本文件只描述已经通过安全校验、可公开给当前账户的结构化结论；不保存
@@ -27,6 +27,32 @@ DeconstructionStatus = Literal[
 ]
 DeconstructionEffectiveStatus = DeconstructionStatus
 DeconstructionRunStatus = Literal["none", "queued", "running", "completed", "failed_retryable"]
+
+# These are deliberately literals rather than an open-ended status string.  The
+# effective status is a projection of the source snapshot and the active run;
+# it is not a free-form worker label.
+DECONSTRUCTION_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    "empty": frozenset({"empty", "queued"}),
+    "queued": frozenset({"queued", "running", "completed", "failed_retryable", "stale", "rebuild_required"}),
+    "running": frozenset({"queued", "running", "completed", "failed_retryable", "stale", "rebuild_required"}),
+    "completed": frozenset({"completed", "stale", "rebuild_required"}),
+    "failed_retryable": frozenset({"failed_retryable", "queued", "stale", "rebuild_required"}),
+    "stale": frozenset({"stale", "queued", "rebuild_required"}),
+    "rebuild_required": frozenset({"rebuild_required", "queued", "stale"}),
+}
+
+
+def is_valid_deconstruction_transition(
+    previous: DeconstructionStatus, current: DeconstructionStatus,
+) -> bool:
+    """Return whether a persisted effective state may advance to ``current``.
+
+    ``empty`` and the source-invalid states are also derived states, so a
+    service may observe them without creating a new run.  Repeated calls are
+    idempotent and therefore remain valid self-transitions.
+    """
+
+    return current in DECONSTRUCTION_STATUS_TRANSITIONS[previous]
 
 
 def utc_now() -> datetime:
@@ -132,9 +158,11 @@ class ChapterBreakdown(BaseModel):
 
 # Stage 32 is opt-in through report, never an in-place migration of stage 31.
 DepthID = Annotated[str, Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")]
+DepthCategory = Annotated[str, Field(min_length=1, max_length=80, pattern=r"\S")]
 DepthText = Annotated[str, Field(min_length=1, max_length=1200, pattern=r"\S")]
 DepthScore = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 DepthProgress = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
+DepthHash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 DepthKind = Literal[
     "character", "character_state", "plotline", "event", "foreshadowing",
     "foreshadowing_state", "rhythm", "reader_experience", "technique", "relation",
@@ -152,7 +180,7 @@ class DepthSource(DepthModel):
     document_id: DepthID
     source_version_id: DepthID
     source_revision: int = Field(ge=0)
-    source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_hash: DepthHash
 
 
 def depth_stable_id(source: DepthSource, kind: str, anchor: str) -> str:
@@ -187,10 +215,10 @@ class DepthEvidence(DepthSource):
     chapter_id: DepthID
     chapter_number: int = Field(ge=1)
     granularity: Literal["span", "chapter"]
-    start_offset: int | None = Field(ge=0)
-    end_offset: int | None = Field(ge=0)
+    start_offset: int | None = Field(default=None, ge=0)
+    end_offset: int | None = Field(default=None, ge=0)
     offset_unit: Literal["utf16_code_unit"] = "utf16_code_unit"
-    excerpt: str = Field(max_length=180)
+    excerpt: str = Field(default="", max_length=180)
     label: str = Field(min_length=1, max_length=120)
 
     @model_validator(mode="after")
@@ -207,16 +235,16 @@ class DepthEvidence(DepthSource):
 class DepthAnalysisItem(DepthModel):
     item_id: DepthID
     kind: DepthKind
-    category: str = Field(min_length=1, max_length=80)
+    category: DepthCategory
     conclusion: DepthText
     epistemic_status: Literal["observed", "inferred", "unknown"]
-    chapter_ids: list[DepthID] = Field(min_length=1)
+    chapter_ids: list[DepthID] = Field(min_length=1, max_length=5000)
     normalized_start: DepthProgress
     normalized_end: DepthProgress
-    evidence_ids: list[DepthID]
-    related_item_ids: list[DepthID]
+    evidence_ids: list[DepthID] = Field(max_length=1000)
+    related_item_ids: list[DepthID] = Field(max_length=1000)
     confidence: DepthScore
-    uncertainty: list[DepthText]
+    uncertainty: list[DepthText] = Field(max_length=16)
 
     @model_validator(mode="after")
     def supported(self) -> "DepthAnalysisItem":
@@ -237,7 +265,7 @@ class DepthAnalysisItem(DepthModel):
 class DepthCharacter(DepthAnalysisItem):
     kind: Literal["character"] = "character"
     name: str = Field(min_length=1, max_length=80)
-    aliases: list[str] = Field(max_length=40)
+    aliases: list[DepthText] = Field(max_length=40)
     role: DepthText
     motivation: DepthText
     inner_conflict: DepthText
@@ -252,7 +280,7 @@ class DepthCharacterState(DepthAnalysisItem):
     emotion: DepthText
     agency: DepthText
     change: DepthText
-    trigger_event_ids: list[DepthID]
+    trigger_event_ids: list[DepthID] = Field(max_length=100)
 
 
 class DepthPlotline(DepthAnalysisItem):
@@ -261,19 +289,25 @@ class DepthPlotline(DepthAnalysisItem):
     central_question: DepthText
     stakes: DepthText
     resolution: DepthText
-    character_ids: list[DepthID]
+    character_ids: list[DepthID] = Field(max_length=100)
 
 
 class DepthEvent(DepthAnalysisItem):
     kind: Literal["event"] = "event"
-    plotline_ids: list[DepthID] = Field(min_length=1)
-    character_ids: list[DepthID]
+    plotline_ids: list[DepthID] = Field(min_length=1, max_length=100)
+    character_ids: list[DepthID] = Field(max_length=100)
     story_order: int | None = Field(ge=0)
     narrative_order: int = Field(ge=0)
     temporal_mode: Literal["linear", "flashback", "flashforward", "parallel", "unknown"]
     action: DepthText
     consequence: DepthText
     plotline_status: Literal["introduced", "developing", "turning", "resolved", "open", "unknown"]
+
+    @model_validator(mode="after")
+    def temporal_order(self) -> "DepthEvent":
+        if self.story_order is None and self.temporal_mode != "unknown" and not self.uncertainty:
+            raise ValueError("missing story order requires explicit uncertainty")
+        return self
 
 
 class DepthForeshadowing(DepthAnalysisItem):
@@ -289,7 +323,15 @@ class DepthForeshadowingState(DepthAnalysisItem):
     foreshadowing_id: DepthID
     status: Literal["planted", "reinforced", "paid_off", "subverted", "unresolved", "unknown"]
     payoff: DepthText
-    event_ids: list[DepthID]
+    event_ids: list[DepthID] = Field(max_length=100)
+
+    @model_validator(mode="after")
+    def state_evidence(self) -> "DepthForeshadowingState":
+        if self.status == "unknown" and self.epistemic_status != "unknown":
+            raise ValueError("unknown foreshadowing state requires unknown epistemic status")
+        if self.status != "unknown" and not self.event_ids:
+            raise ValueError("known foreshadowing state requires an event reference")
+        return self
 
 
 class DepthRhythm(DepthAnalysisItem):
@@ -321,6 +363,9 @@ class DepthTechnique(DepthAnalysisItem):
     effect: DepthText
     learning_note: DepthText
     applicability: DepthText
+    # Examples are references to bounded DepthEvidence excerpts.  Keeping the
+    # IDs instead of another free-text copy prevents a second path for正文泄漏.
+    example_evidence_ids: list[DepthID] = Field(min_length=1, max_length=8)
 
 
 class DepthEndpoint(DepthModel):
@@ -352,44 +397,44 @@ DEPTH_RELATION_ENDPOINTS = {
 
 class DepthView(DepthModel):
     summary: DepthText
-    uncertainty: list[DepthText]
+    uncertainty: list[DepthText] = Field(max_length=20)
 
 
 class DepthCharactersView(DepthView):
-    characters: list[DepthCharacter]
-    states: list[DepthCharacterState]
-    relations: list[DepthRelation]
+    characters: list[DepthCharacter] = Field(default_factory=list, max_length=500)
+    states: list[DepthCharacterState] = Field(default_factory=list, max_length=5000)
+    relations: list[DepthRelation] = Field(default_factory=list, max_length=5000)
 
 
 class DepthPlotView(DepthView):
-    plotlines: list[DepthPlotline]
-    events: list[DepthEvent]
-    relations: list[DepthRelation]
+    plotlines: list[DepthPlotline] = Field(default_factory=list, max_length=500)
+    events: list[DepthEvent] = Field(default_factory=list, max_length=10000)
+    relations: list[DepthRelation] = Field(default_factory=list, max_length=10000)
 
 
 class DepthForeshadowingView(DepthView):
-    threads: list[DepthForeshadowing]
-    states: list[DepthForeshadowingState]
-    relations: list[DepthRelation]
+    threads: list[DepthForeshadowing] = Field(default_factory=list, max_length=2000)
+    states: list[DepthForeshadowingState] = Field(default_factory=list, max_length=10000)
+    relations: list[DepthRelation] = Field(default_factory=list, max_length=10000)
 
 
 class DepthRhythmView(DepthView):
-    items: list[DepthRhythm] = Field(min_length=1)
+    items: list[DepthRhythm] = Field(min_length=1, max_length=10000)
 
 
 class DepthReaderView(DepthView):
-    items: list[DepthReaderExperience] = Field(min_length=1)
+    items: list[DepthReaderExperience] = Field(min_length=1, max_length=10000)
 
 
 class DepthTechniqueView(DepthView):
-    items: list[DepthTechnique] = Field(min_length=1)
+    items: list[DepthTechnique] = Field(min_length=1, max_length=1000)
 
 
 class DeconstructionDepthReport(DepthModel):
     report_version: Literal["2.0"]
     source: DepthSource
-    chapters: list[DepthChapter] = Field(min_length=1)
-    evidence: list[DepthEvidence]
+    chapters: list[DepthChapter] = Field(min_length=1, max_length=5000)
+    evidence: list[DepthEvidence] = Field(min_length=1, max_length=20000)
     characters: DepthCharactersView
     plot: DepthPlotView
     foreshadowing: DepthForeshadowingView
@@ -467,6 +512,9 @@ class DeconstructionDepthReport(DepthModel):
             elif isinstance(item, DepthForeshadowingState):
                 references([item.foreshadowing_id], "foreshadowing")
                 references(item.event_ids, "event")
+            elif isinstance(item, DepthTechnique):
+                if any(key not in item.evidence_ids for key in item.example_evidence_ids):
+                    raise ValueError("technique examples must be evidence references")
             elif isinstance(item, DepthRelation):
                 references([item.start.item_id], item.start.kind)
                 references([item.end.item_id], item.end.kind)
@@ -486,9 +534,12 @@ class DeconstructionDepthReport(DepthModel):
             (self.foreshadowing, self.foreshadowing.threads), (self.rhythm, self.rhythm.items),
             (self.reader_experience, self.reader_experience.items), (self.technique, self.technique.items),
         )
-        for view, primary in groups:
+        for view, primary in groups[:3]:
             if not primary and not view.uncertainty:
                 raise ValueError("empty perspective requires explicit uncertainty")
+        for view, primary in groups[3:]:
+            if not primary or not any(item.epistemic_status != "unknown" for item in primary):
+                raise ValueError("completed view cannot contain only unknown placeholders")
         for parents, states, parent_field in (
             (self.characters.characters, self.characters.states, "character_id"),
             (self.foreshadowing.threads, self.foreshadowing.states, "foreshadowing_id"),
@@ -499,9 +550,6 @@ class DeconstructionDepthReport(DepthModel):
         represented_lines = {key for event in self.plot.events for key in event.plotline_ids}
         if any(line.item_id not in represented_lines for line in self.plot.plotlines):
             raise ValueError("each plotline requires at least one event")
-        for view in (self.rhythm, self.reader_experience, self.technique):
-            if not any(item.epistemic_status != "unknown" for item in view.items):
-                raise ValueError("a completed view cannot contain only unknown placeholders")
         for relations, allowed in (
             (self.characters.relations, {"allies", "opposes", "depends_on", "changes_to"}),
             (self.plot.relations, {"causes", "enables", "prevents", "precedes", "parallel_to", "intersects"}),
@@ -543,7 +591,12 @@ def validate_depth_report_source(
     report = DeconstructionDepthReport.model_validate(report.model_dump())
     if report.source != source or set(chapters) != {c.chapter_id for c in report.chapters}:
         raise ValueError("report source snapshot mismatch")
-    encoded = {key: text.encode("utf-16-le") for key, text in chapters.items()}
+    if any(not isinstance(key, str) or not isinstance(text, str) for key, text in chapters.items()):
+        raise ValueError("source chapters must map string IDs to string content")
+    try:
+        encoded = {key: text.encode("utf-16-le") for key, text in chapters.items()}
+    except UnicodeEncodeError:
+        raise ValueError("source contains an unpaired UTF-16 surrogate") from None
     for chapter in report.chapters:
         if len(encoded[chapter.chapter_id]) // 2 != chapter.utf16_length:
             raise ValueError("chapter UTF-16 length mismatch")
@@ -551,6 +604,10 @@ def validate_depth_report_source(
         if ref.granularity == "chapter":
             continue
         raw = encoded[ref.chapter_id]
+        assert ref.start_offset is not None and ref.end_offset is not None
+        utf16_length = len(raw) // 2
+        if ref.start_offset > utf16_length or ref.end_offset > utf16_length:
+            raise ValueError("evidence offset outside chapter")
         start, end = ref.start_offset * 2, ref.end_offset * 2
         try:
             # Decoding all three parts rejects a cut through either surrogate pair.
@@ -575,6 +632,22 @@ def _validate_report_binding(container) -> None:
         raise ValueError("only a completed document may publish a report")
 
 
+def _remove_internal_public_fields(schema: dict[str, object]) -> None:
+    """Keep migration inputs parseable while removing internal fields from JSON schema.
+
+    The stage 31 service still constructs a run/document with its opaque
+    idempotency key.  The stage 32 public projection may accept that legacy
+    input while serializing and documenting no such coordination token.
+    """
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        properties.pop("idempotency_key", None)
+    required = schema.get("required")
+    if isinstance(required, list):
+        schema["required"] = [item for item in required if item != "idempotency_key"]
+
+
 class DeconstructionDocument(BaseModel):
     """一次绑定到稿本来源的拆解运行和完成结果。"""
 
@@ -591,6 +664,10 @@ class DeconstructionDocument(BaseModel):
     current_stage: str = Field(default="等待拆解", max_length=120)
     idempotency_key: str
     retry_count: int = Field(default=0, ge=0)
+    # 1.0 is the stage 31 compatibility run; 2.0 is the six-perspective
+    # report contract.  A source snapshot may have one document per version so
+    # an upgrade never mutates the old history in place.
+    analysis_contract_version: Literal["1.0", "2.0"] = "1.0"
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview | None = None
     report: DeconstructionDepthReport | None = None
@@ -606,6 +683,10 @@ class DeconstructionDocument(BaseModel):
     @model_validator(mode="after")
     def validate_report(self) -> "DeconstructionDocument":
         _validate_report_binding(self)
+        if self.report is not None and self.analysis_contract_version != "2.0":
+            raise ValueError("depth report requires analysis contract 2.0")
+        if self.analysis_contract_version == "2.0" and self.status == "completed" and self.report is None:
+            raise ValueError("completed depth document requires a depth report")
         return self
 
 
@@ -616,9 +697,29 @@ class DeconstructionProjectRecord(BaseModel):
 
     project_id: str
     account_id: str
+    # Internal CAS version.  It is never part of the browser projection and
+    # defaults to zero so stage 31 sidecars remain readable without migration.
+    record_revision: int = Field(default=0, ge=0)
     active_document_id: str | None = None
     documents: list[DeconstructionDocument] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_documents(self) -> "DeconstructionProjectRecord":
+        document_ids = [item.document_id for item in self.documents]
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("duplicate deconstruction document id")
+        if any(item.project_id != self.project_id or item.account_id != self.account_id for item in self.documents):
+            raise ValueError("document does not match enclosing project")
+        if self.active_document_id is not None and self.active_document_id not in set(document_ids):
+            raise ValueError("active document does not belong to project")
+        source_keys = [
+            (item.source_version_id, item.source_revision, item.source_hash, item.analysis_contract_version)
+            for item in self.documents
+        ]
+        if len(source_keys) != len(set(source_keys)):
+            raise ValueError("duplicate deconstruction source and contract")
+        return self
 
 
 class DeconstructionActions(BaseModel):
@@ -655,15 +756,18 @@ class DeconstructionError(BaseModel):
 
 
 class DeconstructionActiveRun(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_extra=_remove_internal_public_fields)
 
     document_id: str
     run_status: DeconstructionRunStatus
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
+    analysis_contract_version: Literal["1.0", "2.0"] = "1.0"
     retry_count: int = Field(default=0, ge=0)
-    idempotency_key: str
+    # Accepted only so the stage 31 in-memory constructor can be parsed; it is
+    # excluded from every serialization and from the public JSON schema.
+    idempotency_key: str | None = Field(default=None, exclude=True)
     analysis_label: str = "确定性结构拆解（无模型）"
     created_at: datetime
     updated_at: datetime
@@ -671,19 +775,22 @@ class DeconstructionActiveRun(BaseModel):
 
 
 class DeconstructionDocumentPublic(BaseModel):
-    """阶段 31A 兼容投影；不含内部 account_id。"""
+    """阶段 31A 兼容公开投影；不含账户归属字段。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_extra=_remove_internal_public_fields)
 
     document_id: str
     project_id: str
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
+    analysis_contract_version: Literal["1.0", "2.0"] = "1.0"
     status: DeconstructionStatus
     progress_percent: int = Field(default=0, ge=0, le=100)
     current_stage: str = Field(default="等待拆解", max_length=120)
-    idempotency_key: str
+    # Stage 31 accepted this opaque input, but a public projection never
+    # serializes or advertises it.
+    idempotency_key: str | None = Field(default=None, exclude=True)
     retry_count: int = Field(default=0, ge=0)
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview | None = None
@@ -700,6 +807,10 @@ class DeconstructionDocumentPublic(BaseModel):
     @model_validator(mode="after")
     def validate_report(self) -> "DeconstructionDocumentPublic":
         _validate_report_binding(self)
+        if self.report is not None and self.analysis_contract_version != "2.0":
+            raise ValueError("depth report requires analysis contract 2.0")
+        if self.analysis_contract_version == "2.0" and self.status == "completed" and self.report is None:
+            raise ValueError("completed depth document requires a depth report")
         return self
 
 
@@ -713,6 +824,7 @@ class DeconstructionResult(BaseModel):
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
+    analysis_contract_version: Literal["1.0", "2.0"] = "1.0"
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview
     report: DeconstructionDepthReport | None = None
@@ -724,6 +836,10 @@ class DeconstructionResult(BaseModel):
     @model_validator(mode="after")
     def validate_report(self) -> "DeconstructionResult":
         _validate_report_binding(self)
+        if self.report is not None and self.analysis_contract_version != "2.0":
+            raise ValueError("depth report requires analysis contract 2.0")
+        if self.analysis_contract_version == "2.0" and self.report is None:
+            raise ValueError("2.0 result requires a depth report")
         return self
 
 
@@ -735,6 +851,7 @@ class DeconstructionHistoryItem(BaseModel):
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
+    analysis_contract_version: Literal["1.0", "2.0"] = "1.0"
     retry_count: int = Field(default=0, ge=0)
     analysis_label: str = "确定性结构拆解（无模型）"
     created_at: datetime
@@ -821,15 +938,32 @@ class DeconstructionResponse(BaseModel):
             or self.source_match != self.source.match
         ):
             raise ValueError("兼容来源字段必须与 source 一致")
+        active_statuses = {"queued", "running", "completed", "failed_retryable"}
+        if self.effective_status in active_statuses and self.run_status != self.effective_status:
+            raise ValueError("运行态必须与 active effective status 一致")
+        if self.active_run is None and self.run_status != "none":
+            raise ValueError("非 none 的 run_status 必须有 active_run")
+        if self.active_run is not None and self.effective_status in active_statuses and self.source_match:
+            if (
+                self.active_run.source_version_id != self.source.version_id
+                or self.active_run.source_revision != self.source.revision
+                or self.active_run.source_hash != self.source.hash
+            ):
+                raise ValueError("当前运行必须绑定 canonical source")
         if self.effective_status != "completed" and self.result is not None:
             raise ValueError("非 completed 状态不得返回正式 result")
         if self.result is not None and (not self.source_match or self.run_status != "completed"):
             raise ValueError("result 必须绑定当前来源且运行已完成")
+        if self.result is not None and self.result.analysis_contract_version == "2.0" and self.result.report is None:
+            raise ValueError("2.0 depth result requires a depth report")
         if self.deconstruction is not None:
             if (
                 self.deconstruction.effective_status != self.effective_status
                 or self.deconstruction.run_status != self.run_status
                 or self.deconstruction.source_match != self.source_match
+                or self.deconstruction.progress != self.progress
+                or self.deconstruction.current_stage != self.current_stage
+                or self.deconstruction.source != self.source
                 or self.deconstruction.result != self.result
             ):
                 raise ValueError("嵌套 deconstruction 必须与顶层 canonical state 一致")
@@ -837,6 +971,16 @@ class DeconstructionResponse(BaseModel):
             raise ValueError("active_run 必须与 run_status 一致")
         if self.effective_status in {"empty", "stale", "rebuild_required"} and self.document is not None:
             raise ValueError("空态或来源非当前状态不得返回当前 document")
+        if self.document is not None:
+            if self.document.status != self.effective_status:
+                raise ValueError("document status must equal canonical status")
+            if self.document.analysis_contract_version == "2.0" and self.document.report is None:
+                # A queued/running 2.0 document may not have a report yet; the
+                # projection remains useful as a progress document.  Only a
+                # completed 2.0 document is forbidden from pretending depth is
+                # complete without its report.
+                if self.effective_status == "completed":
+                    raise ValueError("completed 2.0 document requires a depth report")
         report = self.result.report if self.result is not None else None
         document_report = self.document.report if self.document is not None else None
         if document_report is not None and document_report != report:
@@ -852,6 +996,8 @@ class DeconstructionResponse(BaseModel):
             for key in ("document_id", "source_version_id", "source_revision", "source_hash"):
                 if getattr(self.active_run, key) != getattr(report.source, key):
                     raise ValueError("depth report active run mismatch")
+            if self.active_run.analysis_contract_version != "2.0" or self.result.analysis_contract_version != "2.0":
+                raise ValueError("depth report requires 2.0 active run and result")
             if self.document is not None and document_report != report:
                 raise ValueError("legacy document projection cannot drop a depth report")
         return self
