@@ -11,6 +11,7 @@ import binascii
 import difflib
 import hashlib
 import io
+import logging
 import re
 import zipfile
 from contextlib import contextmanager
@@ -31,6 +32,7 @@ from schemas.independent import (
     ChapterDocument,
     ChangeDecision,
     ChangeSummary,
+    DeconstructionOutboxItem,
     ForeshadowingItem,
     ImportChapterPreview,
     ImportPreview,
@@ -50,6 +52,7 @@ ANALYSIS_LABEL = "确定性演示分析（未配置模型 Key）"
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_PREVIEWS = 20
 RECOVERY_DAYS = 30
+logger = logging.getLogger("xumai.independent")
 
 
 class IndependentServiceError(Exception):
@@ -89,10 +92,108 @@ class IndependentWorkspaceService:
         # 公开读取必须先尊重已写入的 durable commit marker。
         self.transaction_coordinator: Any | None = None
         self._write_lock_depth = 0
+        # 由拆解路由装配；保持可选，便于旧调用方和阶段 2 测试继续独立运行。
+        self.deconstruction_service: Any | None = None
 
     @staticmethod
     def _now() -> datetime:
         return datetime.now(timezone.utc)
+
+    def _request_deconstruction(self, project_id: str, account_id: str, *, reason: str) -> None:
+        """尽力派发同文件 outbox；正文写入成功不受拆解侧车故障反向影响。"""
+
+        service = self.deconstruction_service
+        if service is None:
+            return
+        try:
+            service.reconcile_outbox(project_id, account_id, reason=reason)
+        except (OSError, ValueError, KeyError):
+            self._mark_deconstruction_event_retry(project_id, account_id, error_code="dispatch_unavailable")
+        except Exception:  # post-commit outbox dispatch must not turn a saved manuscript into HTTP 500
+            self._mark_deconstruction_event_retry(project_id, account_id, error_code="dispatch_failed")
+            logger.warning("作品拆解 outbox 暂不可派发，将由后台恢复")
+
+    @staticmethod
+    def _deconstruction_event_id(record: IndependentProjectRecord) -> str:
+        """按正式稿本内容生成稳定事件键，不把正文放进 outbox。"""
+
+        version = next(
+            (item for item in record.versions if item.version_id == record.active_version_id),
+            None,
+        )
+        parts = [record.project_id, record.active_version_id or ""]
+        if version is not None:
+            for chapter in sorted(version.chapters, key=lambda item: item.chapter_number):
+                parts.extend(
+                    [
+                        chapter.chapter_id,
+                        str(chapter.chapter_number),
+                        str(chapter.server_revision),
+                        IndependentWorkspaceService._hash_text(chapter.formal_content or chapter.content),
+                        chapter.formal_title or chapter.title,
+                    ]
+                )
+        return hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()[:24]
+
+    def _queue_deconstruction_event(self, record: IndependentProjectRecord, *, reason: str) -> str:
+        event_id = self._deconstruction_event_id(record)
+        if not any(item.event_id == event_id for item in record.deconstruction_outbox):
+            record.deconstruction_outbox.append(
+                DeconstructionOutboxItem(
+                    event_id=event_id,
+                    reason=reason,
+                    created_at=self._now(),
+                )
+            )
+            record.deconstruction_outbox = record.deconstruction_outbox[-50:]
+        return event_id
+
+    def _mark_deconstruction_event_retry(self, project_id: str, account_id: str, *, error_code: str) -> None:
+        """只更新安全 outbox 元数据；失败时保留原正文事实和待派发事件。"""
+
+        try:
+            record = self.store.load(project_id)
+            if record is None or record.account_id != account_id:
+                return
+            for item in record.deconstruction_outbox:
+                item.attempts += 1
+                item.last_error_code = error_code
+            self.store.save(record)
+        except (OSError, ValueError, TypeError):
+            return
+
+    def mark_deconstruction_event_retry(self, project_id: str, account_id: str, *, error_code: str) -> None:
+        """供拆解 worker 记录派发失败；只写安全 outbox 元数据。"""
+
+        try:
+            if self._write_lock_depth > 0:
+                self._mark_deconstruction_event_retry(project_id, account_id, error_code=error_code)
+                return
+            with self._author_write_guard(project_id, account_id):
+                self._mark_deconstruction_event_retry(project_id, account_id, error_code=error_code)
+        except (IndependentServiceError, OSError, ValueError, TypeError):
+            # 事件本身仍保留，下一轮扫描会再次尝试；元数据失败不能把正文/API
+            # 已经完成的事实转成异常响应。
+            return
+
+    def _remove_deconstruction_event(self, project_id: str, account_id: str, event_id: str) -> None:
+        record = self.store.load(project_id)
+        if record is None or record.account_id != account_id:
+            return
+        remaining = [item for item in record.deconstruction_outbox if item.event_id != event_id]
+        if len(remaining) == len(record.deconstruction_outbox):
+            return
+        record.deconstruction_outbox = remaining
+        self.store.save(record)
+
+    def ack_deconstruction_event(self, project_id: str, account_id: str, event_id: str) -> None:
+        """确认一个已进入拆解侧车的事件；不在拆解锁内反向拿作者锁。"""
+
+        if self._write_lock_depth > 0:
+            self._remove_deconstruction_event(project_id, account_id, event_id)
+            return
+        with self._author_write_guard(project_id, account_id):
+            self._remove_deconstruction_event(project_id, account_id, event_id)
 
     @staticmethod
     def _word_count(text: str) -> int:
@@ -521,7 +622,9 @@ class IndependentWorkspaceService:
         record.versions.append(version)
         preview.status = "confirmed"
         record.updated_at = now
+        self._queue_deconstruction_event(record, reason="首次导入确认")
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="首次导入确认")
         return record
 
     @_author_write_method
@@ -1091,7 +1194,9 @@ class IndependentWorkspaceService:
         version.updated_at = now
         record.updated_at = now
         self._sync_pending_changes(record, version)
+        self._queue_deconstruction_event(record, reason="完成本章")
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="完成本章")
         return task
 
     def task(self, project_id: str, account_id: str, task_id: str) -> AnalysisTask:
@@ -1417,7 +1522,9 @@ class IndependentWorkspaceService:
         record.change_history.append(f"{now.isoformat()}：根据当前全文重建档案，创建 {new_version.label}。")
         self._notify(record, "version_created", f"已创建 {new_version.label}；旧稿本保留至 {version.recoverable_until.date()}。")
         record.updated_at = now
+        self._queue_deconstruction_event(record, reason="全文重建")
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="全文重建")
         return {"decision": decision, "task": task, "version": new_version, "old_version": version}
 
     def _clone_as_active(self, source: ManuscriptVersion, *, label: str, source_version_id: str) -> ManuscriptVersion:
@@ -1472,7 +1579,9 @@ class IndependentWorkspaceService:
         record.change_history.append(f"{now.isoformat()}：从 {selected.label} 创建新的当前稿本。")
         self._notify(record, "version_created", f"已从 {selected.label} 创建新的当前稿本。")
         record.updated_at = now
+        self._queue_deconstruction_event(record, reason="恢复历史稿本")
         self.store.save(record)
+        self._request_deconstruction(project_id, account_id, reason="恢复历史稿本")
         return {"task": task, "version": new_version, "restored_from": selected}
 
     def trial_sketch(self, project_id: str, account_id: str, *, style: str, confirm: bool) -> dict[str, Any]:

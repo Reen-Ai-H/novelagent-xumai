@@ -1,5 +1,64 @@
 # 当前任务进度
 
+## 阶段 31I：Windows 迁移收口与 GitHub 发布（2026-09-04）
+
+- 目标：不新增产品功能，把阶段31审计候选迁移到 `Reen-Ai-H/novelagent-xumai`，补 Windows 手册与双平台 CI，发布到新仓库 `main`。
+- 基线：`7ff0273` 可达，135 tests、0 failed、0 skipped；OpenAPI `58/61`，旧 `/novel` `16/19`；`github-current/main=9c5aabd` 与旧 `origin/main` 文件树一致。
+- 分支：从 `github-current/main` 建立 `codex/stage-31-independent-deconstruction-release`，已按 `e0f163a → d7166d1 → d614118 → be6fde2 → cdd7d01 → d480a85 → 7ff0273` 顺序重放；最终树与 `7ff0273` 一致。
+- 计划：新增 `docs/WINDOWS_MIGRATION.md`、`.github/workflows/ci.yml`，同步 README/文档/收口矩阵和 GitHub 状态，再完成本地门禁、push、PR、CI、merge。
+- 最大风险：跨平台命令/数据迁移说明误导作者，或把 `.env`、`.novel_*`、审计现场带入公开仓库；只使用无值模板和受控文件清单。
+- 发布记录：`codex/stage-31-independent-deconstruction-release` 已推送，当前候选提交为 `8add855`；Draft PR [#1](https://github.com/Reen-Ai-H/novelagent-xumai/pull/1) 已建立，当前 head 的 Ubuntu/Windows CI 均通过。
+- 当前状态：PR #1 作为 `main` 集成记录；最终主线 SHA 以本轮 GitHub 回读为准。不创建 Release/Tag，不清理旧 worktree、分支和本地数据。
+
+## 阶段 31G：审计 P2 定点收口（2026-09-04）
+
+- 目标：只修时间线首尾归一化和证据接口 `chapter` 严格公开 schema，不改 `frontend/**`、后端其他合同或用户数据。
+- 顺序：先用前导空白/空白段/emoji/多章与 OpenAPI schema 红测复现，再做最小服务层与 Pydantic 修复，最后全量回归并提交单一 commit。
+- 基线：当前候选 HEAD `d480a85`，133 tests、0 failed、0 skipped；OpenAPI `58/61`，旧 `/novel` `16/19`。
+- 最大风险：归一化若直接 `strip` 会改变 UTF-16 evidence/hash/offset；schema 收紧若改写历史 payload 会破坏只读兼容。
+- 红测：前导空白样本首节点为 `4.82`；证据回链 `chapter` 经模型校验仍为 `dict`。
+- 修复：仅对 timeline 展示坐标做有效正文跨度归一化；新增严格 `DeconstructionEvidenceChapter`，历史/当前回链均保留原有只读字段语义。
+- 结果：阶段 31G 专项 2/2、阶段 31 相关回归 26/26、全量 135/135，均 0 failed / 0 skipped；compileall、`node --check`、`git diff --check` 通过；OpenAPI `58/61`、旧 `/novel` `16/19`。
+- 本阶段不改 `frontend/**`、`.env` 或 `.novel_*`，不调用模型；候选提交完成后等待固定审计复验，不自行宣布通过。
+
+## 阶段 31E：作品拆解前后端总集成与候选冻结（2026-09-04）
+
+- 目标：在阶段 31B 后按 `8028865` → `341bad8` 顺序整合真实作品拆解前端，不新增阶段 32 功能。
+- 实际落地：前端提交分别为 `d614118`、`be6fde2`；页面使用 `/independent/{project_id}?view=deconstruction` 和 canonical `effective_status/run_status/source_match` 合同。
+- 基线：整合前 124 tests；整合后当前候选 133 tests，0 failed / 0 skipped；OpenAPI 当前 `58 paths / 61 operations`，旧 `/novel` `16 paths / 19 operations`。
+- API 实测：隔离 TestClient 已验证 `empty`、`queued`、`running`、`completed`、`failed_retryable`、`stale`、`rebuild_required`，匿名 401、跨账户 404，结果含概览/时间线/章节拆解/证据。
+- 浏览器实测：本地 8021 真实服务完成新建独立作品、空白正文、自动保存、完成章节、拆解、刷新深链；完成、空态、排队、失败、过期和待确认页面均已留证。
+- 证据：阶段31E真实截图保留在本机临时证据目录、未纳入 Git；Chrome 实际 CSS 视口曾为 1710×887，当前重登验证为 1710×831，原生截图为 2x；未将其冒充 1440/1024 目标尺寸。
+- 文档：已同步 `README.md`、`docs/README.md`、`docs/USER_GUIDE.md`、`docs/ARCHITECTURE.md`、`docs/DEVELOPMENT.md`、`docs/CLOSEOUT_MATRIX.md`。
+- 安全边界：未读取/修改 `.env`，未迁移/删除/提交 `.novel_*`；前端无 localStorage/sessionStorage，不返回侧车账户字段或正文副本。
+- 最终门禁：阶段 31 专项 26/26、全量 133/133，均 0 failed / 0 skipped；compileall、`node --check`、`git diff --check`、Markdown 本地链接检查均通过；OpenAPI `58/61`、旧 `/novel` `16/19`。
+- 本地候选已收口为当前分支 HEAD（不推送、不建 PR）；不自行宣布独立审计通过，不进入阶段 32。
+
+## 阶段 31B：作品拆解后端架构审查 P1 收敛（2026-09-04）
+
+- 目标：不改 `frontend/**`，收敛锁顺序、拆解 outbox/reconcile、失败持久化、来源证据和四个公开 API 合同。
+- 顺序：先复现基线与已有回归 → 修派发/worker/锁边界 → 修 evidence 与 canonical response → 同步权威文档 → 全量回归。
+- 最大风险：正文保存、拆解侧车和后台恢复若顺序不清，会造成正文成功但拆解 500、任务卡死或结果错误绑定当前稿本。
+- 基线复核：阶段 31A 6 项通过；当前阶段新增 11 项，合计 `124 tests / 0 failed / 0 skipped`。
+- 已完成：来源读取移出拆解锁；正文侧车保存 durable outbox；失败派发可重试；worker/读取可恢复；异常进入 `failed_retryable`；证据和公开状态合同已收紧。
+- 已同步：`docs/DECISIONS.md`、`docs/PRODUCT_SPEC.md`、`docs/UX_FLOWS.md`、`docs/ACCEPTANCE.md`、`docs/ARCHITECTURE.md`。
+- 本阶段不改前端、不调用模型、不改 `.env` 或 `.novel_*`；compileall、OpenAPI/旧路由、node 检查和 diff 检查均已通过。
+- 阶段提交：`ab4e056`（`Converge independent deconstruction architecture`）；不推送、不建 PR，等待管理任务与前端任务集成/复核。
+
+## 阶段 31：独立创作中的作品拆解 MVP 后端（2026-09-04）
+
+- 范围：仅负责拆解 schema、侧车 store/service、API、服务端 worker、后端测试和必要架构文档；前端由独立任务负责，本阶段不修改 `frontend/**`，不做总集成。
+- 分支：`codex/stage-31-independent-deconstruction`；起点为阶段 30 现役基线；既有未提交用户反馈 `docs/DECISIONS.md` 保留。
+- 目标：导入确认/完成本章自动排队，后台离页/重启恢复，概览、0–100% 时间线、章节拆解、evidence 回链、空态/失败/重建和账户隔离可由服务端验证。
+- 顺序：决策与合同 → 独立侧车数据模型 → 确定性拆解服务 → 路由/worker 接线 → 红绿测试 → 全量回归与 TestClient 证据 → 后端提交。
+- 最大风险：跨稿本正文来源变化可能让拆解覆盖作者内容；采用 source version/revision/hash 门禁，旧结果保留、当前返回 `stale`/`rebuild_required`，不回写既有正文数据。
+- 开工基线：`107 tests / 0 failed / 0 skipped`；OpenAPI 与旧 `/novel` 数字待本阶段结束复核；初始 `git status` 为本分支 + 既有 `docs/DECISIONS.md` 修改，无未跟踪文件。
+- 已完成：新增 `schemas/deconstruction.py`、`app/core/deconstruction_store.py`、`app/core/deconstruction_service.py`、`app/deconstruction_routes.py`；接入独立服务 hooks、FastAPI 生命周期 worker、`.gitignore`。
+- 当前后端合同：`GET /api/independent/projects/{project_id}/deconstruction` 单次读取；另有 rebuild、retry 和 evidence 回链接口；状态 `empty/queued/running/completed/failed_retryable/stale/rebuild_required`；结果含来源版本/revision/hash、概览、timeline、chapter_breakdowns、evidence、history、initialized 和 actions。
+- 当前验证（31A 基线记录）：阶段专项 6 tests 全绿；全量 `113 tests / 0 failed / 0 skipped`；compileall、`node --check frontend/app.js`、`git diff --check` 全部通过；OpenAPI `58 paths / 61 operations`（新增拆解 4 paths / 4 operations），旧 `/novel` `16 paths / 19 operations`；受控文件秘密/运行数据清单扫描无保护路径。
+- 后端交付：commit `e585070`（`Implement independent work deconstruction MVP backend`）；工作树干净、分支相对 `origin/main` ahead 1。本阶段不做前端修改、总集成或 PR，交由管理任务与前端任务接续。
+
+
 ## 阶段 30：README 产品展示与使用说明（2026-08-13）
 
 - 目标：重写根 README，加入当前实现截图、A 版效果参考、两条使用路径、快速启动、模型配置、验证命令与边界说明。

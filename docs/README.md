@@ -33,12 +33,14 @@
 
 ## 当前状态
 
-- 文档收口日期：2026-08-12。
-- GitHub `main` 是当前 V1 开发基线：阶段 27 独立审计 P0/P1/P2/P3 均为 0；基线 107 tests、0 failed、0 skipped。
-- 当前 OpenAPI 为 54 paths / 57 operations，旧 `/novel` 为 16 paths / 19 operations；真实 DeepSeek 三章链路已验证。
+- 文档收口日期：2026-09-04；阶段 31 最终审计 P0/P1/P2/P3 均为 0，Windows 迁移与 CI 已纳入发布候选。
+- GitHub `main` 是当前 V1 开发基线；阶段31发布候选为 135 tests、0 failed、0 skipped，Windows/Ubuntu CI 已通过。
+- 当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations；真实 DeepSeek 三章链路已验证。
+- 独立作品拆解已接入真实前端工作区：支持七种 canonical 状态、服务端后台恢复、来源证据回链和账户隔离；阶段31最终候选为 135 tests、0 failed、0 skipped。
 - 项目外离线质量门 Q2 已验证：36 例脱敏黄金集、宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过、外部请求/Token/费用为 0。真实生成质量增益、产品集成和 Q3 仍 pending。
 - 文学质量阶段 23B 为 C；本开发版未部署生产，也不提供正式支付、管理员或云同步。
 - A、B、C 共 21 张探索图保留；A 是现役实现基准，B/C 只作后续灵感参考。
+- Windows 迁移步骤见 `WINDOWS_MIGRATION.md`；CI 覆盖 Ubuntu/Windows、Python 3.12 和 Node LTS。
 - 后续每个阶段必须在独立 `codex/stage-<编号>-<主题>` 分支提交并推送；需复核的阶段保持 Draft PR，通过后再合并主线。
 
 ## 给新智能体的最短入口

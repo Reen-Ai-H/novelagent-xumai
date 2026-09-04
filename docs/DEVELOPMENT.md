@@ -9,6 +9,8 @@ cp .env.example .env
 .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
+Windows PowerShell 的等价步骤见 [`docs/WINDOWS_MIGRATION.md`](WINDOWS_MIGRATION.md)。仓库 CI 在 Ubuntu 和 Windows、Python 3.12、Node LTS 上运行完整 unittest、compileall 和 `node --check`；不加载 `.env`，不调用模型、图片或付费服务。
+
 服务默认只监听本机。不要把本地数据目录当成配置文件编辑，不要把 `.env` 或任何 `.novel_*` 目录加入 Git。
 
 ## 配置合同
@@ -28,7 +30,7 @@ node --check frontend/app.js
 git diff --check
 ```
 
-开发版阶段 28 收口时的基线为 107 tests、0 failed、0 skipped；OpenAPI 为 54 paths / 57 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
+阶段 28 的历史基线为 107 tests；当前阶段31发布候选为 135 tests、0 failed、0 skipped。当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
 
 ## 代码和测试约定
 
@@ -60,6 +62,14 @@ git diff --check
 - 空白导入：只在 preview/confirm 阶段返回明确错误，不创建 active version。
 - 事务卡在 projecting：重启服务让 worker/reconcile 接管；公开入口必须在有限步骤内显示旧完整状态或新完整状态。
 - 页面显示 demo/live/failed 不一致：先确认会话恢复和 `/api/ai/.../workspace` 的服务端状态，不以浏览器 storage 作为真相。
+
+## 作品拆解前端集成
+
+独立作品拆解的 canonical 入口是 `/independent/{project_id}?view=deconstruction`，API 为 `GET /api/independent/projects/{project_id}/deconstruction`，重试、重建和证据回链使用同一作品路径下的 POST/GET 合同。前端只轮询读取，后台推进由 FastAPI worker 完成。
+
+验证页面时依次检查：空正文提示、服务端排队/运行进度、完成结果、可重试失败、过期结果和待确认修改；再刷新深链确认作品标题、来源 revision/hash 与状态仍来自服务端。宽表格必须在窄屏容器内横向滚动，不得让整页横向溢出。
+
+阶段 31E 的前端集成顺序固定为 `8028865` → `341bad8`，在阶段 31B 后分别落为 `d614118`、`be6fde2`；若需要回溯，保留这两个提交的父子关系，不使用并行草稿提交。
 
 ## 发布边界
 
