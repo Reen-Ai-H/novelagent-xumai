@@ -87,6 +87,7 @@ class _EventMeta:
     narrative_order: int
     consequence: str
     status: str
+    negative: bool
     evidence_id: str = ""
 
 
@@ -223,6 +224,7 @@ class DepthAnalysisEngine:
         "答应", "赶来", "帮助", "递", "交给", "打开", "推开", "点亮", "继续",
         "沿", "记录", "抛", "拖", "离开", "回家", "解释", "公开", "不再",
         "终于", "发现", "进入", "遇见", "收到", "保护", "守住", "合作",
+        "没有", "没", "未", "并未", "拒绝", "拒不", "不肯", "不愿",
     )
     _artifact_suffixes = (
         "钥匙", "地图", "船票", "信", "门", "脚印", "真相", "秘密", "线索",
@@ -268,6 +270,7 @@ class DepthAnalysisEngine:
             "答应", "赶来", "帮助", "递", "交给", "打开", "推开", "点亮",
             "继续", "沿", "记录", "抛", "拖", "离开", "回家", "解释",
             "公开", "保护", "守住", "合作", "走", "来", "去", "想",
+            "没有", "没", "未", "并未", "拒绝", "拒不", "不肯", "不愿",
         }
         suffix_verbs = (
             "交给", "递给", "帮助", "保护", "找到", "寻找", "遇见", "看见",
@@ -354,6 +357,82 @@ class DepthAnalysisEngine:
                 values.append(value)
         return _unique(values)[:MAX_NAMES]
 
+    _negation_markers = (
+        "并没有", "没有", "未曾", "未能", "并未", "从未", "不曾", "并不", "并非",
+        "不是", "拒不", "不肯", "不愿", "不想", "不敢", "不去", "不让", "不许",
+        "不准", "不必", "不应", "不该", "不得", "不要", "不再", "无法", "无从",
+        "无力", "无须", "不能", "不会", "不太", "别", "没", "未",
+    )
+    _negation_pattern = re.compile(
+        "|".join(re.escape(item) for item in sorted(_negation_markers, key=len, reverse=True))
+    )
+    _scope_predicate_pattern = re.compile(
+        r"交给|递给|给了|转交|交予|帮助|合作|守住|保护|打开|找到|解释|公开|"
+        r"进入|离开|寻找|收到|遇见|拿出|决定|追赶|阻止|等待|发现|解决|兑现|"
+        r"回答|回应|说明|记录|带走|抛给|拖动|推开|拿起|放回"
+    )
+    _negative_event_pattern = re.compile(
+        r"拒绝|拒不|不肯|不愿|反对|失败|落空|未能|没能|未果|落败|无效"
+    )
+    _clause_boundaries = "，,；;。！？!?：:\n"
+
+    @classmethod
+    def _is_negated_at(cls, text: str, start: int) -> bool:
+        """Return whether a predicate is locally negated in its clause.
+
+        The nearest clause boundary and predicate are used as a small scope,
+        so a negated predicate does not poison a later positive action in the
+        same sentence (for example ``没有找到，后来打开``).  Double negation
+        without an intervening predicate is treated as positive.
+        """
+
+        boundary = max((text.rfind(mark, 0, start) for mark in cls._clause_boundaries), default=-1)
+        prefix = text[boundary + 1:start]
+        negation_positions = [match.start() for match in cls._negation_pattern.finditer(prefix)]
+        # Bare 不 is only a negator when it is immediately adjacent to the
+        # predicate.  This avoids treating lexical words such as 不久、不但、
+        # 无意间 and 无论 as clause-level negation.
+        if prefix.endswith("不"):
+            negation_positions.append(len(prefix) - 1)
+        if not negation_positions:
+            return False
+        predicates = list(cls._scope_predicate_pattern.finditer(prefix))
+        last_negation = max(negation_positions)
+        if predicates and predicates[-1].start() > last_negation:
+            return False
+        if not predicates and len(negation_positions) % 2 == 0:
+            return False
+        return True
+
+    @classmethod
+    def _has_positive(cls, text: str, pattern: str) -> bool:
+        """Match a marker only when its local predicate is affirmative."""
+
+        return any(
+            not cls._is_negated_at(text, match.start())
+            for match in re.finditer(pattern, text)
+        )
+
+    @classmethod
+    def _has_negated(cls, text: str, pattern: str) -> bool:
+        return any(
+            cls._is_negated_at(text, match.start())
+            for match in re.finditer(pattern, text)
+        )
+
+    @classmethod
+    def _has_refusal(cls, text: str) -> bool:
+        return any(
+            not cls._is_negated_at(text, match.start())
+            for match in re.finditer(cls._negative_event_pattern, text)
+        )
+
+    @classmethod
+    def _event_is_negative(cls, text: str) -> bool:
+        """Detect failed, refused, or explicitly negated action predicates."""
+
+        return cls._has_refusal(text) or cls._has_negated(text, cls._scope_predicate_pattern.pattern)
+
     def _chapter_progress(self, chapter: ChapterInput) -> tuple[float, float]:
         return self.intervals[chapter.chapter_id]
 
@@ -367,13 +446,12 @@ class DepthAnalysisEngine:
             round(start + (end - start) * local_end / length, 6),
         )
 
-    @staticmethod
-    def _event_mode(text: str) -> tuple[str, int | None, list[str]]:
-        if re.search(r"三年前|多年前|从前|过去|曾经|回忆|记得|那年|当时", text):
+    def _event_mode(self, text: str) -> tuple[str, int | None, list[str]]:
+        if self._has_positive(text, r"三年前|多年前|从前|过去|曾经|回忆|记得|那年|当时"):
             return "flashback", None, ["正文标记了回溯时间，但未提供完整全局故事顺序。"]
-        if re.search(r"与此同时|同时|此时|另一边|并行|一旁", text):
+        if self._has_positive(text, r"与此同时|同时|此时|另一边|并行|一旁"):
             return "parallel", None, ["正文显示并行发生，但两条行动线的全部先后关系未知。"]
-        if re.search(r"将来|未来|后来会|以后", text):
+        if self._has_positive(text, r"将来|未来|后来会|以后"):
             return "flashforward", None, ["正文提及未来时间，具体故事顺序仍需更多上下文。"]
         return "linear", 0, []
 
@@ -441,16 +519,22 @@ class DepthAnalysisEngine:
         return [(segment.start, segment.end, text)]
 
     def _event_status(self, text: str) -> str:
-        if re.search(r"终于|找到|打开|解释|答案|公开|兑现|解决|不再", text):
+        if self._has_positive(text, r"终于|找到|打开|解释|答案|公开|兑现|解决"):
             return "resolved"
-        if re.search(r"决定|却|但是|然而|危险|危机|对抗|追赶|阻止", text):
+        if self._event_is_negative(text):
+            if self._has_refusal(text) or self._has_positive(text, r"失败|落空|未能|没能|未果|落败|无效"):
+                return "turning"
+            return "open"
+        if self._has_positive(text, r"决定|却|但是|然而|危险|危机|对抗|追赶|阻止"):
             return "turning"
-        if re.search(r"想|寻找|收到|遇见|进入|拿出|交给|递给", text):
+        if self._has_positive(text, r"想|寻找|收到|遇见|进入|拿出|交给|递给"):
             return "introduced"
         return "developing"
 
     def _event_consequence(self, text: str) -> str:
-        if re.search(r"于是|因此|所以|导致|使得|决定|终于|找到|打开|解释|公开|帮助", text):
+        if self._event_is_negative(text):
+            return "正文明确写出相关动作未发生或未完成，后果方向仍需结合上下文确认。"
+        if self._has_positive(text, r"于是|因此|所以|导致|使得|决定|终于|找到|打开|解释|公开|帮助"):
             return "正文明确展示了该行动带来的下一步推进。"
         return "当前片段没有明确交代后果，后续影响仍需更多正文确认。"
 
@@ -469,11 +553,12 @@ class DepthAnalysisEngine:
                     event_id = depth_stable_id(
                         self.source,
                         "event",
-                        f"{chapter.chapter_id}:{start}:{end}:{narrative_order}",
+                        f"{chapter.chapter_id}:{start}:{end}",
                     )
                     evidence_id = self.evidence.span(chapter, start, end, "事件片段")
                     names = [name for name in self.names if name in raw]
                     terms = self._extract_terms(raw)
+                    negative = self._event_is_negative(raw)
                     if temporal_mode == "linear":
                         current_story_order: int | None = story_order
                         story_order += 1
@@ -493,6 +578,7 @@ class DepthAnalysisEngine:
                         narrative_order=narrative_order,
                         consequence=self._event_consequence(raw),
                         status=self._event_status(raw),
+                        negative=negative,
                         evidence_id=evidence_id,
                     )
                     self.events.append(event)
@@ -505,15 +591,28 @@ class DepthAnalysisEngine:
                     r"^(因为|由于)|所以|因此|于是|从而|导致|使得|让",
                     segment.clean,
                 ):
+                    events_by_id = {event.event_id: event for event in self.events}
+                    left_event = events_by_id[clause_ids[0]]
+                    right_event = events_by_id[clause_ids[1]]
                     self.causal_pairs.append(
-                        (clause_ids[0], clause_ids[1], "causes", "正文使用了明确的因果连接词。")
+                        (
+                            clause_ids[0],
+                            clause_ids[1],
+                            "causes",
+                            (
+                                "正文使用明确因果连接词关联两个事件；其中至少一个动作被否定，"
+                                "这里只保留负向因果，不推断正向推进。"
+                                if left_event.negative or right_event.negative
+                                else "正文使用了明确的因果连接词。"
+                            ),
+                        )
                     )
 
         # A concrete object transfer followed by a later use can establish an
         # enabling relation. Shared names or neighboring chapters are not
         # enough; both events must mention the same non-visual term.
         for index, earlier in enumerate(self.events):
-            if not re.search(r"交给|递给|给了|把", earlier.action):
+            if earlier.negative or not self._has_positive(earlier.action, r"交给|递给|给了|转交|交予"):
                 continue
             earlier_terms = set(earlier.terms)
             if not earlier_terms:
@@ -523,7 +622,11 @@ class DepthAnalysisEngine:
                     term for term in later.terms
                     if term in earlier_terms and term not in self._non_story_terms
                 ]
-                if shared and re.search(r"用|打开|找到|解释|拿|带", later.action):
+                if (
+                    not later.negative
+                    and shared
+                    and self._has_positive(later.action, r"用|打开|找到|解释|拿|带")
+                ):
                     self.transfer_pairs.append(
                         (earlier.event_id, later.event_id, shared[0])
                     )
@@ -619,19 +722,27 @@ class DepthAnalysisEngine:
             )
             inner_conflict = (
                 f"正文在{name}相关片段中出现了犹豫、害怕或转变信号。"
-                if any(re.search(r"害怕|犹豫|却|但是|不再", event.action) for event in related_events)
+                if any(self._has_positive(event.action, r"害怕|犹豫|却|但是|不再") for event in related_events)
                 else f"当前片段没有充分揭示{name}的内在冲突。"
             )
             role = (
                 f"{name}是正文中反复出现的行动参与者。"
-                if len(related_events) > 1
-                else f"{name}在当前正文中以行动参与者身份出现。"
+                if len(related_events) > 1 and any(not event.negative for event in related_events)
+                else (
+                    f"{name}在当前正文中以拒绝、未完成或待确认状态相关者身份出现。"
+                    if all(event.negative for event in related_events)
+                    else f"{name}在当前正文中以行动参与者身份出现。"
+                )
             )
             common = self._common(
                 item_id=character_ids[name],
                 kind="character",
                 category="人物候选",
-                conclusion=f"正文直接呈现{name}参与了至少一项行动，具体主导地位仍需更长文本确认。",
+                conclusion=(
+                    f"正文直接呈现{name}参与了至少一项行动，具体主导地位仍需更长文本确认。"
+                    if any(not event.negative for event in related_events)
+                    else f"正文直接呈现{name}涉及一项拒绝、未发生或未完成状态，具体主导地位仍需更长文本确认。"
+                ),
                 epistemic_status="inferred",
                 chapter_ids=chapter_ids,
                 evidence_ids=evidence_ids,
@@ -671,13 +782,13 @@ class DepthAnalysisEngine:
                             self.evidence.span(chapter, position, position + len(name), "人物状态")
                         ]
                 state_id = depth_stable_id(
-                    self.source, "character-state", f"{name}:{chapter_id}:{state_index}",
+                    self.source, "character-state", f"{name}:{chapter_id}",
                 )
                 event_ids = [event.event_id for event in chapter_events[:100]]
                 action = _clip(chapter_events[0].action, 110) if chapter_events else "正文没有明确行动。"
                 emotion = (
                     "片段中出现担忧、犹豫或情绪变化。"
-                    if re.search(r"害怕|犹豫|紧张|愤怒|悲伤|不再", chapter.content)
+                    if self._has_positive(chapter.content, r"害怕|犹豫|紧张|愤怒|悲伤|不再")
                     else "当前片段未明确标注情绪状态。"
                 )
                 change = (
@@ -716,9 +827,9 @@ class DepthAnalysisEngine:
             if len(event.names) < 2:
                 continue
             relation_type: str | None = None
-            if re.search(r"合作|帮助|守住|赶来|一起|保护|答应|交给|递给", event.action):
+            if self._has_positive(event.action, r"合作|帮助|守住|赶来|一起|保护|答应|交给|递给"):
                 relation_type = "allies"
-            elif re.search(r"对抗|阻止|争吵|敌对|不信|冲突", event.action):
+            elif self._has_positive(event.action, r"对抗|阻止|争吵|敌对|不信|冲突") or self._has_refusal(event.action):
                 relation_type = "opposes"
             if relation_type is None:
                 continue
@@ -778,6 +889,7 @@ class DepthAnalysisEngine:
         plotline_id = depth_stable_id(self.source, "plotline", "main-event-progression")
         event_models: list[DepthEvent] = []
         event_by_id: dict[str, DepthEvent] = {}
+        event_meta_by_id = {event.event_id: event for event in self.events}
         for index, event in enumerate(self.events):
             start, end = self._event_progress(event)
             mode_uncertainty: list[str] = []
@@ -787,11 +899,16 @@ class DepthAnalysisEngine:
                 mode_uncertainty.append("并行片段只确认同时发生，不推断两条线的因果。")
             elif event.temporal_mode == "flashforward":
                 mode_uncertainty.append("未来片段的具体世界时间仍不确定。")
+            event_conclusion = (
+                f"第{event.chapter.chapter_number}章呈现了一个明确的未发生、未完成或拒绝状态：{event.action}。"
+                if event.negative
+                else f"第{event.chapter.chapter_number}章呈现了一个可观察行动：{event.action}。"
+            )
             common = self._common(
                 item_id=event.event_id,
                 kind="event",
                 category="正文事件",
-                conclusion=f"第{event.chapter.chapter_number}章呈现了一个可观察行动：{event.action}。",
+                conclusion=event_conclusion,
                 epistemic_status="observed",
                 chapter_ids=[event.chapter.chapter_id],
                 evidence_ids=[event.evidence_id],
@@ -871,6 +988,15 @@ class DepthAnalysisEngine:
             relation_keys.add(key)
             left = event_by_id[left_id]
             right = event_by_id[right_id]
+            negative_cause = (
+                relation_type == "causes"
+                and (
+                    event_meta_by_id[left_id].negative
+                    or event_meta_by_id[right_id].negative
+                )
+            )
+            if negative_cause:
+                conclusion = "正文明确的因果连接表示前一状态未发生或未完成，并关联到后一负向状态。"
             chapter_ids = _unique([*left.chapter_ids, *right.chapter_ids])
             evidence_ids = _unique([*left.evidence_ids, *right.evidence_ids])
             start = min(left.normalized_start, right.normalized_start)
@@ -887,9 +1013,15 @@ class DepthAnalysisEngine:
                 epistemic_status="inferred" if relation_type != "precedes" else "observed",
                 chapter_ids=chapter_ids,
                 evidence_ids=evidence_ids,
-                confidence=0.78 if relation_type in {"causes", "enables"} else 0.86,
+                confidence=0.72 if negative_cause else 0.78 if relation_type in {"causes", "enables"} else 0.86,
                 uncertainty=(
-                    ["因果关系只依据明确连接词或同一具体物件的行动链推断。"]
+                    [
+                        (
+                            "这里只保留正文明确的负向因果，不据此推断正向推进或完成。"
+                            if negative_cause
+                            else "因果关系只依据明确连接词或同一具体物件的行动链推断。"
+                        )
+                    ]
                     if relation_type in {"causes", "enables"}
                     else []
                 ),
@@ -988,9 +1120,11 @@ class DepthAnalysisEngine:
             later = next((item for item in ordered[1:] if item.narrative_order > first.narrative_order), None)
             if later is None:
                 continue
-            if not re.search(r"交给|递给|提到|说|留下|记|疑问|缺|秘密|线索|约定|把", first.action):
+            if first.negative or later.negative:
                 continue
-            if not re.search(r"打开|用|解释|答案|找到|公开|兑现|回收|解决|回应|说明", later.action):
+            if not self._has_positive(first.action, r"交给|递给|提到|说|留下|记|疑问|缺|秘密|线索|约定"):
+                continue
+            if not self._has_positive(later.action, r"打开|用|解释|答案|找到|公开|兑现|回收|解决|回应|说明"):
                 continue
             # Avoid emitting separate threads for a phrase and its head noun
             # when both describe the exact same source chain.
@@ -1177,13 +1311,13 @@ class DepthAnalysisEngine:
             first = segments[0]
             evidence_id = self.evidence.span(chapter, first.start, first.end, "章节节奏片段")
             text = chapter.content
-            pace = 0.72 if len(segments) >= 3 or re.search(r"决定|追赶|打开|终于", text) else 0.48
-            tension = 0.76 if re.search(r"危险|害怕|追赶|冲突|危机|却|但是", text) else 0.38
+            pace = 0.72 if len(segments) >= 3 or self._has_positive(text, r"决定|追赶|打开|终于") else 0.48
+            tension = 0.76 if self._has_positive(text, r"危险|害怕|追赶|冲突|危机|却|但是") else 0.38
             density = min(0.95, 0.34 + len(segments) * 0.12 + (0.12 if self.names else 0.0))
             function = (
                 "开端观察" if index == 0 else
                 "收束观察" if index == len(self.chapters) - 1 else
-                "推进与转折观察" if re.search(r"决定|却|但是|终于|危机|转折", text)
+                "推进与转折观察" if self._has_positive(text, r"决定|却|但是|终于|危机|转折")
                 else "发展观察"
             )
             common = self._common(
@@ -1245,7 +1379,7 @@ class DepthAnalysisEngine:
             text = chapter.content
             expectation = (
                 "行动目标或待解决问题会推动读者继续期待结果。"
-                if re.search(r"想|寻找|疑问|秘密|决定|等待|为什么", text)
+                if self._has_positive(text, r"想|寻找|疑问|秘密|决定|等待|为什么")
                 else "当前片段主要提供场景或行动，后续期待尚不明确。"
             )
             gap = (
@@ -1255,10 +1389,10 @@ class DepthAnalysisEngine:
             )
             emotion = (
                 "危险、害怕、追赶或解决信号会改变读者的情绪预期。"
-                if re.search(r"危险|害怕|紧张|追赶|终于|答案|雨", text)
+                if self._has_positive(text, r"危险|害怕|紧张|追赶|终于|答案|雨")
                 else "情绪影响主要来自当前行动和场景细节，强度仍需上下文确认。"
             )
-            valence = 0.24 if re.search(r"终于|找到|答案|帮助|合作", text) else -0.18 if re.search(r"害怕|危险|失踪|冲突", text) else 0.0
+            valence = 0.24 if self._has_positive(text, r"终于|找到|答案|帮助|合作") else -0.18 if self._has_positive(text, r"害怕|危险|失踪|冲突") else 0.0
             common = self._common(
                 item_id=depth_stable_id(self.source, "reader", f"chapter:{chapter.chapter_id}"),
                 kind="reader_experience",
@@ -1277,12 +1411,12 @@ class DepthAnalysisEngine:
                 "expectation": expectation,
                 "information_gap": gap,
                 "emotional_effect": emotion,
-                "curiosity": float(0.74 if re.search(r"秘密|疑问|为什么|失踪|寻找", text) else 0.42),
-                "suspense": float(0.72 if re.search(r"危险|害怕|追赶|失踪", text) else 0.34),
+                "curiosity": float(0.74 if self._has_positive(text, r"秘密|疑问|为什么|失踪|寻找") else 0.42),
+                "suspense": float(0.72 if self._has_positive(text, r"危险|害怕|追赶|失踪") else 0.34),
                 "emotional_valence": float(valence),
                 "payoff": (
                     "本章出现了阶段性回应或情绪缓解。"
-                    if re.search(r"终于|找到|答案|帮助|合作", text)
+                    if self._has_positive(text, r"终于|找到|答案|帮助|合作")
                     else "当前章节的主要问题尚未显示完整回收。"
                 ),
             }))
@@ -1319,8 +1453,7 @@ class DepthAnalysisEngine:
         for label, pattern, observation, mechanism in rules:
             for chapter in self.chapters:
                 for segment in self.segments_by_chapter[chapter.chapter_id]:
-                    if re.search(pattern, segment.clean):
-                        evidence_id = self.evidence.span(chapter, segment.start, segment.end, "叙事技法例证")
+                    if self._has_positive(segment.clean, pattern):
                         candidates.append((label, observation, mechanism + f"例证来自第{chapter.chapter_number}章。"))
                         # Store the evidence on the candidate through a
                         # deterministic side lookup below.
@@ -1355,7 +1488,7 @@ class DepthAnalysisEngine:
             }
             for chapter in self.chapters:
                 for segment in self.segments_by_chapter[chapter.chapter_id]:
-                    if re.search(patterns.get(label, r"."), segment.clean):
+                    if self._has_positive(segment.clean, patterns.get(label, r".")):
                         selected_chapter, selected_segment = chapter, segment
                         break
                 if selected_chapter is not None:
