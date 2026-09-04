@@ -216,7 +216,9 @@
           <a class="spine-brand editor-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
           <nav class="spine-links editor-spine-links">
             <a class="spine-link is-active" href="#editor" data-action="show-editor"><span class="spine-icon">▤</span><strong>正文</strong></a>
+            <button class="spine-link" type="button" data-action="show-deconstruction"><span class="spine-icon">⌇</span><strong>作品拆解</strong></button>
             <button class="spine-link" type="button" data-action="show-archive"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+            <button class="spine-link" type="button" data-action="open-version-history"><span class="spine-icon">◫</span><strong>版本记录</strong></button>
           </nav>
           <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">WORK / 02</span><button id="editorLogoutButton" class="spine-logout" type="button">退出</button></div>
         </aside>
@@ -263,7 +265,9 @@
           <a class="spine-brand archive-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
           <nav class="spine-links archive-spine-links">
             <button class="spine-link" type="button" data-action="archive-open-editor"><span class="spine-icon">▤</span><strong>正文</strong></button>
+            <button class="spine-link" type="button" data-action="archive-open-deconstruction"><span class="spine-icon">⌇</span><strong>作品拆解</strong></button>
             <button class="spine-link is-active" type="button" data-action="archive-open-self"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+            <button class="spine-link" type="button" data-action="archive-open-versions"><span class="spine-icon">◫</span><strong>版本记录</strong></button>
             <button id="archiveAiLink" class="spine-link is-hidden" type="button" data-action="archive-open-ai"><span class="spine-icon">✦</span><strong>创作室</strong></button>
           </nav>
           <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">ARCH / 03</span><button id="archiveLogoutButton" class="spine-logout" type="button">退出</button></div>
@@ -275,6 +279,27 @@
           </header>
           <div id="archivePageNotice" class="notice archive-page-notice is-hidden" role="status"></div>
           <section id="archivePageContent" class="archive-page-content" aria-live="polite"></section>
+        </main>
+      </section>
+
+      <section id="deconstructionScreen" class="screen deconstruction-screen is-hidden" data-screen="deconstruction" aria-hidden="true" aria-labelledby="deconstructionPageTitle">
+        <aside class="deconstruction-spine" aria-label="作品拆解导航">
+          <a class="spine-brand deconstruction-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
+          <nav class="spine-links deconstruction-spine-links">
+            <button class="spine-link" type="button" data-action="deconstruction-open-editor"><span class="spine-icon">▤</span><strong>正文</strong></button>
+            <button class="spine-link is-active" type="button" data-action="deconstruction-open-self"><span class="spine-icon">⌇</span><strong>作品拆解</strong></button>
+            <button class="spine-link" type="button" data-action="deconstruction-open-archive"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+            <button class="spine-link" type="button" data-action="deconstruction-open-versions"><span class="spine-icon">◫</span><strong>版本记录</strong></button>
+          </nav>
+          <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">XRAY / 04</span><button id="deconstructionLogoutButton" class="spine-logout" type="button">退出</button></div>
+        </aside>
+        <main class="deconstruction-main">
+          <header class="deconstruction-header">
+            <div class="deconstruction-heading"><p class="kicker"><span class="kicker-line"></span>独立创作 / <span id="deconstructionProjectTitle">—</span></p><h1 id="deconstructionPageTitle">作品拆解</h1><p class="deconstruction-lede">把正文里的结构线索放回可回看的章节证据里。</p></div>
+            <div class="deconstruction-header-actions"><span id="deconstructionStatusPill" class="deconstruction-status-pill">等待读取</span><button id="deconstructionRefreshButton" class="button button-outline" type="button" data-action="deconstruction-refresh">刷新拆解</button></div>
+          </header>
+          <div id="deconstructionNotice" class="notice deconstruction-notice is-hidden" role="status"></div>
+          <section id="deconstructionPageContent" class="deconstruction-page-content" aria-live="polite" aria-busy="false"></section>
         </main>
       </section>
 

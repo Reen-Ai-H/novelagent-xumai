@@ -42,6 +42,11 @@
     archiveAnchorIntent: null,
     archiveAnchorUnlockTimer: null,
     archiveScrollSpyCleanup: null,
+    deconstructionProjectId: null,
+    deconstructionWorkspace: null,
+    deconstructionLoadToken: 0,
+    deconstructionPollTimer: null,
+    pendingEvidence: null,
     dialogFocus: new WeakMap(),
   };
 
@@ -53,6 +58,7 @@
     libraryScreen: $("#libraryScreen"),
     independentScreen: $("#independentScreen"),
     archiveScreen: $("#archiveScreen"),
+    deconstructionScreen: $("#deconstructionScreen"),
     aiStudioScreen: $("#aiStudioScreen"),
     aiDirectorScreen: $("#aiDirectorScreen"),
     emailForm: $("#emailLoginForm"),
@@ -118,6 +124,11 @@
     archivePageContent: $("#archivePageContent"),
     archivePageNotice: $("#archivePageNotice"),
     archiveAiLink: $("#archiveAiLink"),
+    deconstructionProjectTitle: $("#deconstructionProjectTitle"),
+    deconstructionStatusPill: $("#deconstructionStatusPill"),
+    deconstructionRefreshButton: $("#deconstructionRefreshButton"),
+    deconstructionNotice: $("#deconstructionNotice"),
+    deconstructionPageContent: $("#deconstructionPageContent"),
     aiStudioProjectTitle: $("#aiStudioProjectTitle"),
     aiStudioModelLabel: $("#aiStudioModelLabel"),
     aiStudioBlueprintState: $("#aiStudioBlueprintState"),
@@ -221,6 +232,8 @@
     if (/^\/archive\/[A-Za-z0-9_-]+$/.test(window.location.pathname)) return "archive";
     if (/^\/ai\/[A-Za-z0-9_-]+\/director$/.test(window.location.pathname)) return "aiDirector";
     if (/^\/ai\/[A-Za-z0-9_-]+$/.test(window.location.pathname)) return "aiStudio";
+    if (/^\/independent\/[A-Za-z0-9_-]+$/.test(window.location.pathname)
+      && new URLSearchParams(window.location.search).get("view") === "deconstruction") return "deconstruction";
     if (/^\/independent\/[A-Za-z0-9_-]+$/.test(window.location.pathname)) return "independent";
     return "landing";
   }
@@ -242,6 +255,10 @@
 
   function setActiveScreen(screen) {
     if (state.screen === "archive" && screen !== "archive") state.archiveScrollSpyCleanup?.();
+    if (state.screen === "deconstruction" && screen !== "deconstruction") {
+      window.clearTimeout(state.deconstructionPollTimer);
+      state.deconstructionPollTimer = null;
+    }
     state.screen = screen;
     const screens = {
       landing: elements.landingScreen,
@@ -249,6 +266,7 @@
       library: elements.libraryScreen,
       independent: elements.independentScreen,
       archive: elements.archiveScreen,
+      deconstruction: elements.deconstructionScreen,
       aiStudio: elements.aiStudioScreen,
       aiDirector: elements.aiDirectorScreen,
     };
@@ -258,15 +276,16 @@
       node.classList.toggle("is-hidden", !active);
       node.setAttribute("aria-hidden", active ? "false" : "true");
     });
-    document.body.classList.toggle("workspace-active", ["library", "independent", "archive", "aiStudio", "aiDirector"].includes(screen));
+    document.body.classList.toggle("workspace-active", ["library", "independent", "archive", "deconstruction", "aiStudio", "aiDirector"].includes(screen));
     if (screen === "login") {
       window.setTimeout(() => elements.emailInput?.focus(), 80);
     }
   }
 
   async function navigate(path, { replace = false } = {}) {
+    const sameProjectPath = path.startsWith(`/independent/${encodeURIComponent(state.editorProjectId || "")}`);
     const leavingEditor = state.screen === "independent"
-      && !path.startsWith(`/independent/${encodeURIComponent(state.editorProjectId || "")}`)
+      && (!sameProjectPath || new URL(path, window.location.origin).searchParams.get("view") === "deconstruction")
       && (state.editorDirty || state.editorSaving);
     if (leavingEditor && !(await flushPendingSave())) return false;
     const method = replace ? "replaceState" : "pushState";
@@ -291,6 +310,10 @@
       const projectId = archiveProjectIdFromLocation();
       if (state.account && projectId) loadArchiveWorkspace(projectId);
       else if (projectId) restoreSession("archive");
+    } else if (state.screen === "deconstruction") {
+      const projectId = independentProjectIdFromLocation();
+      if (state.account && projectId) loadDeconstructionWorkspace(projectId);
+      else if (projectId) restoreSession("deconstruction");
     } else if (state.screen === "aiStudio" || state.screen === "aiDirector") {
       const projectId = aiProjectIdFromLocation();
       if (state.account && projectId) loadAIWorkspace(projectId, state.screen === "aiDirector");
@@ -399,7 +422,7 @@
       return null;
     }
     if (url.origin !== window.location.origin) return null;
-    const knownPath = /^\/library(?:[?#].*)?$|^\/(?:independent|archive)\/[A-Za-z0-9_-]+(?:[?#].*)?$|^\/ai\/[A-Za-z0-9_-]+(?:\/director)?(?:[?#].*)?$/;
+    const knownPath = /^\/library(?:[?#].*)?$|^\/independent\/[A-Za-z0-9_-]+(?:\?view=deconstruction)?(?:[#].*)?$|^\/archive\/[A-Za-z0-9_-]+(?:[?#].*)?$|^\/ai\/[A-Za-z0-9_-]+(?:\/director)?(?:[?#].*)?$/;
     if (!knownPath.test(target)) return null;
     return `${url.pathname}${url.search}${url.hash}`;
   }
@@ -678,6 +701,10 @@
           setActiveScreen("archive");
           const projectId = archiveProjectIdFromLocation();
           if (projectId) await loadArchiveWorkspace(projectId);
+        } else if (preferredScreen === "deconstruction") {
+          setActiveScreen("deconstruction");
+          const projectId = independentProjectIdFromLocation();
+          if (projectId) await loadDeconstructionWorkspace(projectId);
         } else if (preferredScreen === "aiStudio" || preferredScreen === "aiDirector") {
           setActiveScreen(preferredScreen);
           const projectId = aiProjectIdFromLocation();
@@ -688,13 +715,13 @@
         return;
       }
       state.account = null;
-      if (["library", "independent", "archive", "aiStudio", "aiDirector"].includes(preferredScreen)) {
+      if (["library", "independent", "archive", "deconstruction", "aiStudio", "aiDirector"].includes(preferredScreen)) {
         navigate("/login", { replace: true });
       } else {
         setActiveScreen(preferredScreen);
       }
     } catch (error) {
-      if (["library", "independent", "archive", "aiStudio", "aiDirector"].includes(preferredScreen)) {
+      if (["library", "independent", "archive", "deconstruction", "aiStudio", "aiDirector"].includes(preferredScreen)) {
         state.sessionExpired = error.code === "session_expired";
         state.account = null;
         navigate("/login", { replace: true });
@@ -1203,6 +1230,448 @@
     return label;
   }
 
+  /*
+   * 作品拆解 API adapter
+   *
+   * 这是拆解页面唯一接触 fetch 的边界。服务端响应可以继续扩展，但页面
+   * 只消费 normalizeDeconstructionResponse() 产出的稳定视图模型。这里不
+   * 放开发 fixture，也不从正文或作品简介猜测拆解结果。
+   */
+  const deconstructionApi = Object.freeze({
+    workspace: (projectId) => `/api/independent/projects/${encodeURIComponent(projectId)}/deconstruction`,
+    action: (projectId, action) => `/api/independent/projects/${encodeURIComponent(projectId)}/deconstruction/${action}`,
+    async read(projectId) {
+      return normalizeDeconstructionResponse(await requestJson(this.workspace(projectId)));
+    },
+    async mutate(projectId, action) {
+      await requestJson(this.action(projectId, action), { method: "POST", body: "{}" });
+    },
+  });
+
+  const deconstructionStatusText = {
+    empty: "尚未拆解",
+    queued: "排队中",
+    running: "分析中",
+    completed: "已完成",
+    failed_retryable: "分析失败，可重试",
+    stale: "结果已过期",
+    rebuild_required: "需要重建",
+  };
+
+  function firstValue(...values) {
+    return values.find((value) => value !== undefined && value !== null && value !== "");
+  }
+
+  function asArray(value) {
+    if (Array.isArray(value)) return value;
+    if (value === undefined || value === null || value === "") return [];
+    return [value];
+  }
+
+  function numberOrNull(value) {
+    if (value === undefined || value === null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function percentOrNull(value) {
+    const number = numberOrNull(value);
+    if (number === null) return null;
+    return Math.max(0, Math.min(100, number));
+  }
+
+  function confidencePercentOrNull(value) {
+    const number = numberOrNull(value);
+    if (number === null) return null;
+    return Math.max(0, Math.min(100, number <= 1 ? number * 100 : number));
+  }
+
+  function normalizedConfidence(value) {
+    if (typeof value === "number") {
+      const percent = confidencePercentOrNull(value);
+      if (percent === null) return { value: null, label: "待确认" };
+      return { value: percent, label: percent >= 80 ? "高置信度" : percent >= 55 ? "中等置信度" : "低置信度" };
+    }
+    const text = String(value || "").trim().toLowerCase();
+    if (text.includes("高") || text === "high") return { value: 85, label: "高置信度" };
+    if (text.includes("中") || text === "medium" || text === "mid") return { value: 65, label: "中等置信度" };
+    if (text.includes("低") || text === "low") return { value: 30, label: "低置信度" };
+    return { value: null, label: "待确认" };
+  }
+
+  function readableValue(value, fallback = "暂无记录") {
+    if (Array.isArray(value)) {
+      const joined = value.map((item) => readableValue(item, "")).filter(Boolean).join("；");
+      return joined || fallback;
+    }
+    if (value && typeof value === "object") {
+      return String(firstValue(value.text, value.summary, value.description, value.value, value.label, fallback) || fallback);
+    }
+    const text = String(value ?? "").trim();
+    return text || fallback;
+  }
+
+  function normalizeDeconstructionStatus(value, initialized = true) {
+    const raw = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+    const aliases = {
+      ready: "completed",
+      complete: "completed",
+      done: "completed",
+      failed: "failed_retryable",
+      retryable_failed: "failed_retryable",
+      processing: "running",
+      pending: "queued",
+      rebuild: "rebuild_required",
+    };
+    if (aliases[raw]) return aliases[raw];
+    if (Object.prototype.hasOwnProperty.call(deconstructionStatusText, raw)) return raw;
+    return initialized ? "empty" : "empty";
+  }
+
+  function normalizeEvidenceRef(ref, index = 0, fallback = {}) {
+    if (typeof ref === "string") {
+      return {
+        id: ref,
+        sourceVersionId: fallback.sourceVersionId || null,
+        label: "来源证据",
+        chapterId: fallback.chapterId || null,
+        chapterNumber: numberOrNull(fallback.chapterNumber),
+        charStart: numberOrNull(fallback.charStart),
+        charEnd: numberOrNull(fallback.charEnd),
+        paragraphStart: numberOrNull(fallback.paragraphStart),
+        paragraphEnd: numberOrNull(fallback.paragraphEnd),
+        excerpt: "",
+      };
+    }
+    const value = ref || {};
+    const source = value.source || value.anchor || {};
+    return {
+      id: String(firstValue(value.evidence_id, value.ref_id, value.id, `evidence-${index + 1}`)),
+      sourceVersionId: firstValue(value.source_version_id, value.sourceVersionId, source.source_version_id, source.sourceVersionId, fallback.sourceVersionId, null),
+      label: readableValue(value.label, "来源证据"),
+      chapterId: firstValue(value.chapter_id, value.source_chapter_id, value.chapterId, source.chapter_id, source.chapterId, fallback.chapterId, null),
+      chapterNumber: numberOrNull(firstValue(value.chapter_number, value.source_chapter_number, value.chapterNumber, source.chapter_number, source.chapterNumber, fallback.chapterNumber)),
+      charStart: numberOrNull(firstValue(value.char_start, value.start_char, value.start_offset, value.charStart, source.char_start, source.start_char, source.start_offset, source.charStart, fallback.charStart)),
+      charEnd: numberOrNull(firstValue(value.char_end, value.end_char, value.end_offset, value.charEnd, source.char_end, source.end_char, source.end_offset, source.charEnd, fallback.charEnd)),
+      paragraphStart: numberOrNull(firstValue(value.paragraph_start, value.paragraphStart, source.paragraph_start, source.paragraphStart, fallback.paragraphStart)),
+      paragraphEnd: numberOrNull(firstValue(value.paragraph_end, value.paragraphEnd, source.paragraph_end, source.paragraphEnd, fallback.paragraphEnd)),
+      excerpt: readableValue(firstValue(value.excerpt, value.quote, value.snippet, value.text, source.excerpt), ""),
+    };
+  }
+
+  function normalizeEvidenceRefs(value, globalRefs = [], fallback = {}) {
+    const refs = asArray(value);
+    const byId = new Map(globalRefs.map((ref, index) => {
+      const normalized = normalizeEvidenceRef(ref, index, fallback);
+      return [normalized.id, normalized];
+    }));
+    return refs.map((ref, index) => {
+      if (typeof ref === "string" && byId.has(ref)) {
+        const definedFallback = Object.fromEntries(Object.entries(fallback).filter(([, item]) => item !== undefined && item !== null && item !== ""));
+        return { ...definedFallback, ...byId.get(ref) };
+      }
+      return normalizeEvidenceRef(ref, index, fallback);
+    });
+  }
+
+  function normalizeObservationList(value, globalRefs = []) {
+    if (value && !Array.isArray(value) && typeof value === "object") {
+      return Object.entries(value).map(([key, item]) => ({
+        label: key === "opening" ? "开端" : key === "development" ? "发展" : key === "climax" ? "高潮" : key === "ending" ? "结尾" : key,
+        text: readableValue(item),
+        confidence: normalizedConfidence(item?.confidence),
+        uncertainty: readableValue(item?.uncertainty, ""),
+        evidenceRefs: normalizeEvidenceRefs(item?.evidence_refs || item?.evidence || item?.sources, globalRefs),
+      }));
+    }
+    return asArray(value).map((item, index) => ({
+      label: readableValue(item?.label || item?.name, `阶段 ${index + 1}`),
+      text: readableValue(item?.text || item?.summary || item?.description || item),
+      confidence: normalizedConfidence(item?.confidence),
+      uncertainty: readableValue(item?.uncertainty, ""),
+      evidenceRefs: normalizeEvidenceRefs(item?.evidence_refs || item?.evidence || item?.sources, globalRefs),
+    }));
+  }
+
+  function normalizeTimelineNode(item, index, globalRefs = []) {
+    const value = item || {};
+    const chapterId = firstValue(value.chapter_id, value.source_chapter_id, value.chapter?.chapter_id, null);
+    const chapterStart = numberOrNull(firstValue(value.chapter_start, value.start_chapter, value.chapter_number, value.chapter?.number));
+    const chapterEnd = numberOrNull(firstValue(value.chapter_end, value.end_chapter, value.chapter_to, chapterStart));
+    const wordStart = numberOrNull(firstValue(value.word_start, value.start_word, value.char_start));
+    const wordEnd = numberOrNull(firstValue(value.word_end, value.end_word, value.char_end));
+    return {
+      id: String(firstValue(value.node_id, value.timeline_id, value.event_id, value.id, `timeline-${index + 1}`)),
+      normalizedStart: percentOrNull(firstValue(value.normalized_start, value.start_percent, value.start, value.progress_start)),
+      normalizedEnd: percentOrNull(firstValue(value.normalized_end, value.end_percent, value.end, value.progress_end)),
+      chapterId,
+      chapterStart,
+      chapterEnd,
+      wordStart,
+      wordEnd,
+      title: readableValue(firstValue(value.title, value.label, value.event), `结构节点 ${index + 1}`),
+      event: readableValue(firstValue(value.core_event, value.event, value.summary, value.description)),
+      narrativeFunction: readableValue(firstValue(value.narrative_function, value.function, value.role), "暂未归类"),
+      characters: asArray(firstValue(value.characters, value.character_names)).map((character) => readableValue(character)).filter(Boolean),
+      confidence: normalizedConfidence(value.confidence),
+      uncertainty: readableValue(value.uncertainty, ""),
+      evidenceRefs: normalizeEvidenceRefs(value.evidence_refs || value.evidence || value.sources || value.evidence_ref_ids, globalRefs, { chapterId, chapterNumber: chapterStart, charStart: wordStart, charEnd: wordEnd }),
+    };
+  }
+
+  function normalizeChapterBreakdown(item, index, globalRefs = []) {
+    const value = item || {};
+    const chapterNumber = numberOrNull(firstValue(value.chapter_number, value.number, value.chapter?.number));
+    const fallback = { chapterId: firstValue(value.chapter_id, value.chapter?.chapter_id, null), chapterNumber };
+    return {
+      chapterId: fallback.chapterId,
+      chapterNumber,
+      title: readableValue(firstValue(value.title, value.chapter_title), chapterNumber ? `第 ${chapterNumber} 章` : "待命名章节"),
+      summary: readableValue(firstValue(value.summary, value.one_sentence_summary, value.synopsis)),
+      coreEvent: readableValue(firstValue(value.core_event, value.core_events, value.event)),
+      narrativeFunction: readableValue(firstValue(value.narrative_function, value.function, value.chapter_function)),
+      scene: readableValue(firstValue(value.scene, value.scenes, value.setting, value.location)),
+      conflict: readableValue(firstValue(value.conflict, value.core_conflict)),
+      informationRelease: readableValue(firstValue(value.information_release, value.information, value.revelation)),
+      relationshipChange: readableValue(firstValue(value.relationship_change, value.relationships)),
+      emotionalChange: readableValue(firstValue(value.emotional_change, value.emotion)),
+      foreshadowing: readableValue(firstValue(value.foreshadowing, value.foreshadowing_change, value.clue)),
+      openingHook: readableValue(firstValue(value.opening_hook, value.opening)),
+      endingHook: readableValue(firstValue(value.ending_hook, value.ending)),
+      confidence: normalizedConfidence(value.confidence),
+      uncertainty: readableValue(value.uncertainty, ""),
+      evidenceRefs: normalizeEvidenceRefs(value.evidence_refs || value.evidence || value.sources || value.evidence_ref_ids, globalRefs, fallback),
+    };
+  }
+
+  function normalizeDeconstructionResponse(payload) {
+    const root = payload?.deconstruction || payload?.analysis || payload || {};
+    const document = root.document || {};
+    const source = root.source || root.source_snapshot || document.source || payload?.source || {};
+    const rawEvidenceRefs = document.evidence || document.evidence_refs || root.evidence_refs || root.evidence || payload?.evidence_refs || [];
+    const overview = document.overview || root.overview || root.summary || {};
+    const initialized = Boolean(firstValue(payload?.initialized, root.initialized, true));
+    const status = normalizeDeconstructionStatus(firstValue(root.status, payload?.status, root.task?.status, payload?.task?.status), initialized);
+    const timelineSource = document.timeline?.nodes || document.timeline || root.timeline?.nodes || root.timeline_nodes || root.timeline || root.events || [];
+    const chapterSource = document.chapter_breakdowns || document.chapter_analyses || root.chapter_breakdowns || root.chapter_analyses || root.chapters || [];
+    const timeline = asArray(timelineSource).map((item, index) => normalizeTimelineNode(item, index, rawEvidenceRefs));
+    const chapters = asArray(chapterSource).map((item, index) => normalizeChapterBreakdown(item, index, rawEvidenceRefs));
+    const structureValue = firstValue(overview.structure, overview.structural_observations, overview.structure_units, overview.observations, root.structural_observations);
+    const phaseStructure = { opening: overview.opening, development: overview.development, climax: overview.climax, ending: overview.ending };
+    const fallbackStructure = Object.values(phaseStructure).some((item) => item !== undefined && item !== null && item !== "") ? phaseStructure : [];
+    const rawMainCharacterCandidates = asArray(firstValue(overview.main_characters, overview.main_character_candidates, overview.characters, overview.character_candidates, root.main_characters));
+    const rawCoreConflictCandidates = asArray(firstValue(overview.core_conflict, overview.core_conflict_candidates, overview.central_conflict, overview.conflict, root.core_conflict));
+    const coreConflictCandidateConfidence = rawCoreConflictCandidates.map((item) => item?.confidence).find((item) => item !== undefined && item !== null && item !== "");
+    const normalizedOverview = {
+      wordCount: numberOrNull(firstValue(overview.word_count, overview.total_word_count, source.word_count, root.word_count, root.total_word_count)),
+      chapterCount: numberOrNull(firstValue(overview.chapter_count, source.chapter_count, root.chapter_count, chapters.length || null)),
+      sceneCount: numberOrNull(firstValue(overview.scene_count, overview.total_scene_count, source.scene_count, timeline.length || null)),
+      volumeCount: numberOrNull(firstValue(overview.volume_count, overview.part_count, source.volume_count)),
+      mainCharacters: rawMainCharacterCandidates.map((item, index) => ({
+        name: readableValue(item?.name || item?.value || item?.label || item, `人物候选 ${index + 1}`),
+        role: readableValue(item?.role || item?.label, "候选人物"),
+        confidence: normalizedConfidence(item?.confidence),
+        uncertainty: readableValue(item?.uncertainty, ""),
+        evidenceRefs: normalizeEvidenceRefs(item?.evidence_refs || item?.evidence, rawEvidenceRefs),
+      })),
+      coreConflict: rawCoreConflictCandidates.map((item) => readableValue(item)).filter(Boolean).join("；"),
+      coreConflictConfidence: normalizedConfidence(firstValue(overview.core_conflict_confidence, overview.confidence, coreConflictCandidateConfidence)),
+      structure: normalizeObservationList(structureValue ?? fallbackStructure, rawEvidenceRefs),
+      uncertainties: asArray(firstValue(overview.uncertainties, overview.uncertainty, overview.uncertain_items, document.uncertainty, root.uncertainties)).map((item) => readableValue(item)).filter(Boolean),
+    };
+    const task = root.task || payload?.task || {};
+    const progress = percentOrNull(firstValue(root.progress_percent, root.progress, task.progress_percent, task.progress));
+    const actions = root.actions || payload?.actions || {};
+    return {
+      projectId: String(firstValue(root.project_id, payload?.project_id, "")),
+      title: readableValue(firstValue(root.title, payload?.title), "—"),
+      initialized,
+      status,
+      statusLabel: deconstructionStatusText[status] || "状态未知",
+      progress,
+      message: readableValue(firstValue(root.message, root.status_message, root.error_message, root.empty_reason, root.current_stage, task.message), "服务端会在后台继续处理这本作品。"),
+      currentStage: readableValue(firstValue(root.current_stage, task.current_stage), ""),
+      analysisLabel: readableValue(firstValue(root.analysis_label, document.analysis_label), "拆解来源待确认"),
+      updatedAt: firstValue(root.updated_at, payload?.updated_at, task.updated_at, null),
+      source: {
+        versionId: firstValue(source.version_id, source.source_version_id, root.source_version_id, document.source_version_id, payload?.active_version_id, null),
+        revision: numberOrNull(firstValue(source.revision, source.source_revision, root.source_revision, document.source_revision)),
+        contentHash: firstValue(source.content_hash, source.source_content_hash, root.source_content_hash, root.source_hash, document.source_hash, null),
+        chapterCount: numberOrNull(firstValue(source.chapter_count, source.chapters, normalizedOverview.chapterCount)),
+        wordCount: numberOrNull(firstValue(source.word_count, source.total_word_count, normalizedOverview.wordCount)),
+      },
+      overview: normalizedOverview,
+      timeline,
+      chapters,
+      evidenceRefs: normalizeEvidenceRefs(rawEvidenceRefs),
+      actions: {
+        retry: Boolean(firstValue(actions.retry, actions.can_retry, root.retryable, status === "failed_retryable" || status === "stale")),
+        rebuild: Boolean(firstValue(actions.rebuild, actions.can_rebuild, status === "rebuild_required")),
+      },
+      readOnly: Boolean(firstValue(root.read_only, payload?.read_only, false)),
+    };
+  }
+
+  function hasDeconstructionResults(data) {
+    return Boolean(data?.timeline?.length || data?.chapters?.length || data?.overview?.structure?.length || data?.overview?.mainCharacters?.length || data?.overview?.coreConflict);
+  }
+
+  function formatDeconstructionCount(value, suffix = "") {
+    const number = numberOrNull(value);
+    return number === null ? "—" : `${Math.round(number).toLocaleString("zh-CN")}${suffix}`;
+  }
+
+  function deconstructionConfidenceBadge(confidence, compact = false) {
+    const item = confidence || normalizedConfidence(null);
+    const tone = item.value === null ? "pending" : item.value >= 80 ? "high" : item.value >= 55 ? "medium" : "low";
+    return `<span class="deconstruction-confidence is-${tone}">${escapeHtml(compact ? item.label.replace("置信度", "") : item.label)}</span>`;
+  }
+
+  function deconstructionAnchorLabel(item) {
+    const chapterStart = numberOrNull(item?.chapterStart ?? item?.chapterNumber);
+    const chapterEnd = numberOrNull(item?.chapterEnd);
+    const wordStart = numberOrNull(item?.wordStart);
+    const wordEnd = numberOrNull(item?.wordEnd);
+    const chapterText = chapterStart === null ? "章节待定位" : chapterEnd !== null && chapterEnd !== chapterStart ? `第 ${chapterStart}–${chapterEnd} 章` : `第 ${chapterStart} 章`;
+    const wordText = wordStart === null ? "" : wordEnd !== null && wordEnd !== wordStart ? ` · ${formatDeconstructionCount(wordStart)}–${formatDeconstructionCount(wordEnd)} 字` : ` · ${formatDeconstructionCount(wordStart)} 字起`;
+    return `${chapterText}${wordText}`;
+  }
+
+  function renderDeconstructionEvidence(refs, fallback = {}) {
+    const references = refs || [];
+    if (!references.length) return `<span class="deconstruction-no-evidence">暂未绑定来源证据</span>`;
+    return `<div class="deconstruction-evidence-list">${references.slice(0, 6).map((ref, index) => {
+      const evidence = normalizeEvidenceRef(ref, index, fallback);
+      const chapterNumber = numberOrNull(firstValue(evidence.chapterNumber, fallback.chapterNumber));
+      const sourceVersionId = firstValue(evidence.sourceVersionId, fallback.sourceVersionId, "");
+      const excerpt = evidence.excerpt ? evidence.excerpt.replace(/\s+/g, " ").slice(0, 96) : "";
+      const label = chapterNumber === null ? `证据 ${index + 1}` : `回到第 ${chapterNumber} 章`;
+      if (chapterNumber === null) return `<span class="deconstruction-evidence-unresolved"><span>${escapeHtml(label)}</span><small>章节定位待补充</small></span>`;
+      return `<button class="deconstruction-evidence-link" type="button" data-action="open-deconstruction-evidence" data-evidence-id="${escapeHtml(evidence.id)}" data-source-version-id="${escapeHtml(sourceVersionId)}" data-chapter-id="${escapeHtml(evidence.chapterId || "")}" data-chapter-number="${chapterNumber}" data-char-start="${evidence.charStart ?? ""}" data-char-end="${evidence.charEnd ?? ""}" data-excerpt="${escapeHtml(excerpt)}" aria-label="${escapeHtml(`${label}${excerpt ? `：${excerpt}` : ""}`)}"><span class="deconstruction-evidence-label">${escapeHtml(label)}</span><span class="deconstruction-evidence-excerpt">${escapeHtml(excerpt || deconstructionAnchorLabel({ chapterNumber }))}</span><span class="deconstruction-evidence-arrow" aria-hidden="true">↗</span></button>`;
+    }).join("")}</div>`;
+  }
+
+  function deconstructionStatusHeading(data) {
+    const headings = {
+      empty: "还没有足够正文可供拆解",
+      queued: "拆解任务已排队",
+      running: "正在把正文还原成结构线",
+      completed: "这份拆解已经可以回看",
+      failed_retryable: "这次拆解没有完成",
+      stale: "正文变了，旧结果仍可回看",
+      rebuild_required: "需要用当前稿本重建",
+    };
+    return headings[data?.status] || "拆解状态待确认";
+  }
+
+  function deconstructionStatusAction(data) {
+    if (data.status === "failed_retryable" && data.actions.retry) return `<button class="button button-primary" type="button" data-action="deconstruction-retry">重试拆解 <span aria-hidden="true">→</span></button>`;
+    if (data.status === "rebuild_required" && data.actions.rebuild) return `<button class="button button-primary" type="button" data-action="deconstruction-rebuild">重建当前稿本 <span aria-hidden="true">→</span></button>`;
+    if (data.status === "stale" && data.actions.rebuild) return `<button class="button button-outline" type="button" data-action="deconstruction-rebuild">更新拆解 <span aria-hidden="true">→</span></button>`;
+    if (data.status === "stale" && data.actions.retry) return `<button class="button button-outline" type="button" data-action="deconstruction-retry">更新拆解 <span aria-hidden="true">→</span></button>`;
+    if (data.status === "rebuild_required") return `<button class="button button-outline" type="button" data-action="deconstruction-open-editor">回到正文确认修改 <span aria-hidden="true">→</span></button>`;
+    if (data.status === "empty") return `<button class="button button-outline" type="button" data-action="deconstruction-open-editor">回到正文 <span aria-hidden="true">→</span></button>`;
+    return "";
+  }
+
+  function renderDeconstructionStatus(data) {
+    const working = ["queued", "running"].includes(data.status);
+    const progress = data.progress === null ? 0 : data.progress;
+    const progressText = data.progress === null ? "服务端尚未提供进度百分比" : `已完成 ${Math.round(data.progress)}%`;
+    const sourceText = data.source.chapterCount !== null || data.source.wordCount !== null
+      ? `${formatDeconstructionCount(data.source.chapterCount, " 章")} · ${formatDeconstructionCount(data.source.wordCount, " 字")}`
+      : "来源规模待识别";
+    return `<section class="deconstruction-state-card is-${escapeHtml(data.status)}" aria-label="拆解状态">
+      <div class="deconstruction-state-copy"><div class="deconstruction-state-kicker"><span class="eyebrow">拆解状态</span><span class="deconstruction-status-note">服务端状态</span></div><h2>${escapeHtml(deconstructionStatusHeading(data))}</h2><p>${escapeHtml(data.message)}</p></div>
+      <div class="deconstruction-state-side">${working ? `<div class="deconstruction-progress" role="progressbar" aria-label="拆解进度" aria-valuemin="0" aria-valuemax="100" ${data.progress === null ? "" : `aria-valuenow="${Math.round(data.progress)}"`}><span style="width: ${progress}%"></span></div><span class="deconstruction-progress-label">${escapeHtml(progressText)}</span>` : `<span class="deconstruction-state-source">来源 / ${escapeHtml(sourceText)}</span>`}${deconstructionStatusAction(data)}</div>
+    </section>`;
+  }
+
+  function renderDeconstructionOverview(data) {
+    const overview = data.overview;
+    const metrics = [
+      ["正文规模", formatDeconstructionCount(overview.wordCount ?? data.source.wordCount, " 字"), "服务端统计"],
+      ["章节数量", formatDeconstructionCount(overview.chapterCount ?? data.source.chapterCount, " 章"), "来源章节"],
+      ["场景节点", formatDeconstructionCount(overview.sceneCount, " 个"), "仅显示已识别"],
+      ["稿本修订", data.source.revision === null ? "—" : `REV / ${data.source.revision}`, data.source.versionId ? "当前稿本" : "版本待确认"],
+    ];
+    const observations = overview.structure.length ? overview.structure.map((item) => `<article class="deconstruction-observation"><div><strong>${escapeHtml(item.label)}</strong>${deconstructionConfidenceBadge(item.confidence, true)}</div><p>${escapeHtml(item.text)}</p>${item.uncertainty ? `<small class="deconstruction-uncertainty">不确定：${escapeHtml(item.uncertainty)}</small>` : ""}${renderDeconstructionEvidence(item.evidenceRefs)}</article>`).join("") : `<p class="deconstruction-empty-note">服务端还没有返回可引用的结构观察。这里不会用固定的开端、发展、高潮模板补齐。</p>`;
+    const characters = overview.mainCharacters.length ? overview.mainCharacters.slice(0, 5).map((item) => `<li><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.role)}</small></div>${deconstructionConfidenceBadge(item.confidence, true)}${item.uncertainty ? `<p>${escapeHtml(item.uncertainty)}</p>` : ""}${renderDeconstructionEvidence(item.evidenceRefs)}</li>`).join("") : `<li class="deconstruction-empty-list">尚未形成主要人物候选。</li>`;
+    return `<section class="deconstruction-panel deconstruction-overview-panel" aria-labelledby="deconstructionOverviewTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">从正文实际统计</span><h2 id="deconstructionOverviewTitle">作品概览</h2></div><span class="deconstruction-panel-note">${escapeHtml(data.source.versionId ? "当前稿本" : "来源版本待确认")}</span></header><div class="deconstruction-metric-row">${metrics.map(([label, value, note]) => `<div class="deconstruction-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div>`).join("")}</div><div class="deconstruction-overview-lower"><div class="deconstruction-observation-board"><div class="deconstruction-subheading"><h3>结构观察</h3><span>每条判断都应能回到证据</span></div><div class="deconstruction-observation-list">${observations}</div></div><aside class="deconstruction-candidate-board"><div class="deconstruction-subheading"><h3>主要人物候选</h3><span>尚未等于事实</span></div><ul class="deconstruction-candidate-list">${characters}</ul><div class="deconstruction-conflict-block"><div class="deconstruction-subheading"><h3>核心冲突候选</h3>${deconstructionConfidenceBadge(overview.coreConflictConfidence, true)}</div><p>${escapeHtml(overview.coreConflict || "尚未形成可引用的核心冲突判断。")} </p></div></aside></div>${overview.uncertainties.length ? `<div class="deconstruction-uncertainty-strip"><strong>仍需保留的不确定项</strong><span>${overview.uncertainties.slice(0, 5).map(escapeHtml).join(" · ")}</span></div>` : ""}</section>`;
+  }
+
+  function renderDeconstructionTimeline(data) {
+    const nodes = data.timeline || [];
+    const nodeMarkup = nodes.length ? nodes.map((node) => {
+      const start = node.normalizedStart;
+      const end = node.normalizedEnd === null ? (start === null ? null : Math.min(100, start + 3)) : node.normalizedEnd;
+      const width = start === null || end === null ? 0 : Math.max(3, end - start);
+      const positioned = start !== null && end !== null;
+      return `<article class="deconstruction-timeline-node ${positioned ? "is-positioned" : "is-unplaced"}" ${positioned ? `style="--node-start: ${start}%; --node-size: ${width}%"` : ""}><div class="deconstruction-timeline-marker" aria-hidden="true"><i></i></div><div class="deconstruction-timeline-copy"><div class="deconstruction-timeline-topline"><span class="mono">${positioned ? `${Math.round(start)}–${Math.round(end)}%` : "百分比待识别"}</span>${deconstructionConfidenceBadge(node.confidence, true)}</div><h3>${escapeHtml(node.title)}</h3><p>${escapeHtml(node.event)}</p><div class="deconstruction-timeline-meta"><span>${escapeHtml(deconstructionAnchorLabel(node))}</span>${node.narrativeFunction ? `<span>${escapeHtml(node.narrativeFunction)}</span>` : ""}</div>${node.characters.length ? `<div class="deconstruction-tag-row">${node.characters.slice(0, 4).map((character) => `<span>${escapeHtml(character)}</span>`).join("")}</div>` : ""}${node.uncertainty ? `<small class="deconstruction-uncertainty">不确定：${escapeHtml(node.uncertainty)}</small>` : ""}${renderDeconstructionEvidence(node.evidenceRefs, { chapterNumber: node.chapterStart, charStart: node.wordStart, charEnd: node.wordEnd })}</div></article>`;
+    }).join("") : `<p class="deconstruction-empty-note">完成后台拆解后，这里会按正文实际出现的结构节点排列；当前没有可展示的时间线。</p>`;
+    return `<section class="deconstruction-panel deconstruction-timeline-panel" aria-labelledby="deconstructionTimelineTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">归一化进度 + 绝对锚点</span><h2 id="deconstructionTimelineTitle">节奏时间线</h2></div><span class="deconstruction-panel-note">0% 起于正文开头，100% 落在正文结尾</span></header><div class="deconstruction-timeline-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div><div class="deconstruction-timeline-rail" aria-label="作品结构节奏节点">${nodes.length ? `<div class="deconstruction-timeline-axis"></div>` : ""}${nodeMarkup}</div><div class="deconstruction-timeline-legend"><span><i class="is-blue"></i>已定位的结构节点</span><span><i class="is-coral"></i>需要回看的不确定项</span><span class="mono">${nodes.length} 个服务端节点</span></div></section>`;
+  }
+
+  function deconstructionCell(label, value) {
+    const text = readableValue(value, "暂无");
+    return `<div class="deconstruction-table-detail"><span>${escapeHtml(label)}</span><strong>${escapeHtml(text)}</strong></div>`;
+  }
+
+  function renderDeconstructionChapterTable(data) {
+    const chapters = data.chapters || [];
+    const rows = chapters.length ? chapters.map((chapter) => `<tr><th scope="row"><span class="mono">${chapter.chapterNumber === null ? "—" : String(chapter.chapterNumber).padStart(2, "0")}</span><strong>${escapeHtml(chapter.title)}</strong><small>${escapeHtml(deconstructionAnchorLabel(chapter))}</small></th><td><p class="deconstruction-table-summary">${escapeHtml(chapter.summary)}</p>${chapter.coreEvent ? `<small>${escapeHtml(chapter.coreEvent)}</small>` : ""}</td><td>${deconstructionCell("功能", chapter.narrativeFunction)}${deconstructionCell("场景", chapter.scene)}${deconstructionCell("冲突", chapter.conflict)}</td><td>${deconstructionCell("信息释放", chapter.informationRelease)}${deconstructionCell("关系变化", chapter.relationshipChange)}${deconstructionCell("情绪变化", chapter.emotionalChange)}</td><td>${deconstructionCell("伏笔", chapter.foreshadowing)}${deconstructionCell("开头钩子", chapter.openingHook)}${deconstructionCell("结尾钩子", chapter.endingHook)}</td><td><div class="deconstruction-table-confidence">${deconstructionConfidenceBadge(chapter.confidence)}${chapter.uncertainty ? `<small class="deconstruction-uncertainty">不确定：${escapeHtml(chapter.uncertainty)}</small>` : ""}</div>${renderDeconstructionEvidence(chapter.evidenceRefs, { chapterId: chapter.chapterId, chapterNumber: chapter.chapterNumber })}</td></tr>`).join("") : `<tr><td colspan="6"><p class="deconstruction-empty-note">后台尚未返回章节拆解。已有正文也不会被前端临时摘要替代。</p></td></tr>`;
+    return `<section class="deconstruction-panel deconstruction-chapter-panel" aria-labelledby="deconstructionChapterTitle"><header class="deconstruction-panel-heading"><div><span class="eyebrow">逐章回看</span><h2 id="deconstructionChapterTitle">章节拆解</h2></div><span class="deconstruction-panel-note">${chapters.length ? `${chapters.length} 章已返回` : "等待服务端结果"}</span></header><div class="deconstruction-table-wrap"><table class="deconstruction-table"><caption class="visually-hidden">章节拆解表，包含摘要、结构功能、场景冲突、信息关系、伏笔钩子和证据回链</caption><thead><tr><th scope="col">章节</th><th scope="col">一句话摘要 / 核心事件</th><th scope="col">结构功能 / 场景 / 冲突</th><th scope="col">信息 / 关系 / 情绪</th><th scope="col">伏笔 / 开头 / 结尾</th><th scope="col">置信度 / 证据</th></tr></thead><tbody>${rows}</tbody></table></div><p class="deconstruction-table-footnote">点击“回到第 X 章”会打开同一作品正文；若服务端只提供章节级证据，页面不会伪装成精确字符高亮。</p></section>`;
+  }
+
+  function renderDeconstructionPage(data) {
+    state.deconstructionWorkspace = data;
+    state.deconstructionProjectId = data.projectId || state.deconstructionProjectId;
+    if (!data.initialized) data.status = "empty";
+    elements.deconstructionProjectTitle.textContent = data.title || "—";
+    elements.deconstructionStatusPill.textContent = data.statusLabel;
+    elements.deconstructionStatusPill.className = `deconstruction-status-pill is-${data.status}`;
+    elements.deconstructionRefreshButton.disabled = ["queued", "running"].includes(data.status);
+    elements.deconstructionPageContent.setAttribute("aria-busy", String(["queued", "running"].includes(data.status)));
+    const content = [renderDeconstructionStatus(data)];
+    if (data.status === "empty") {
+      content.push(`<section class="deconstruction-empty-panel"><div class="deconstruction-empty-mark">⌇</div><h2>先让正文留下可观察的章节</h2><p>作品拆解只读取这本作品当前稿本的真实正文。完成导入或写下至少一章后，服务端才会生成概览、节奏节点和章节证据；这里不会用标题、简介或固定模板填充结果。</p><div class="deconstruction-empty-actions"><button class="button button-outline" type="button" data-action="deconstruction-open-editor">回到正文 <span aria-hidden="true">→</span></button></div></section>`);
+    } else if (hasDeconstructionResults(data)) {
+      content.push(renderDeconstructionOverview(data), renderDeconstructionTimeline(data), renderDeconstructionChapterTable(data));
+    } else {
+      content.push(`<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>${escapeHtml(data.status === "completed" ? "服务端还没有返回可引用内容" : "结果会在这里出现")}</h2><p>${escapeHtml(data.status === "completed" ? "当前响应没有概览、时间线或章节拆解字段，页面保留空白，不将不完整响应冒充分析完成。" : "任务在服务端继续运行；离开页面或刷新后，重新读取即可恢复。")}</p></section>`);
+    }
+    if (data.status !== "empty") content.push(`<p class="deconstruction-source-note"><span>分析来源</span>${escapeHtml(data.analysisLabel)}${data.source.versionId ? ` · 当前稿本 ${escapeHtml(String(data.source.versionId).slice(0, 12))}` : ""}${data.source.revision === null ? "" : ` · REV / ${data.source.revision}`}</p>`);
+    elements.deconstructionPageContent.innerHTML = content.join("");
+    scheduleDeconstructionPoll(data);
+  }
+
+  function renderDeconstructionLoading() {
+    elements.deconstructionProjectTitle.textContent = "正在读取…";
+    elements.deconstructionStatusPill.textContent = "读取中";
+    elements.deconstructionStatusPill.className = "deconstruction-status-pill is-loading";
+    elements.deconstructionRefreshButton.disabled = true;
+    elements.deconstructionPageContent.setAttribute("aria-busy", "true");
+    elements.deconstructionPageContent.innerHTML = `<section class="deconstruction-loading-panel" aria-label="正在读取作品拆解"><div class="deconstruction-loading-line"></div><div class="deconstruction-loading-line is-short"></div><div class="deconstruction-loading-grid"><span></span><span></span><span></span></div><p>正在读取这本作品的服务端拆解状态…</p></section>`;
+  }
+
+  function renderDeconstructionReadError(message) {
+    elements.deconstructionStatusPill.textContent = "读取失败";
+    elements.deconstructionStatusPill.className = "deconstruction-status-pill is-error";
+    elements.deconstructionRefreshButton.disabled = false;
+    elements.deconstructionPageContent.setAttribute("aria-busy", "false");
+    elements.deconstructionPageContent.innerHTML = `<section class="deconstruction-error-panel"><div class="deconstruction-error-mark">!</div><h2>作品拆解暂时读不到</h2><p>${escapeHtml(message || "请稍后重试；当前没有展示任何本地或静态结果。")} </p><button class="button button-primary" type="button" data-action="deconstruction-refresh">重新读取 <span aria-hidden="true">→</span></button></section>`;
+  }
+
+  function scheduleDeconstructionPoll(data) {
+    window.clearTimeout(state.deconstructionPollTimer);
+    state.deconstructionPollTimer = null;
+    if (!data || !["queued", "running"].includes(data.status)) return;
+    state.deconstructionPollTimer = window.setTimeout(() => {
+      state.deconstructionPollTimer = null;
+      if (state.screen === "deconstruction" && state.deconstructionProjectId === data.projectId) loadDeconstructionWorkspace(data.projectId, { silent: true });
+    }, 1300);
+  }
+
   function renderArchivePage(data) {
     state.archiveWorkspace = data;
     state.archiveProjectId = data.project_id;
@@ -1379,6 +1848,106 @@
       }
       setWorkspaceNotice(elements.archivePageNotice, error.message || "故事档案读取失败，请稍后重试。", "red");
     }
+  }
+
+  async function loadDeconstructionWorkspace(projectId, { silent = false } = {}) {
+    if (!projectId) return;
+    const loadToken = ++state.deconstructionLoadToken;
+    state.deconstructionProjectId = projectId;
+    window.clearTimeout(state.deconstructionPollTimer);
+    state.deconstructionPollTimer = null;
+    setActiveScreen("deconstruction");
+    if (!silent) {
+      renderDeconstructionLoading();
+      setWorkspaceNotice(elements.deconstructionNotice, "");
+    }
+    try {
+      const data = await deconstructionApi.read(projectId);
+      if (loadToken !== state.deconstructionLoadToken || state.deconstructionProjectId !== projectId) return;
+      renderDeconstructionPage(data);
+      setWorkspaceNotice(elements.deconstructionNotice, "");
+      void loadNotifications();
+    } catch (error) {
+      if (loadToken !== state.deconstructionLoadToken || state.deconstructionProjectId !== projectId) return;
+      if (error.status === 401) {
+        state.account = null;
+        state.sessionExpired = error.code === "session_expired";
+        navigate("/login", { replace: true });
+        return;
+      }
+      setWorkspaceNotice(elements.deconstructionNotice, error.message || "作品拆解读取失败，请稍后重试。", "red");
+      renderDeconstructionReadError(error.message);
+    }
+  }
+
+  async function runDeconstructionAction(action) {
+    const projectId = state.deconstructionProjectId;
+    if (!projectId) return;
+    const buttons = $$(`[data-action="deconstruction-${action}"]`, elements.deconstructionPageContent);
+    buttons.forEach((button) => { button.disabled = true; });
+    setWorkspaceNotice(elements.deconstructionNotice, action === "rebuild" ? "正在为当前稿本排队重建…" : "正在提交拆解任务…", "blue");
+    try {
+      await deconstructionApi.mutate(projectId, action);
+      await loadDeconstructionWorkspace(projectId);
+      showToast(action === "rebuild" ? "当前稿本已开始重建。" : "拆解任务已重新排队。", "blue");
+    } catch (error) {
+      buttons.forEach((button) => { button.disabled = false; });
+      setWorkspaceNotice(elements.deconstructionNotice, error.message || "拆解任务没有提交成功，请稍后重试。", "red");
+    }
+  }
+
+  async function openDeconstructionEvidence(actionNode) {
+    const projectId = state.deconstructionProjectId;
+    if (!projectId) return;
+    const chapterNumber = numberOrNull(actionNode.dataset.chapterNumber);
+    const charStart = numberOrNull(actionNode.dataset.charStart);
+    const charEnd = numberOrNull(actionNode.dataset.charEnd);
+    state.pendingEvidence = {
+      evidenceId: actionNode.dataset.evidenceId || "",
+      sourceVersionId: actionNode.dataset.sourceVersionId || "",
+      chapterId: actionNode.dataset.chapterId || "",
+      chapterNumber,
+      charStart,
+      charEnd,
+      excerpt: actionNode.dataset.excerpt || "",
+    };
+    const navigated = await navigate(`/independent/${encodeURIComponent(projectId)}`);
+    if (!navigated) {
+      state.pendingEvidence = null;
+      return;
+    }
+    state.editorMode = "independent";
+    await loadIndependentWorkspace(projectId);
+    const version = activeEditorVersion();
+    const evidence = state.pendingEvidence;
+    const chapter = version?.chapters?.find((item) => evidence.chapterId && item.chapter_id === evidence.chapterId)
+      || version?.chapters?.find((item) => evidence.chapterNumber !== null && item.chapter_number === evidence.chapterNumber);
+    if (!chapter) {
+      state.pendingEvidence = null;
+      setEditorNotice("已回到正文，但来源章节在当前稿本中不可用。", "red");
+      return;
+    }
+    state.activeChapterId = chapter.chapter_id;
+    state.editorDirty = false;
+    state.editorConflict = null;
+    renderEditorWorkspace();
+    const content = elements.chapterEditor.value || "";
+    const sameSourceVersion = !evidence.sourceVersionId || !version?.version_id || evidence.sourceVersionId === version.version_id;
+    const validStart = sameSourceVersion && evidence.charStart !== null && evidence.charStart >= 0 && evidence.charStart <= content.length;
+    const validEnd = validStart && evidence.charEnd !== null && evidence.charEnd >= evidence.charStart && evidence.charEnd <= content.length;
+    if (validEnd) {
+      elements.chapterEditor.focus({ preventScroll: true });
+      elements.chapterEditor.setSelectionRange(evidence.charStart, evidence.charEnd);
+    } else {
+      elements.chapterEditor.focus({ preventScroll: true });
+    }
+    const anchorText = validEnd
+      ? `已选择正文中的第 ${evidence.charStart}–${evidence.charEnd} 字。`
+      : sameSourceVersion
+        ? "当前证据只提供章节级定位，未伪装成精确字符高亮。"
+        : "证据来自另一稿本，已定位到同章；当前只保留章节级回看。";
+    setEditorNoticeHtml(`<strong>已回到来源证据。</strong> 第 ${chapter.chapter_number} 章 · ${escapeHtml(anchorText)}${evidence.excerpt ? `<span class="editor-evidence-excerpt">“${escapeHtml(evidence.excerpt)}”</span>` : ""}`, "blue");
+    state.pendingEvidence = null;
   }
 
   function renderAIConversation(messages) {
@@ -1658,6 +2227,21 @@
     loadAIWorkspace(state.aiProjectId, false);
   }
 
+  async function openDeconstruction(projectId = state.editorProjectId || state.archiveProjectId) {
+    if (!projectId) return;
+    const path = `/independent/${encodeURIComponent(projectId)}?view=deconstruction`;
+    if (await navigate(path)) await loadDeconstructionWorkspace(projectId);
+  }
+
+  async function openDeconstructionVersions(projectId = state.deconstructionProjectId || state.archiveProjectId || state.editorProjectId) {
+    if (!projectId) return;
+    const path = `/independent/${encodeURIComponent(projectId)}`;
+    if (!(await navigate(path))) return;
+    state.editorMode = "independent";
+    await loadIndependentWorkspace(projectId);
+    openVersionHistoryDialog();
+  }
+
   function openAIDirector() {
     if (!state.aiProjectId) return;
     navigate(`/ai/${encodeURIComponent(state.aiProjectId)}/director`);
@@ -1710,9 +2294,11 @@
       elements.archiveDrawer.classList.remove("is-collapsed");
       elements.archiveDrawer.querySelector(".archive-drawer-body")?.removeAttribute("hidden");
     }
+    if (action === "show-deconstruction") openDeconstruction(state.editorProjectId);
     if (action === "show-archive") {
       if (await navigate(`/archive/${encodeURIComponent(state.editorProjectId)}`)) await loadArchiveWorkspace(state.editorProjectId);
     }
+    if (action === "open-version-history") openVersionHistoryDialog();
     if (action === "toggle-archive") {
       const collapsed = elements.archiveDrawer.classList.toggle("is-collapsed");
       actionNode.setAttribute("aria-expanded", String(!collapsed));
@@ -1750,8 +2336,24 @@
         await loadIndependentWorkspace(state.archiveProjectId);
       }
     }
+    if (action === "archive-open-deconstruction") openDeconstruction(state.archiveProjectId);
+    if (action === "archive-open-versions") openDeconstructionVersions(state.archiveProjectId);
     if (action === "archive-open-ai") openAIStudio();
     if (action === "archive-open-self") loadArchiveWorkspace(state.archiveProjectId);
+    if (action === "deconstruction-open-editor") {
+      const projectId = state.deconstructionProjectId;
+      if (projectId && await navigate(`/independent/${encodeURIComponent(projectId)}`)) await loadIndependentWorkspace(projectId);
+    }
+    if (action === "deconstruction-open-self") loadDeconstructionWorkspace(state.deconstructionProjectId);
+    if (action === "deconstruction-open-archive") {
+      const projectId = state.deconstructionProjectId;
+      if (projectId && await navigate(`/archive/${encodeURIComponent(projectId)}`)) await loadArchiveWorkspace(projectId);
+    }
+    if (action === "deconstruction-open-versions") openDeconstructionVersions(state.deconstructionProjectId);
+    if (action === "deconstruction-refresh") loadDeconstructionWorkspace(state.deconstructionProjectId);
+    if (action === "deconstruction-retry") runDeconstructionAction("retry");
+    if (action === "deconstruction-rebuild") runDeconstructionAction("rebuild");
+    if (action === "open-deconstruction-evidence") openDeconstructionEvidence(actionNode);
     if (action === "ai-open-studio") openAIStudio();
     if (action === "ai-open-director") openAIDirector();
     if (action === "ai-open-editor") openAIEditor();
@@ -1787,6 +2389,7 @@
     elements.editorNotice?.addEventListener("click", handleAction);
     elements.versionHistoryContent?.addEventListener("click", handleAction);
     elements.archivePageContent?.addEventListener("click", handleAction);
+    elements.deconstructionScreen?.addEventListener("click", handleAction);
     elements.directorPageContent?.addEventListener("click", handleAction);
     elements.notificationsList.addEventListener("click", handleAction);
     elements.notificationsList.addEventListener("keydown", (event) => {
@@ -1800,6 +2403,7 @@
     elements.editorLogoutButton = $("#editorLogoutButton");
     elements.editorLogoutButton.addEventListener("click", logout);
     $("#archiveLogoutButton")?.addEventListener("click", logout);
+    $("#deconstructionLogoutButton")?.addEventListener("click", logout);
     $("#aiStudioLogoutButton")?.addEventListener("click", logout);
     $("#aiDirectorLogoutButton")?.addEventListener("click", logout);
     $("#newProjectButton").addEventListener("click", openNewProject);
