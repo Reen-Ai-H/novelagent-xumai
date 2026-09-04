@@ -33,6 +33,7 @@
 | `goals/V1_IMPLEMENTATION.md` | 已排队的 A 版首版实现目标 | 首版范围或完成状态改变时 |
 | `goals/STAGE_32_DECONSTRUCTION_DEPTH.md` | Windows 接棒后可直接执行的阶段 32 任务书 | 阶段 32 范围、顺序或验收改变时 |
 | `STAGE_32_CONTRACT.md` | 阶段 32 冻结的版本化 schema、证据、状态、锁与前后端接缝 | 架构合同经复核调整时 |
+| `goals/STAGE_33_INDEPENDENT_EXPERIENCE.md` | 阶段 33 独立创作体验收口任务书、跨页面合同与测试设计 | 阶段 33 范围、顺序或验收改变时 |
 
 ## 当前状态
 
@@ -45,7 +46,7 @@
 - A、B、C 共 21 张探索图保留；A 是现役实现基准，B/C 只作后续灵感参考。
 - Windows 迁移步骤见 `WINDOWS_MIGRATION.md`；CI 覆盖 Ubuntu/Windows、Python 3.12 和 Node LTS。
 - 后续每个阶段必须在独立 `codex/stage-<编号>-<主题>` 分支提交并推送；需复核的阶段保持 Draft PR，通过后再合并主线。
-- 下一阶段及长期顺序以 `ROADMAP.md` 为唯一入口；阶段 32 合并后进入阶段 33“独立创作体验收口”，不得仅凭聊天记录推断范围。
+- 下一阶段及长期顺序以 `ROADMAP.md` 为唯一入口；阶段 32 已合并，当前进入阶段 33“独立创作体验收口”，其产品/架构/验收合同见 `goals/STAGE_33_INDEPENDENT_EXPERIENCE.md`，不得仅凭聊天记录推断范围。
 
 ## 给新智能体的最短入口
 

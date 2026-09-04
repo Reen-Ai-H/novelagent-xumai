@@ -107,3 +107,28 @@ DeconstructionService
 `app/core/deconstruction_depth.py` 按章节事实、跨章关系、六视角分析、证据校验和发布顺序构造 `report_version="2.0"`。事件、人物状态和证据 ID 使用来源 token 与章节/span 等固有锚点，不使用遍历序号；否定、拒绝、阻止、能力/许可否定与双重否定按局部谓词作用域处理，缺少证据时保持未知或降低置信。
 
 作者写入、后台分析和跨 store 事务统一进入持久项目锁；发布前重新校验 active version、revision、hash 与 CAS token，正文变更时放弃旧发布并进入 `stale` 或 `rebuild_required`。前端只接受严格 2.0 报告，提供总览和六视角 roving tabs、筛选与证据抽屉；当前来源允许精确定位，历史来源只读且禁用定位。
+
+## 12. 独立创作体验收口合同（阶段 33）
+
+阶段 33 不改阶段 32 的 2.0 schema、七种 canonical 状态、source token 或 evidence 定位单位，而是把编辑器、章末、档案、版本和拆解接入一个可恢复的作品上下文。实施与测试设计见 [STAGE_33_INDEPENDENT_EXPERIENCE.md](goals/STAGE_33_INDEPENDENT_EXPERIENCE.md)。
+
+```text
+independent workspace
+ ├─ active manuscript (唯一可写稿本)
+ │   ├─ chapter editor: title + body + server revision
+ │   ├─ complete chapter: snapshot + task + notification + outbox
+ │   └─ pending change batch: one batch + batch revision
+ ├─ archive: latest / chapter snapshot / rebuilding / historical
+ ├─ version history: read-only preview → impact confirmation → new active
+ └─ deconstruction 2.0: source token + canonical status + evidence gate
+```
+
+作者保存是唯一正文写入事实；标题和正文同次校验并在项目锁内原子提交。普通保存不创建稿本、不触发全文重建。完成本章只接受最近已保存内容，同一稿本/章节/hash 的重试复用任务、快照、通知和 outbox；分析、拆解和大段读取在锁外执行，发布前以 version、revision、hash 和 CAS 再校验。
+
+已有正式正文的改动先进入当前稿本唯一待确认批次。批次确认使用 `batch_id + version_id + batch_revision + idempotency key`，过期请求返回 409；忽略保留当前稿本并明确旧来源，重建创建新 active 稿本，旧稿本只读并保留 30 天恢复期。恢复先生成只读预览和影响摘要，再用确认身份、当前 active 前置条件和幂等键创建新稿本；任何历史稿本都不被就地改写。
+
+固定写入顺序为“授权 → project lock → 校验 active/chapter/batch revision → 正文/稿本与 outbox 原子提交 → 释放锁 → 锁外后台任务 → 发布前 source/CAS 校验”。禁止持有 deconstruction-specific lock 后反向进入 independent store。失败、重启和 outbox 补偿只改变任务或派生状态，不删除作者正文；新稿本重建期间不能把旧档案或旧拆解结果冒充当前。
+
+跨页面公开状态至少表达当前稿本、编辑章节、正式边界、待确认批次、任务、档案 view/source、拆解 canonical 状态和服务端 actions。公开任务投影只能含稳定任务 ID、类型、状态、归属稿本/章节、重试能力、安全错误码和时间，必须剥离 `account_id`、CAS/lock、idempotency key、prompt、raw completion、private memory、路径、堆栈和正文副本；未授权 401，跨账户 404。
+
+前端保存状态只存在当前页面内，服务端是刷新/重登后的唯一真相，不使用 local/session storage 复制正文或状态。编辑、批次和恢复使用可回收焦点的对话框；章节、快照、版本、六视角 tabs 和证据均键盘可达，状态以文本/`aria-live` 表达，reduced-motion 不依赖动画；1440×900 与 1024×900 只允许局部容器滚动，不允许整页横向溢出。

@@ -73,6 +73,8 @@ git diff --check
 
 阶段 32 的完成态响应必须同时满足 `analysis_contract_version="2.0"` 和 `report.report_version="2.0"`。验证时覆盖总览、六视角、roving tabs、筛选、当前证据精确定位、历史证据只读、修改后重建与刷新/重登；浏览器脚本使用隔离临时数据和禁止付费调用的 runtime。后端专项必须保留否定/拒绝/阻止/模态否定、双重与三重否定、稳定 ID、跨进程锁和 CAS 竞态回归。
 
+阶段 33 的执行入口是 [STAGE_33_INDEPENDENT_EXPERIENCE.md](goals/STAGE_33_INDEPENDENT_EXPERIENCE.md)。实现按“后端公开合同与持久化接缝 → 独立流程与并发/重启测试 → 前端 server-backed 状态与对话框 → Edge 双尺寸集成 → 独立审计”分工；本阶段不通过静态页面或 fixture 宣称完成。专项测试必须覆盖 100 章中文真实流程、标题/正文逐字保存、任务/批次/版本幂等、历史只读、source token、账户隔离、失败恢复和键盘/响应式门禁。
+
 ## 发布边界
 
 GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 32 深度作品拆解独立审计 P0/P1/P2/P3 均为 0；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。
