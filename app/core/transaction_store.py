@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import re
-import fcntl
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +20,12 @@ from threading import RLock
 from typing import Any, Callable
 
 from schemas.transaction import TransactionJournal, TransactionPayload
+
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 TRANSACTION_DATA_DIR = Path(__file__).resolve().parents[2] / ".novel_transactions"
@@ -80,14 +85,26 @@ class TransactionStore:
 
         self.base_dir.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(self._project_lock_path(project_id), os.O_CREAT | os.O_RDWR, 0o600)
+        acquired = False
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            if os.name == "nt":
+                # msvcrt.locking 锁定当前文件指针起始的一个字节；固定文件长度
+                # 后再加锁，避免空锁文件在 Windows 上无法建立区域锁。
+                os.ftruncate(descriptor, 1)
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+            else:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            acquired = True
             yield
         finally:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            finally:
-                os.close(descriptor)
+            if acquired:
+                if os.name == "nt":
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:
