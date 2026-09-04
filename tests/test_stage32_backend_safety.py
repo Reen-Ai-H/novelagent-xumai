@@ -296,6 +296,57 @@ class Stage32BackendSafetyTest(unittest.TestCase):
         double_negative = DepthAnalysisEngine(_snapshot(["不是没有找到钥匙。"])).build()
         self.assertEqual(double_negative.plot.events[0].plotline_status, "resolved")
 
+    def test_scope_double_negation_with_ba_object_preserves_positive_chains(self) -> None:
+        double_negations = (
+            "不可能不", "不可以不", "不能不", "不能够不", "不得不",
+            "没办法不", "没有办法不", "不是不能", "不是没有",
+        )
+        for prefix in double_negations:
+            with self.subTest(prefix=prefix):
+                transfer = DepthAnalysisEngine(_snapshot([
+                    f"林舟{prefix}把钥匙交给顾遥。",
+                ], character_names=("林舟", "顾遥"))).build()
+                self.assertTrue(any(
+                    relation.relation_type == "allies"
+                    for relation in transfer.characters.relations
+                ))
+
+                chain = DepthAnalysisEngine(_snapshot([
+                    f"林舟{prefix}把钥匙交给顾遥。",
+                    "顾遥用钥匙打开门。",
+                ], character_names=("林舟", "顾遥"))).build()
+                self.assertTrue(any(
+                    relation.relation_type == "enables"
+                    for relation in chain.plot.relations
+                ))
+                self.assertTrue(any(state.status == "paid_off" for state in chain.foreshadowing.states))
+                self.assertTrue(any(
+                    item.plotline_status == "resolved"
+                    for item in chain.plot.events
+                ))
+                self.assertIn("阶段性回应或情绪缓解", chain.reader_experience.items[-1].payoff)
+
+                ordinary = DepthAnalysisEngine(_snapshot([
+                    f"林舟{prefix}打开门。",
+                ])).build()
+                self.assertEqual(ordinary.plot.events[0].plotline_status, "resolved")
+                self.assertIn("阶段性回应或情绪缓解", ordinary.reader_experience.items[0].payoff)
+
+        for triple in ("不可能不不", "不是不能不"):
+            with self.subTest(triple=triple):
+                ordinary = DepthAnalysisEngine(_snapshot([
+                    f"林舟{triple}打开门。",
+                ])).build()
+                self.assertNotEqual(ordinary.plot.events[0].plotline_status, "resolved")
+                self.assertNotIn("阶段性回应或情绪缓解", ordinary.reader_experience.items[0].payoff)
+                transfer = DepthAnalysisEngine(_snapshot([
+                    f"林舟{triple}把钥匙交给顾遥。",
+                ], character_names=("林舟", "顾遥"))).build()
+                self.assertFalse(any(
+                    relation.relation_type == "allies"
+                    for relation in transfer.characters.relations
+                ))
+
     def test_noun_and_waiting_sentences_do_not_create_completion_or_reader_payoff(self) -> None:
         for text in ("答案仍在桌上。", "林舟等待答案。"):
             with self.subTest(text=text):
