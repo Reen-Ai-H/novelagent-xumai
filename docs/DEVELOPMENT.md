@@ -30,7 +30,7 @@ node --check frontend/app.js
 git diff --check
 ```
 
-阶段 28 的历史基线为 107 tests；当前阶段31发布候选为 135 tests、0 failed、0 skipped。当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
+阶段 28 的历史基线为 107 tests，阶段 31 为 135 tests；当前阶段 32 候选为 204 tests、0 failed、0 skipped。当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
 
 ## 代码和测试约定
 
@@ -71,6 +71,8 @@ git diff --check
 
 阶段 31E 的前端集成顺序固定为 `8028865` → `341bad8`，在阶段 31B 后分别落为 `d614118`、`be6fde2`；若需要回溯，保留这两个提交的父子关系，不使用并行草稿提交。
 
+阶段 32 的完成态响应必须同时满足 `analysis_contract_version="2.0"` 和 `report.report_version="2.0"`。验证时覆盖总览、六视角、roving tabs、筛选、当前证据精确定位、历史证据只读、修改后重建与刷新/重登；浏览器脚本使用隔离临时数据和禁止付费调用的 runtime。后端专项必须保留否定/拒绝/阻止/模态否定、双重与三重否定、稳定 ID、跨进程锁和 CAS 竞态回归。
+
 ## 发布边界
 
-GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 27 功能独立审计通过；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。
+GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 32 深度作品拆解独立审计 P0/P1/P2/P3 均为 0；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。

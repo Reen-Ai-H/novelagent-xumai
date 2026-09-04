@@ -16,8 +16,14 @@ from datetime import datetime, timezone
 from threading import RLock
 from typing import Any
 
-from app.core.deconstruction_store import DeconstructionStore, DeconstructionStoreError
+from app.core.deconstruction_depth import ChapterInput, DepthAnalysisEngine, DepthSnapshot
+from app.core.deconstruction_store import (
+    DeconstructionStore,
+    DeconstructionStoreConflict,
+    DeconstructionStoreError,
+)
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
+from app.core.project_lock import ProjectLockError
 from schemas.deconstruction import (
     ChapterBreakdown,
     DeconstructionActions,
@@ -37,6 +43,9 @@ from schemas.deconstruction import (
     DeconstructionStatus,
     EvidenceRef,
     TimelineNode,
+    DepthEvidence,
+    DepthSource,
+    validate_depth_report_source,
 )
 
 
@@ -83,7 +92,11 @@ class _Source:
 
     @property
     def sufficient(self) -> bool:
-        return bool(self.version_id and self.chapters)
+        return bool(self.version_id and any(chapter.content.strip() for chapter in self.chapters))
+
+    @property
+    def analysis_chapters(self) -> tuple[_SourceChapter, ...]:
+        return tuple(chapter for chapter in self.chapters if chapter.content.strip())
 
 
 class DeconstructionService:
@@ -205,8 +218,6 @@ class DeconstructionService:
         chapters: list[_SourceChapter] = []
         for chapter in sorted(version.chapters, key=lambda item: item.chapter_number):
             content = chapter.formal_content or ""
-            if not content.strip():
-                continue
             chapters.append(
                 _SourceChapter(
                     chapter_id=chapter.chapter_id,
@@ -217,6 +228,7 @@ class DeconstructionService:
                 )
             )
 
+        analysis_chapters = tuple(chapter for chapter in chapters if chapter.content.strip())
         source_payload = {
             "version_id": version.version_id,
             "chapters": [
@@ -225,9 +237,8 @@ class DeconstructionService:
                     "chapter_number": chapter.chapter_number,
                     "title": chapter.title,
                     "content": chapter.content,
-                    "server_revision": chapter.server_revision,
                 }
-                for chapter in chapters
+                for chapter in analysis_chapters
             ],
         }
         source_hash = hashlib.sha256(
@@ -243,7 +254,11 @@ class DeconstructionService:
             account_id=account_id,
             title=record.title,
             version_id=version.version_id,
-            source_revision=max((chapter.server_revision for chapter in chapters), default=0),
+            # Only completed formal chapters participate in the author source
+            # revision. Empty drafting slots are represented in the current
+            # chapter table but cannot invalidate a report for the last
+            # completed source snapshot.
+            source_revision=max((chapter.server_revision for chapter in analysis_chapters), default=0),
             source_hash=source_hash,
             chapters=tuple(chapters),
             pending_changes=record.pending_changes is not None,
@@ -362,6 +377,7 @@ class DeconstructionService:
             active is not None
             and source.sufficient
             and active.source_version_id == source.version_id
+            and active.source_revision == source.source_revision
             and active.source_hash == source.source_hash
         )
         status: DeconstructionStatus
@@ -376,6 +392,11 @@ class DeconstructionService:
             status = "rebuild_required"
         elif not source_match:
             status = "stale"
+        elif active.analysis_contract_version == "1.0" and active.status == "completed":
+            # A completed stage-31 overview is historical compatibility data,
+            # not a stage-32 six-view result. Keep it active in history while
+            # requiring an explicit 2.0 rebuild.
+            status = "rebuild_required"
         else:
             status = active.status
 
@@ -423,6 +444,7 @@ class DeconstructionService:
                 source_hash=active.source_hash,
                 retry_count=active.retry_count,
                 idempotency_key=active.idempotency_key,
+                analysis_contract_version=active.analysis_contract_version,
                 analysis_label=active.analysis_label,
                 created_at=active.created_at,
                 updated_at=active.updated_at,
@@ -613,56 +635,81 @@ class DeconstructionService:
             )
         assert source.version_id is not None
         assert source.source_hash is not None
-        with self._lock:
-            record = self._record(project_id, account_id)
-            if record is None:
-                record = DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
-            existing = next(
-                (
-                    item
-                    for item in record.documents
-                    if item.source_version_id == source.version_id and item.source_hash == source.source_hash
-                ),
-                None,
+        with self.store.project_locks.project_lock(project_id):
+            # Re-read the source after entering the shared gate so a source
+            # update racing the initial snapshot cannot create a document for
+            # an already obsolete token.
+            locked_source = self._source(project_id, account_id)
+            self._check_source_precondition(
+                locked_source,
+                expected_source_version_id=expected_source_version_id,
+                expected_source_revision=expected_source_revision,
+                expected_source_hash=expected_source_hash,
             )
-            if existing is not None:
-                if existing.status == "failed_retryable":
-                    existing.status = "queued"
-                    existing.progress_percent = 0
-                    existing.current_stage = "等待重新拆解"
-                    existing.error_message = None
-                    existing.updated_at = self._now()
-                    record.active_document_id = existing.document_id
-                    record.updated_at = existing.updated_at
-                    self.store.save(record)
-                elif record.active_document_id != existing.document_id:
-                    record.active_document_id = existing.document_id
-                    record.updated_at = self._now()
-                    self.store.save(record)
-                return existing
+            if not locked_source.sufficient or locked_source.pending_changes:
+                raise DeconstructionServiceError(
+                    "deconstruction_rebuild_required",
+                    "当前正式正文尚未形成可分析的稳定来源，请稍后重试。",
+                    status_code=409,
+                )
+            source = locked_source
+            with self._lock:
+                record = self._record(project_id, account_id)
+                if record is None:
+                    record = DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
+                existing = next(
+                    (
+                        item
+                        for item in record.documents
+                        if item.analysis_contract_version == "2.0"
+                        and item.source_version_id == source.version_id
+                        and item.source_revision == source.source_revision
+                        and item.source_hash == source.source_hash
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    if existing.status == "failed_retryable":
+                        existing.status = "queued"
+                        existing.progress_percent = 0
+                        existing.current_stage = "等待重新拆解"
+                        existing.error_message = None
+                        existing.updated_at = self._now()
+                        record.active_document_id = existing.document_id
+                        record.updated_at = existing.updated_at
+                        self.store.save_if_revision(record, record.record_revision)
+                    elif record.active_document_id != existing.document_id:
+                        record.active_document_id = existing.document_id
+                        record.updated_at = self._now()
+                        self.store.save_if_revision(record, record.record_revision)
+                    return existing
 
-            now = self._now()
-            document_id = self._slug(f"deconstruction:{project_id}:{source.version_id}:{source.source_hash}")
-            document = DeconstructionDocument(
-                document_id=document_id,
-                project_id=project_id,
-                account_id=account_id,
-                source_version_id=source.version_id,
-                source_revision=source.source_revision or 0,
-                source_hash=source.source_hash,
-                status="queued",
-                progress_percent=0,
-                current_stage="等待拆解",
-                idempotency_key=idempotency_key or document_id,
-                created_at=now,
-                updated_at=now,
-            )
-            record.documents.append(document)
-            record.documents = record.documents[-MAX_HISTORY:]
-            record.active_document_id = document.document_id
-            record.updated_at = now
-            self.store.save(record)
-            return document
+                now = self._now()
+                document_id = self._slug(
+                    f"deconstruction:2.0:{project_id}:{source.version_id}:"
+                    f"{source.source_revision}:{source.source_hash}"
+                )
+                document = DeconstructionDocument(
+                    document_id=document_id,
+                    project_id=project_id,
+                    account_id=account_id,
+                    source_version_id=source.version_id,
+                    source_revision=source.source_revision or 0,
+                    source_hash=source.source_hash,
+                    status="queued",
+                    progress_percent=0,
+                    current_stage="等待拆解",
+                    idempotency_key=idempotency_key or document_id,
+                    analysis_contract_version="2.0",
+                    created_at=now,
+                    updated_at=now,
+                )
+                record.documents.append(document)
+                record.documents = record.documents[-MAX_HISTORY:]
+                record.active_document_id = document.document_id
+                record.updated_at = now
+                self.store.save_if_revision(record, record.record_revision)
+                return document
 
     def retry(
         self,
@@ -675,60 +722,92 @@ class DeconstructionService:
         expected_source_revision: int | None = None,
         expected_source_hash: str | None = None,
     ) -> DeconstructionDocument:
-        source = self._source(project_id, account_id)
-        self._check_source_precondition(
-            source,
-            expected_source_version_id=expected_source_version_id,
-            expected_source_revision=expected_source_revision,
-            expected_source_hash=expected_source_hash,
-        )
-        record = self._record(project_id, account_id)
-        document = self._document(record, document_id or (record.active_document_id if record else None))
-        if document is None:
-            return self.enqueue_for_project(
-                project_id,
-                account_id,
-                reason="手动重建",
-                idempotency_key=idempotency_key,
-                expected_source_version_id=expected_source_version_id,
-                expected_source_revision=expected_source_revision,
-                expected_source_hash=expected_source_hash,
-            )
-        if document.status not in {"failed_retryable", "stale", "rebuild_required"}:
-            if document.status in {"queued", "running", "completed"}:
-                return document
-            raise DeconstructionServiceError("deconstruction_not_retryable", "当前拆解没有可执行的重试。", status_code=409)
-        if not source.sufficient or source.pending_changes:
+        try:
+            # Retry uses exactly the same project -> instance lock order as
+            # enqueue and publish. Source and record are re-read while the
+            # persistent gate is held; no stale retry can overwrite a newer
+            # worker or author mutation.
+            with self.store.project_locks.project_lock(project_id):
+                source = self._source(project_id, account_id)
+                self._check_source_precondition(
+                    source,
+                    expected_source_version_id=expected_source_version_id,
+                    expected_source_revision=expected_source_revision,
+                    expected_source_hash=expected_source_hash,
+                )
+                with self._lock:
+                    record = self._record(project_id, account_id)
+                    document = self._document(
+                        record,
+                        document_id or (record.active_document_id if record else None),
+                    )
+                if document is None:
+                    return self.enqueue_for_project(
+                        project_id,
+                        account_id,
+                        reason="手动重建",
+                        idempotency_key=idempotency_key,
+                        expected_source_version_id=expected_source_version_id,
+                        expected_source_revision=expected_source_revision,
+                        expected_source_hash=expected_source_hash,
+                    )
+                if document.analysis_contract_version != "2.0":
+                    return self.enqueue_for_project(
+                        project_id,
+                        account_id,
+                        reason="阶段32深度重建",
+                        idempotency_key=idempotency_key,
+                        expected_source_version_id=expected_source_version_id,
+                        expected_source_revision=expected_source_revision,
+                        expected_source_hash=expected_source_hash,
+                    )
+                if document.status not in {"failed_retryable", "stale", "rebuild_required"}:
+                    if document.status in {"queued", "running", "completed"}:
+                        return document
+                    raise DeconstructionServiceError(
+                        "deconstruction_not_retryable",
+                        "当前拆解没有可执行的重试。",
+                        status_code=409,
+                    )
+                if not source.sufficient or source.pending_changes:
+                    raise DeconstructionServiceError(
+                        "deconstruction_rebuild_required",
+                        "请先完成并确认当前正文修改，再重试作品拆解。",
+                        status_code=409,
+                    )
+                if (
+                    document.source_version_id != source.version_id
+                    or document.source_revision != source.source_revision
+                    or document.source_hash != source.source_hash
+                ):
+                    return self.enqueue_for_project(
+                        project_id,
+                        account_id,
+                        reason="基于新稿本重建",
+                        idempotency_key=idempotency_key,
+                    )
+                with self._lock:
+                    assert record is not None and document is not None
+                    document.status = "queued"
+                    document.progress_percent = 0
+                    document.current_stage = "等待重新拆解"
+                    document.error_message = None
+                    document.retry_count += 1
+                    if idempotency_key:
+                        document.idempotency_key = idempotency_key
+                    document.updated_at = self._now()
+                    assert record is not None
+                    record.active_document_id = document.document_id
+                    record.updated_at = document.updated_at
+                    self.store.save_if_revision(record, record.record_revision)
+                    return document
+        except ProjectLockError as exc:
             raise DeconstructionServiceError(
-                "deconstruction_rebuild_required",
-                "请先完成并确认当前正文修改，再重试作品拆解。",
-                status_code=409,
-            )
-        if document.source_version_id != source.version_id or document.source_hash != source.source_hash:
-            return self.enqueue_for_project(
-                project_id,
-                account_id,
-                reason="基于新稿本重建",
-                idempotency_key=idempotency_key,
-            )
-        with self._lock:
-            record = self._record(project_id, account_id)
-            document = self._document(record, document.document_id)
-            if document is None:
-                return self.enqueue_for_project(project_id, account_id, reason="重试材料重新读取")
-            document.status = "queued"
-            document.progress_percent = 0
-            document.current_stage = "等待重新拆解"
-            document.error_message = None
-            document.retry_count += 1
-            if idempotency_key:
-                document.idempotency_key = idempotency_key
-            document.updated_at = self._now()
-            assert record is not None
-            record.active_document_id = document.document_id
-            record.updated_at = document.updated_at
-            self.store.save(record)
-            return document
+                "deconstruction_lock_unavailable",
+                "作品拆解暂时被另一项操作占用，请稍后重试。",
+                status_code=503,
+                data={"retryable": True},
+            ) from exc
 
     @staticmethod
     def _utf16_length(text: str) -> int:
@@ -806,23 +885,24 @@ class DeconstructionService:
         return "发展观察"
 
     def _build_document(self, source: _Source, document: DeconstructionDocument) -> None:
-        if any("[[deconstruction-fail]]" in chapter.content for chapter in source.chapters):
+        chapters = source.analysis_chapters
+        if any("[[deconstruction-fail]]" in chapter.content for chapter in chapters):
             raise DeconstructionAnalysisError("demo_failure")
-        if not source.chapters or not source.version_id:
+        if not chapters or not source.version_id:
             raise DeconstructionAnalysisError("empty_source")
 
         evidence: list[EvidenceRef] = []
         chapter_breakdowns: list[ChapterBreakdown] = []
         timeline: list[TimelineNode] = []
-        total_chars = sum(len(chapter.content) for chapter in source.chapters)
-        total_words = sum(self._word_count(chapter.content) for chapter in source.chapters)
+        total_chars = sum(len(chapter.content) for chapter in chapters)
+        total_words = sum(self._word_count(chapter.content) for chapter in chapters)
         global_offset = 0
 
-        for index, chapter in enumerate(source.chapters):
+        for index, chapter in enumerate(chapters):
             text = chapter.content
             sentences = self._sentences(text)
             paragraphs = self._paragraphs(text) or [text]
-            function = self._chapter_function(index, len(source.chapters), text)
+            function = self._chapter_function(index, len(chapters), text)
             first_sentence = sentences[0] if sentences else self._clip(text)
             last_sentence = sentences[-1] if sentences else self._clip(text)
             chapter_refs: list[EvidenceRef] = []
@@ -875,7 +955,7 @@ class DeconstructionService:
                 uncertainty.append("未从正文明确识别核心冲突。")
             if not information_sentence:
                 uncertainty.append("信息释放点不明显，仍需更多正文确认。")
-            if len(source.chapters) < 3:
+            if len(chapters) < 3:
                 uncertainty.append("章节数量较少，长程结构暂不能确定。")
             chapter_breakdowns.append(
                 ChapterBreakdown(
@@ -910,10 +990,10 @@ class DeconstructionService:
                 global_end = global_offset + local_end
                 start_percent = round(global_start / total_chars * 100, 2) if total_chars else 0.0
                 end_percent = round(global_end / total_chars * 100, 2) if total_chars else 100.0
-                if index == len(source.chapters) - 1 and scene_index == len(paragraphs[:8]) - 1:
+                if index == len(chapters) - 1 and scene_index == len(paragraphs[:8]) - 1:
                     end_percent = 100.0
-                word_start = sum(self._word_count(item.content) for item in source.chapters[:index]) + self._word_count(text[:local_offset])
-                word_end = sum(self._word_count(item.content) for item in source.chapters[:index]) + self._word_count(text[:local_end])
+                word_start = sum(self._word_count(item.content) for item in chapters[:index]) + self._word_count(text[:local_offset])
+                word_end = sum(self._word_count(item.content) for item in chapters[:index]) + self._word_count(text[:local_end])
                 event = self._clip(self._sentences(paragraph)[0] if self._sentences(paragraph) else paragraph, 240)
                 ref = self._evidence(source, chapter, document, paragraph, f"时间线片段 {scene_index + 1}", offset_hint=local_offset)
                 evidence.append(ref)
@@ -938,15 +1018,15 @@ class DeconstructionService:
                 )
             global_offset += len(text)
 
-        first_chapter = source.chapters[0]
-        last_chapter = source.chapters[-1]
+        first_chapter = chapters[0]
+        last_chapter = chapters[-1]
         opening_sentence = self._sentences(first_chapter.content)[0] if self._sentences(first_chapter.content) else first_chapter.content
         ending_sentence = self._sentences(last_chapter.content)[-1] if self._sentences(last_chapter.content) else last_chapter.content
         opening_ref = self._evidence(source, first_chapter, document, opening_sentence, "开端观察")
         ending_ref = self._evidence(source, last_chapter, document, ending_sentence, "结尾观察")
         evidence.extend([opening_ref, ending_ref])
 
-        development_chapter = source.chapters[min(1, len(source.chapters) - 1)]
+        development_chapter = chapters[min(1, len(chapters) - 1)]
         development_sentence = self._first_matching_sentence(
             development_chapter.content,
             ("推进", "发展", "冲突", "决定", "进入", "继续"),
@@ -967,7 +1047,7 @@ class DeconstructionService:
         climax_chapter = next(
             (
                 chapter
-                for chapter in reversed(source.chapters)
+                for chapter in reversed(chapters)
                 if self._first_matching_sentence(chapter.content, ("终于", "危机", "爆发", "转折", "真相", "决定"))
             ),
             None,
@@ -994,13 +1074,13 @@ class DeconstructionService:
 
         character_candidates: list[DeconstructionCandidate] = []
         all_names = list(source.character_names)
-        for chapter in source.chapters:
+        for chapter in chapters:
             for name in self._character_names_for_chapter(source, chapter):
                 if name not in all_names:
                     all_names.append(name)
         for name in all_names[:12]:
             chapter = next(
-                (item for item in source.chapters if name in item.content),
+                (item for item in chapters if name in item.content),
                 first_chapter,
             )
             ref = self._evidence(source, chapter, document, name, "人物候选")
@@ -1015,7 +1095,7 @@ class DeconstructionService:
             )
 
         conflict_candidates: list[DeconstructionCandidate] = []
-        for chapter in source.chapters:
+        for chapter in chapters:
             sentence = self._first_matching_sentence(
                 chapter.content,
                 ("核心冲突", "冲突", "对抗", "危险", "必须", "追赶"),
@@ -1035,7 +1115,7 @@ class DeconstructionService:
                 break
 
         overview_uncertainty: list[str] = []
-        if len(source.chapters) < 3:
+        if len(chapters) < 3:
             overview_uncertainty.append("当前只有少量正式章节，长程节奏和结尾判断仍不稳定。")
         if not character_candidates:
             overview_uncertainty.append("未发现明确人物标记，人物候选暂为空。")
@@ -1043,11 +1123,11 @@ class DeconstructionService:
             overview_uncertainty.append("未发现明确核心冲突标记，冲突候选暂为空。")
         volume_titles = [
             chapter.title
-            for chapter in source.chapters
+            for chapter in chapters
             if re.search(r"卷|篇|部", chapter.title)
         ]
         structure_units = [
-            f"章节结构（共 {len(source.chapters)} 章）",
+            f"章节结构（共 {len(chapters)} 章）",
             f"正文片段（共 {len(timeline)} 段）",
         ]
         if volume_titles:
@@ -1056,7 +1136,7 @@ class DeconstructionService:
         overview = DeconstructionOverview(
             title=source.title,
             total_word_count=total_words,
-            chapter_count=len(source.chapters),
+            chapter_count=len(chapters),
             structure_units=structure_units,
             main_character_candidates=character_candidates,
             core_conflict_candidates=conflict_candidates,
@@ -1078,11 +1158,71 @@ class DeconstructionService:
         document.timeline = self._normalize_timeline(timeline)
         document.chapter_breakdowns = chapter_breakdowns
         deduplicated: dict[str, EvidenceRef] = {item.evidence_id: item for item in evidence}
+        if document.analysis_contract_version == "2.0":
+            assert source.version_id is not None and source.source_hash is not None
+            snapshot = DepthSnapshot(
+                project_id=source.project_id,
+                document_id=document.document_id,
+                source_version_id=source.version_id,
+                source_revision=source.source_revision or 0,
+                source_hash=source.source_hash,
+                chapters=tuple(
+                    ChapterInput(
+                        chapter_id=chapter.chapter_id,
+                        chapter_number=chapter.chapter_number,
+                        title=chapter.title,
+                        content=chapter.content,
+                    )
+                    for chapter in source.chapters
+                ),
+                character_names=source.character_names,
+            )
+            report = DepthAnalysisEngine(snapshot).build()
+            validate_depth_report_source(
+                report,
+                source=DepthSource(
+                    project_id=source.project_id,
+                    document_id=document.document_id,
+                    source_version_id=source.version_id,
+                    source_revision=source.source_revision or 0,
+                    source_hash=source.source_hash,
+                ),
+                chapters={chapter.chapter_id: chapter.content for chapter in source.chapters},
+            )
+            document.report = report
+            for item in report.evidence:
+                # Stage 31's evidence endpoint accepts the legacy bounded
+                # projection. The depth report itself remains the canonical
+                # six-view object and retains exact UTF-16 offsets.
+                if item.granularity != "span":
+                    continue
+                assert item.start_offset is not None and item.end_offset is not None
+                target_path = (
+                    f"/independent/{source.project_id}?version_id={source.version_id}"
+                    f"&chapter_id={item.chapter_id}&evidence_id={item.evidence_id}"
+                    f"&document_id={document.document_id}"
+                )
+                deduplicated[item.evidence_id] = EvidenceRef(
+                    evidence_id=item.evidence_id,
+                    document_id=document.document_id,
+                    source_version_id=item.source_version_id,
+                    source_revision=item.source_revision,
+                    source_hash=item.source_hash,
+                    chapter_id=item.chapter_id,
+                    chapter_number=item.chapter_number,
+                    start_offset=item.start_offset,
+                    end_offset=item.end_offset,
+                    offset_unit=item.offset_unit,
+                    excerpt=item.excerpt,
+                    label=item.label,
+                    target_path=target_path,
+                )
         document.evidence = list(deduplicated.values())
         document.uncertainty = overview_uncertainty
 
     @staticmethod
     def _clear_result(document: DeconstructionDocument) -> None:
+        document.report = None
         document.overview = None
         document.timeline = []
         document.chapter_breakdowns = []
@@ -1091,45 +1231,92 @@ class DeconstructionService:
         document.completed_at = None
 
     def _mark_not_current(self, project_id: str, account_id: str, document_id: str, source: _Source) -> DeconstructionDocument:
-        with self._lock:
-            record = self._record(project_id, account_id)
-            document = self._document(record, document_id)
-            if document is None:
-                raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
-            if document.status == "completed" and source.sufficient and document.source_version_id == source.version_id and document.source_hash == source.source_hash:
-                return document
-            document.status = "rebuild_required" if source.pending_changes or not source.sufficient else "stale"
-            document.current_stage = "等待根据当前正文更新"
-            document.error_message = "正文来源已变化，当前拆解没有覆盖作者的新内容。"
-            document.updated_at = self._now()
-            assert record is not None
-            record.updated_at = document.updated_at
-            self.store.save(record)
-            return document
+        try:
+            with self.store.project_locks.project_lock(project_id):
+                with self._lock:
+                    record = self._record(project_id, account_id)
+                    document = self._document(record, document_id)
+                    if document is None:
+                        raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
+                    if (
+                        document.status == "completed"
+                        and document.analysis_contract_version == "2.0"
+                        and source.sufficient
+                        and document.source_version_id == source.version_id
+                        and document.source_revision == source.source_revision
+                        and document.source_hash == source.source_hash
+                    ):
+                        return document
+                    assert record is not None
+                    return self._mark_not_current_locked(record, document, source)
+        except ProjectLockError as exc:
+            raise DeconstructionServiceError(
+                "deconstruction_lock_unavailable",
+                "作品拆解暂时被另一项操作占用，请稍后重试。",
+                status_code=503,
+                data={"retryable": True},
+            ) from exc
 
     def _mark_failed(self, project_id: str, account_id: str, document_id: str, message: str) -> DeconstructionDocument:
         """把分析异常归类为可重试状态；错误消息不携带异常原文或正文。"""
 
-        with self._lock:
-            record = self._record(project_id, account_id)
-            document = self._document(record, document_id)
-            if document is None:
-                raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
-            if document.status == "completed":
-                return document
-            document.status = "failed_retryable"
-            document.progress_percent = 0
-            document.current_stage = "拆解失败"
-            document.error_message = message
-            self._clear_result(document)
-            document.updated_at = self._now()
-            assert record is not None
-            record.updated_at = document.updated_at
-            self.store.save(record)
-            return document
+        try:
+            with self.store.project_locks.project_lock(project_id):
+                with self._lock:
+                    record = self._record(project_id, account_id)
+                    document = self._document(record, document_id)
+                    if document is None:
+                        raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
+                    if document.status == "completed":
+                        return document
+                    document.status = "failed_retryable"
+                    document.progress_percent = 0
+                    document.current_stage = "拆解失败"
+                    document.error_message = message
+                    self._clear_result(document)
+                    document.updated_at = self._now()
+                    assert record is not None
+                    record.updated_at = document.updated_at
+                    self.store.save_if_revision(record, record.record_revision)
+                    return document
+        except ProjectLockError as exc:
+            raise DeconstructionServiceError(
+                "deconstruction_lock_unavailable",
+                "作品拆解暂时被另一项操作占用，请稍后重试。",
+                status_code=503,
+                data={"retryable": True},
+            ) from exc
+
+    @staticmethod
+    def _document_matches_source(document: DeconstructionDocument, source: _Source) -> bool:
+        return bool(
+            source.sufficient
+            and not source.pending_changes
+            and document.source_version_id == source.version_id
+            and document.source_revision == source.source_revision
+            and document.source_hash == source.source_hash
+        )
+
+    def _mark_not_current_locked(
+        self,
+        record: DeconstructionProjectRecord,
+        document: DeconstructionDocument,
+        source: _Source,
+    ) -> DeconstructionDocument:
+        """Mutate one loaded record while project lock is already held."""
+
+        document.status = "rebuild_required" if source.pending_changes or not source.sufficient else "stale"
+        document.current_stage = "等待根据当前正文更新"
+        document.error_message = "正文来源已变化，当前拆解没有覆盖作者的新内容。"
+        self._clear_result(document)
+        document.updated_at = self._now()
+        record.updated_at = document.updated_at
+        self.store.save_if_revision(record, record.record_revision)
+        return document
 
     def run_document(self, project_id: str, account_id: str, document_id: str) -> DeconstructionDocument:
-        # 只在极短窗口内持拆解侧车锁；来源读取必须在锁外，避免反向拿独立/事务锁。
+        # First inspect the sidecar without holding the deconstruction mutex.
+        # The canonical source snapshot is then captured outside both locks.
         with self._lock:
             record = self._record(project_id, account_id)
             document = self._document(record, document_id)
@@ -1149,32 +1336,47 @@ class DeconstructionService:
         except Exception:
             return self._mark_failed(project_id, account_id, document_id, "拆解来源读取失败，正文没有被修改；可以重试。")
 
-        if (
-            not source.sufficient
-            or source.pending_changes
-            or document.source_version_id != source.version_id
-            or document.source_hash != source.source_hash
-        ):
+        if not self._document_matches_source(document, source):
             return self._mark_not_current(project_id, account_id, document_id, source)
 
-        with self._lock:
-            record = self._record(project_id, account_id)
-            document = self._document(record, document_id)
-            if document is None:
-                raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
-            if document.status == "completed":
-                return document
-            if document.status not in {"queued", "running"}:
-                return document
-            document.status = "running"
-            document.progress_percent = 8
-            document.current_stage = "读取正文结构"
-            document.error_message = None
-            document.updated_at = self._now()
-            assert record is not None
-            record.updated_at = document.updated_at
-            self.store.save(record)
-            working = document.model_copy(deep=True)
+        run_record_revision: int | None = None
+        try:
+            # The common persistent lock is always outermost. Source reload is
+            # outside the instance mutex so this path cannot hold a
+            # deconstruction lock while waiting for an author/transaction lock.
+            with self.store.project_locks.project_lock(project_id):
+                locked_source = self._source(project_id, account_id)
+                if not self._document_matches_source(document, locked_source):
+                    return self._mark_not_current(project_id, account_id, document_id, locked_source)
+                with self._lock:
+                    record = self._record(project_id, account_id)
+                    document = self._document(record, document_id)
+                    if document is None:
+                        raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
+                    if document.status == "completed":
+                        return document
+                    if document.status not in {"queued", "running"}:
+                        return document
+                    if not self._document_matches_source(document, locked_source):
+                        assert record is not None
+                        return self._mark_not_current_locked(record, document, locked_source)
+                    document.status = "running"
+                    document.progress_percent = 8
+                    document.current_stage = "读取正文结构"
+                    document.error_message = None
+                    document.updated_at = self._now()
+                    assert record is not None
+                    record.updated_at = document.updated_at
+                    self.store.save_if_revision(record, record.record_revision)
+                    run_record_revision = record.record_revision
+                    working = document.model_copy(deep=True)
+        except ProjectLockError as exc:
+            raise DeconstructionServiceError(
+                "deconstruction_lock_unavailable",
+                "作品拆解暂时被另一项操作占用，请稍后重试。",
+                status_code=503,
+                data={"retryable": True},
+            ) from exc
 
         try:
             working.current_stage = "提取章节与证据"
@@ -1183,38 +1385,55 @@ class DeconstructionService:
             working.current_stage = "整理节奏与章节拆解"
             working.progress_percent = 82
 
-            # 分析期间作者可能产生新 revision；完成前再做一次来源门禁，且仍在拆解锁外。
-            final_source = self._source(project_id, account_id)
-            if (
-                not final_source.sufficient
-                or final_source.pending_changes
-                or final_source.version_id != source.version_id
-                or final_source.source_hash != source.source_hash
-            ):
-                return self._mark_not_current(project_id, account_id, document_id, final_source)
-
-            with self._lock:
+            # Phase C: hold the same persistent project gate used by author
+            # writes, reload the canonical source and record, then CAS publish.
+            # No author revision can land between this source read and save.
+            with self.store.project_locks.project_lock(project_id):
+                final_source = self._source(project_id, account_id)
                 record = self._record(project_id, account_id)
-                latest = self._document(record, document_id)
-                if latest is None:
-                    raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
-                if latest.status == "completed":
-                    return latest
-                if latest.source_version_id != source.version_id or latest.source_hash != source.source_hash:
-                    return self._mark_not_current(project_id, account_id, document_id, final_source)
-                working.status = "completed"
-                working.progress_percent = 100
-                working.current_stage = "拆解完成"
-                working.completed_at = self._now()
-                working.updated_at = working.completed_at
-                assert record is not None
-                index = record.documents.index(latest)
-                record.documents[index] = working
-                record.updated_at = working.updated_at
-                self.store.save(record)
-                return working
+                with self._lock:
+                    latest = self._document(record, document_id)
+                    if latest is None:
+                        raise DeconstructionServiceError("deconstruction_missing", "作品拆解任务不存在。", status_code=404)
+                    if latest.status == "completed":
+                        return latest
+                    if not self._document_matches_source(latest, source) or not self._document_matches_source(latest, final_source):
+                        assert record is not None
+                        return self._mark_not_current_locked(record, latest, final_source)
+                    if run_record_revision is None or record is None or record.record_revision != run_record_revision:
+                        # Another durable sidecar mutation won the CAS window.
+                        # Never overwrite the newer record with this worker's
+                        # stale in-memory copy.
+                        return latest
+                    working.status = "completed"
+                    working.progress_percent = 100
+                    working.current_stage = "拆解完成"
+                    working.completed_at = self._now()
+                    working.updated_at = working.completed_at
+                    index = record.documents.index(latest)
+                    record.documents[index] = working
+                    record.updated_at = working.updated_at
+                    self.store.save_if_revision(record, record.record_revision)
+                    return working
         except (KeyboardInterrupt, SystemExit):
             raise
+        except DeconstructionStoreConflict:
+            latest_record = self._record(project_id, account_id)
+            latest = self._document(latest_record, document_id)
+            if latest is not None:
+                return latest
+            raise DeconstructionServiceError(
+                "deconstruction_conflict",
+                "作品拆解已被另一项操作更新，请刷新后重试。",
+                status_code=409,
+            ) from None
+        except (ProjectLockError, DeconstructionStoreError) as exc:
+            raise DeconstructionServiceError(
+                "deconstruction_lock_unavailable" if isinstance(exc, ProjectLockError) else "deconstruction_store_unavailable",
+                "作品拆解暂时不可写入，请稍后重试。",
+                status_code=503,
+                data={"retryable": True},
+            ) from exc
         except DeconstructionAnalysisError:
             return self._mark_failed(project_id, account_id, document_id, "确定性拆解没有完成，正文没有被修改；可以重试。")
         except (ValueError, TypeError, KeyError):
@@ -1253,13 +1472,24 @@ class DeconstructionService:
         record = self._record(project_id, account_id)
         if record is None:
             raise DeconstructionServiceError("evidence_missing", "这条拆解证据不存在。", status_code=404)
+        active = self._document(record, record.active_document_id)
+        active_depth = bool(
+            active is not None
+            and active.status == "completed"
+            and active.analysis_contract_version == "2.0"
+            and self._document_matches_source(active, source)
+        )
         for document in record.documents:
             for item in document.evidence:
                 if item.evidence_id != evidence_id:
                     continue
                 source_matches_current = bool(
-                    source.sufficient
+                    active_depth
+                    and active is not None
+                    and item.document_id == active.document_id
+                    and source.sufficient
                     and item.source_version_id == source.version_id
+                    and item.source_revision == source.source_revision
                     and item.source_hash == source.source_hash
                 )
                 chapter = next((chapter for chapter in source.chapters if chapter.chapter_id == item.chapter_id), None)

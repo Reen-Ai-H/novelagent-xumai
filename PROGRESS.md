@@ -1,5 +1,37 @@
 # 当前任务进度
 
+## 阶段 32：深度作品拆解（审计通过，待合并，2026-09-05）
+
+- 最新里程碑：集成候选 `a631606` 已通过同一独立审计任务最终复验，P0/P1/P2/P3 均为 0。全量 `204 tests / 0 failed / 0 skipped`，阶段 32 专项 69 项，阶段 31 回归 28 项，并发回归 44 项；OpenAPI 58/61、旧 `/novel` 16/19，compileall、Node 与 diff check 均通过。
+- 真实界面：Microsoft Edge 152 在 1440×900 与 1024×900 完成登录、导入、后台拆解、总览和六视角、当前证据精确定位、历史证据只读、刷新/重登及修改后重建；两个视口均 0 console error/warn、无整页横向溢出。
+- 审计回派：首轮发现否定动作误生成 enables/paid_off、空白必填字段和顺序型 stable ID；后续扩展反例覆盖拒绝/阻止、答案宾语、模态否定、词法例外及带把/将宾语的双重/三重否定。缺陷均回原后端任务修复并由同一审计任务复验，最终 9 种双重否定 36 例、三重否定 27 例通过。
+- GitHub：分支 `codex/stage-32-deconstruction-depth`，Draft PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4)。`a631606` 的 push 与 pull_request 两组 Ubuntu/Windows CI 均通过；完成本轮文档提交并取得同 SHA 双平台绿灯后转 Ready 并合并。
+
+### 实施记录
+
+- 架构冻结：可见架构任务完成冻结提交 `ce49277`，管理按 checkpoint → freeze 顺序接入为 `52ca221`、`1272673`。完整阅读合同并复核一致性后，管理全量实际 `180 tests / 12 failures / 0 skipped`（11.676s）：168 项既有/合同检查通过，12 项引擎黑盒验收仍缺 report。六视角 schema 冻结当时不代表功能完成，随后按同一基线创建可见 Luna/max 后端和前端任务并行。
+- 并行研发已启动：可见“阶段32 深度拆解后端引擎”使用 `codex/stage-32-backend-depth`；“阶段32 六视角前端体验”使用 `codex/stage-32-frontend-depth`。两者已核实 active，且均 fast-forward 到冻结管理基线 `de736c2`，模型/推理均为 Luna/max。后端不改前端，前端不改后端，管理验收/文档/CI不交给执行任务改写；待集成后再建独立审计。
+- 冻结后验收对齐：旧版夹具使用独立的 legacy 文档身份，避免借用新引擎排队 ID；补首读 `rebuild_required`/可升级、旧证据历史只读以及响应不含内部 CAS/去重字段断言。升级单测实跑 1 failure / 0 skipped（0.065s），旧引擎仍误报 completed，确认下一步由后端修复；diff 检查通过。
+- 管理浏览器门禁对齐冻结合同：真实端到端不再从阶段31顶层 `result.evidence` 误取证据，改为强制 `analysis_contract_version=2.0`、六视角容器完整、`result.report.evidence` 来源 hash 一致；修改后重建也必须仍为2.0，再用旧深度证据验证历史只读。前端证据抽屉的可访问交互待前端候选接入后继续补齐。
+- 前端增量审查发现并回派两项：nullable 深度指标不能被 JavaScript 转成0（前端已改为严格保留null并显示未知）；roving tab 只有当前项可进Tab序列时，必须实现方向键/Home/End，否则六视角对普通键盘用户不可达。管理浏览器门禁已改为从总览仅用 ArrowRight 依次切换六视角并核对焦点，不再通过测试代码逐个强制 focus 掩盖缺陷。
+
+- 管理分支：`codex/stage-32-deconstruction-depth`，从最新 `origin/main=223b414` 建立隔离工作区；原 main 工作区的测试改动、启动脚本和本地数据全部保留。
+- 已执行：`git fetch origin main`、`git merge --ff-only origin/main`、`git rev-list --left-right --count HEAD...origin/main`，主线一致（0/0）；完整读取规则、路线、任务书、进度与阻塞。
+- 顺序：架构冻结公开合同；后端与前端使用独立工作区并行；管理集成后交独立审计，缺陷回派原实现任务复验。
+- 当前未完成：仅剩现役文档提交、该提交对应的 GitHub 双平台 CI 和 PR 合并；六视角实现、专项/全量/浏览器门禁与独立审计均已完成。
+- 基线发现：阶段 15 dotenv 测试依赖开发目录已有 `.env` 与有效 key，需改为隔离配置夹具，真实验证跨 cwd 加载，不通过注入环境 key 制造通过。
+- 基线复验：干净工作区全量 `135 tests / 1 failure / 0 skipped`，唯一失败为不存在开发 `.env`。改为临时项目布局执行原配置模块、移除继承的模型变量、给无关 cwd 放置反例配置后，全量 `135 tests / 0 failed / 0 skipped`（9.483s）。compileall、node 语法与 diff 检查通过；没有读取或修改用户 `.env`。
+- GitHub：初始管理提交 `562513b`、基线修复 `a90682d` 已推送至阶段分支；Draft PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4)。`a90682d` 的 [CI run](https://github.com/Reen-Ai-H/novelagent-xumai/actions/runs/33897641025) Ubuntu/Windows 均 success，仅证明此时基线修复通过。
+- 验收基础：新增隔离浏览器服务（真实 app/worker、临时测试账户和自有合成正文、禁止模型调用）；Edge 152 已实测视口 1440×900、根 scrollWidth=1440。新的六视角浏览器测试已红测：完成真实登录/创建/导入/后台拆解后，旧前端缺人物 tab，另有 favicon 404 控制台错误；留给前端实现修复，不屏蔽日志。
+- 自动门禁入口 `tests/run_quality_gates.py` 已实跑 `135 tests / 0 failed / 0 skipped`（10.245s）、OpenAPI 58/61、旧 `/novel` 16/19，静态通过；CI 改为无需 `.env` 或环境 key，并强制零 skipped 和路由下限。
+- 用户更新协作方式：停止隐藏子 Agent，改为侧栏可见的独立对话任务，统一使用 `gpt-5.6-luna` / `max`。原架构执行者已停止关闭，已落盘 schema/24项契约测试保存为 `c59b1a2`（未冻结），交可见架构任务接续；合同冻结后创建可见后端/前端任务，集成后创建可见独立审计任务。每个任务保持隔离 worktree，由管理任务统一集成和 GitHub 交付。
+- 可见架构任务“阶段32 架构合同冻结”已确认 active，在独立 `codex/stage-32-architecture-visible` 分支接上 `a53030e` checkpoint，继续审查和编写冻结合同。新建任务列表曾未及时显示，已通过实际任务读取确认运行，未重复创建。
+- 管理侧新增 `tests/test_stage32_acceptance.py` 的 9 项黑盒验收，覆盖六类自然/合成正文、真实结构化结果、人物变化/因果/伏笔语义、假因果与假回收反例、来源证据、幂等重建与历史隔离。初始红测 9/9 失败均为现有 stage31 缺少深度 `report`；这是未实现证据，禁止 skip 或改断言转绿。
+- 验收复核：导入会 strip 章节边缘空白，因此前导空白/emoji 改由真实 start→draft→complete 写入，逐字断言保存/正式正文后再检查证据；新增首尾/中间空白章用例。专项现为 10 tests / 10 expected failures / 0 skipped（0.552s），均停在尚无深度 report。`a1260a4` 双平台 CI 的 144 tests / 9 failures / 0 skipped 与当时同一缺口一致，不把红测误报为平台故障。
+- 旧数据升级红测：新增阶段 31 已完成侧车夹具，经真实读取、显式 rebuild、worker 要获得新版 report，同时保留旧文档/证据和作者正文；旧实现仅按来源哈希去重，不能完成升级。专项实际 `11 tests / 11 failures / 0 skipped`（0.607s），均为尚无深度 report；`git diff --check` 通过。升级身份与公开状态规则已交回可见架构任务冻结，不删除旧结果。
+- 合同中途复核：发现“每个视角必须有非 unknown 实体”会迫使无人物/无伏笔文本编造内容，已回派架构任务修正并新增纯景物负例；倒叙有标记不等于可确定全局 story_order，也已要求显式保留未知。管理全量实跑 `147 tests / 12 failures / 0 skipped`（11.525s），135 项既有测试通过、12 项新深度验收均停在未实现 report；compileall、前端/浏览器脚本 node 语法、diff 检查通过。升级用例提交 `b692292` 已推送，当前仍为 Draft 阶段。
+- 管理独立预检架构工作区当前 schema/测试：`tests/run_quality_gates.py` 实际 `168 tests / 0 failed / 0 skipped`（11.145s）、OpenAPI 58/61、旧 `/novel` 16/19、静态检查通过；该工作区尚未提交冻结文档，且不含管理侧 12 项引擎黑盒验收，因此不代表深度功能完成。重新 fetch 后管理分支相对 `origin/main` 为 8/0；可见 Luna/max 协作决定同步至 `DECISIONS.md` 和 `AGENT_WORKFLOW.md`，避免换任务后退回隐藏 Agent。
+
 ## 阶段 31J：Windows 零上下文接棒任务书（2026-09-05）
 
 - 目标：补齐 GitHub 中缺失的下一阶段正式任务书与长期研发顺序，让 Windows 新管理任务不依赖 Mac 聊天记录即可继续。
