@@ -1,11 +1,18 @@
 # 当前任务进度
 
-## 阶段 32：深度作品拆解（审计通过，待合并，2026-09-05）
+## 阶段 33：独立创作体验收口（进行中，2026-09-05）
+
+- 基线：从最新 `origin/main=ec2f31a71f5f7839d9f34f03832afa89ced31d4e` 建立 `codex/stage-33-independent-experience` 隔离工作区；阶段 32 已在 PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4) 合并。
+- 当前顺序：先由可见 Luna/max 任务冻结真实作者流程、产品/架构合同和验收，再按不重叠目录拆分实现；总管理负责集成、真实浏览器和最终文档，独立审计最后介入。
+- 管理基线走查：用隔离临时账户和合成正文实走新建独立作品、空白写作、自动保存、完成本章、新章、档案、版本、旧章修改重建和深度拆解。确认四个待写入合同的摩擦点：新增章节后没有自动进入新章；刷新正在写的第二章会回到第一章；已落盘但未完成章节从档案返回时显示“等待保存”；稿本预览只展示第一章摘要，无法充分判断整本恢复目标。
+- 安全：走查没有读取 `.env`，没有调用真实模型或付费服务，数据仅存在于浏览器测试服务自动创建的临时目录；服务和临时浏览器均已停止。
+
+## 阶段 32：深度作品拆解（已合并，2026-09-05）
 
 - 最新里程碑：集成候选 `a631606` 已通过同一独立审计任务最终复验，P0/P1/P2/P3 均为 0。全量 `204 tests / 0 failed / 0 skipped`，阶段 32 专项 69 项，阶段 31 回归 28 项，并发回归 44 项；OpenAPI 58/61、旧 `/novel` 16/19，compileall、Node 与 diff check 均通过。
 - 真实界面：Microsoft Edge 152 在 1440×900 与 1024×900 完成登录、导入、后台拆解、总览和六视角、当前证据精确定位、历史证据只读、刷新/重登及修改后重建；两个视口均 0 console error/warn、无整页横向溢出。
 - 审计回派：首轮发现否定动作误生成 enables/paid_off、空白必填字段和顺序型 stable ID；后续扩展反例覆盖拒绝/阻止、答案宾语、模态否定、词法例外及带把/将宾语的双重/三重否定。缺陷均回原后端任务修复并由同一审计任务复验，最终 9 种双重否定 36 例、三重否定 27 例通过。
-- GitHub：分支 `codex/stage-32-deconstruction-depth`，Draft PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4)。`a631606` 的 push 与 pull_request 两组 Ubuntu/Windows CI 均通过；完成本轮文档提交并取得同 SHA 双平台绿灯后转 Ready 并合并。
+- GitHub：最终候选 `08b74ad` 的 push 与 pull_request 两组 Ubuntu/Windows CI 均通过；PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4) 已从 Draft 转 Ready 并合并，`main` 合并提交为 `ec2f31a71f5f7839d9f34f03832afa89ced31d4e`。
 
 ### 实施记录
 
@@ -18,7 +25,7 @@
 - 管理分支：`codex/stage-32-deconstruction-depth`，从最新 `origin/main=223b414` 建立隔离工作区；原 main 工作区的测试改动、启动脚本和本地数据全部保留。
 - 已执行：`git fetch origin main`、`git merge --ff-only origin/main`、`git rev-list --left-right --count HEAD...origin/main`，主线一致（0/0）；完整读取规则、路线、任务书、进度与阻塞。
 - 顺序：架构冻结公开合同；后端与前端使用独立工作区并行；管理集成后交独立审计，缺陷回派原实现任务复验。
-- 当前未完成：仅剩现役文档提交、该提交对应的 GitHub 双平台 CI 和 PR 合并；六视角实现、专项/全量/浏览器门禁与独立审计均已完成。
+- 完成态：六视角实现、专项/全量/浏览器门禁、独立审计、最终文档、同 SHA 双平台 CI 和 PR 合并均已完成。
 - 基线发现：阶段 15 dotenv 测试依赖开发目录已有 `.env` 与有效 key，需改为隔离配置夹具，真实验证跨 cwd 加载，不通过注入环境 key 制造通过。
 - 基线复验：干净工作区全量 `135 tests / 1 failure / 0 skipped`，唯一失败为不存在开发 `.env`。改为临时项目布局执行原配置模块、移除继承的模型变量、给无关 cwd 放置反例配置后，全量 `135 tests / 0 failed / 0 skipped`（9.483s）。compileall、node 语法与 diff 检查通过；没有读取或修改用户 `.env`。
 - GitHub：初始管理提交 `562513b`、基线修复 `a90682d` 已推送至阶段分支；Draft PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4)。`a90682d` 的 [CI run](https://github.com/Reen-Ai-H/novelagent-xumai/actions/runs/33897641025) Ubuntu/Windows 均 success，仅证明此时基线修复通过。
