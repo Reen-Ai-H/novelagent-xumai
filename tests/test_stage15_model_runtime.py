@@ -121,7 +121,7 @@ print({
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
-            cwd="/tmp",
+            cwd=tempfile.gettempdir(),
             env={**os.environ, "PYTHONPATH": str(root)},
             capture_output=True,
             text=True,

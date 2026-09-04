@@ -39,7 +39,7 @@ jobs:
 
       - name: Run full unittest suite
         env:
-          OPENAI_API_KEY: ci-test-placeholder
+          DASHSCOPE_API_KEY: ci-test-placeholder
         run: python -W ignore -m unittest discover -s tests -q
 
       - name: Compile Python sources
