@@ -8,6 +8,9 @@
 - 当前未完成：六视角实现、专项/全量/浏览器门禁、独立审计、GitHub 双平台 CI 和合并；不沿用阶段 31 通过记录冒充阶段 32 验收。
 - 基线发现：阶段 15 dotenv 测试依赖开发目录已有 `.env` 与有效 key，需改为隔离配置夹具，真实验证跨 cwd 加载，不通过注入环境 key 制造通过。
 - 基线复验：干净工作区全量 `135 tests / 1 failure / 0 skipped`，唯一失败为不存在开发 `.env`。改为临时项目布局执行原配置模块、移除继承的模型变量、给无关 cwd 放置反例配置后，全量 `135 tests / 0 failed / 0 skipped`（9.483s）。compileall、node 语法与 diff 检查通过；没有读取或修改用户 `.env`。
+- GitHub：初始管理提交 `562513b`、基线修复 `a90682d` 已推送至阶段分支；Draft PR [#4](https://github.com/Reen-Ai-H/novelagent-xumai/pull/4)。`a90682d` 的 [CI run](https://github.com/Reen-Ai-H/novelagent-xumai/actions/runs/33897641025) Ubuntu/Windows 均 success，仅证明此时基线修复通过。
+- 验收基础：新增隔离浏览器服务（真实 app/worker、临时测试账户和自有合成正文、禁止模型调用）；Edge 152 已实测视口 1440×900、根 scrollWidth=1440。新的六视角浏览器测试已红测：完成真实登录/创建/导入/后台拆解后，旧前端缺人物 tab，另有 favicon 404 控制台错误；留给前端实现修复，不屏蔽日志。
+- 自动门禁入口 `tests/run_quality_gates.py` 已实跑 `135 tests / 0 failed / 0 skipped`（10.245s）、OpenAPI 58/61、旧 `/novel` 16/19，静态通过；CI 改为无需 `.env` 或环境 key，并强制零 skipped 和路由下限。
 
 ## 阶段 31J：Windows 零上下文接棒任务书（2026-09-05）
 

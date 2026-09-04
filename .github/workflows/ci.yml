@@ -33,17 +33,5 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Prepare safe CI configuration
-        shell: bash
-        run: cp .env.example .env
-
-      - name: Run full unittest suite
-        env:
-          DASHSCOPE_API_KEY: ci-test-placeholder
-        run: python -W ignore -m unittest discover -s tests -q
-
-      - name: Compile Python sources
-        run: python -m compileall -q app schemas main.py
-
-      - name: Check frontend JavaScript
-        run: node --check frontend/app.js
+      - name: Run full tests, zero-skip, OpenAPI and static gates without credentials
+        run: python -W ignore tests/run_quality_gates.py
