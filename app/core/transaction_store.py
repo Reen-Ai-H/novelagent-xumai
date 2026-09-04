@@ -19,6 +19,7 @@ from tempfile import NamedTemporaryFile
 from threading import RLock
 from typing import Any, Callable
 
+from app.core.project_lock import ProjectLockStore
 from schemas.transaction import TransactionJournal, TransactionPayload
 
 
@@ -60,8 +61,14 @@ class TransactionStore:
     """journal 与 staging payload 的安全原子文件存储。"""
 
     def __init__(self, base_dir: Path = TRANSACTION_DATA_DIR) -> None:
-        self.base_dir = base_dir
+        self.base_dir = Path(base_dir)
         self._lock = RLock()
+        # All stores rooted under one application data directory share this
+        # lock directory.  Keep a common hashed gate and the stage-26 legacy
+        # filename as two nested locks with one global acquisition order.
+        lock_dir = self.base_dir if self.base_dir.name == ".novel_transactions" else self.base_dir.parent / ".novel_transactions"
+        self._project_locks = ProjectLockStore(lock_dir)
+        self._legacy_project_locks = ProjectLockStore(lock_dir, legacy_names=True)
 
     @staticmethod
     def _validate_id(value: str) -> str:
@@ -77,34 +84,21 @@ class TransactionStore:
         return self.base_dir / f"{self._validate_id(transaction_id)}.payload.json"
 
     def _project_lock_path(self, project_id: str) -> Path:
-        return self.base_dir / f".{self._validate_id(project_id)}.write.lock"
+        return self._legacy_project_locks._path(project_id)
 
     @contextmanager
     def project_lock(self, project_id: str):
         """跨进程项目写锁；锁文件故障释放，不依赖进程内 asyncio/RLock。"""
-
+        # The common implementation is also used by independent manuscript
+        # writers and the deconstruction publisher.  ``legacy_names`` keeps
+        # the stage-26 lock filename stable for existing local transaction
+        # directories.  Always acquire the common hashed gate first, then
+        # the legacy lock; independent/deconstruction writers use the same
+        # hashed gate and can therefore never form a lock-order cycle.
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(self._project_lock_path(project_id), os.O_CREAT | os.O_RDWR, 0o600)
-        acquired = False
-        try:
-            if os.name == "nt":
-                # msvcrt.locking 锁定当前文件指针起始的一个字节；固定文件长度
-                # 后再加锁，避免空锁文件在 Windows 上无法建立区域锁。
-                os.ftruncate(descriptor, 1)
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
-            else:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-            acquired = True
-            yield
-        finally:
-            if acquired:
-                if os.name == "nt":
-                    os.lseek(descriptor, 0, os.SEEK_SET)
-                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-                else:
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
+        with self._project_locks.project_lock(project_id):
+            with self._legacy_project_locks.project_lock(project_id):
+                yield
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:
