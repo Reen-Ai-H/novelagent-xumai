@@ -91,7 +91,14 @@ async function oneViewport(browser, width) {
     assert.equal(response.status(), 200);
     const result = await response.json();
     assert.equal(result.effective_status, 'completed');
-    assert.ok(result.result.evidence.length);
+    assert.equal(result.result.analysis_contract_version, '2.0');
+    const depth = result.result.report;
+    assert.equal(depth.report_version, '2.0');
+    for (const key of ['characters', 'plot', 'foreshadowing', 'rhythm', 'reader_experience', 'technique']) {
+      assert.ok(depth[key] && typeof depth[key] === 'object', `missing depth view: ${key}`);
+    }
+    assert.ok(depth.evidence.length);
+    assert.ok(depth.evidence.every(ref => ref.source_hash === result.source.hash));
     const oldHash = result.source.hash;
 
     // Re-login restores the same real project and completed result.
@@ -119,7 +126,9 @@ async function oneViewport(browser, width) {
     await waitComplete(page);
     const rebuilt = await (await context.request.get(`${origin}/api/independent/projects/${projectId}/deconstruction`)).json();
     assert.notEqual(rebuilt.source.hash, oldHash);
-    const oldEvidence = result.result.evidence[0];
+    assert.equal(rebuilt.result.analysis_contract_version, '2.0');
+    assert.equal(rebuilt.result.report.report_version, '2.0');
+    const oldEvidence = depth.evidence[0];
     const historical = await (await context.request.get(`${origin}/api/independent/projects/${projectId}/deconstruction/evidence/${oldEvidence.evidence_id}`)).json();
     assert.equal(historical.historical, true);
     assert.equal(historical.chapter.read_only, true);
