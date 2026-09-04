@@ -256,6 +256,46 @@ class Stage32BackendSafetyTest(unittest.TestCase):
         self.assertEqual(independent.plot.events[0].plotline_status, "resolved")
         self.assertIn("明确展示了该行动带来的下一步推进", independent.plot.events[0].consequence)
 
+    def test_capability_and_permission_negation_blocks_all_positive_chains(self) -> None:
+        denials = ("不可能", "不可以", "不可", "不能够", "没办法", "没有办法", "禁止", "不允许")
+        for denial in denials:
+            with self.subTest(denial=denial):
+                relation_report = DepthAnalysisEngine(_snapshot([
+                    f"林舟{denial}把钥匙交给顾遥。",
+                ], character_names=("林舟", "顾遥"))).build()
+                event = relation_report.plot.events[0]
+                self.assertNotEqual(event.plotline_status, "resolved")
+                self.assertFalse(any(
+                    relation.relation_type == "allies"
+                    for relation in relation_report.characters.relations
+                ))
+
+                chain_report = DepthAnalysisEngine(_snapshot([
+                    "林舟把钥匙交给顾遥。",
+                    f"顾遥{denial}用钥匙打开门。",
+                ], character_names=("林舟", "顾遥"))).build()
+                blocked = chain_report.plot.events[-1]
+                self.assertNotEqual(blocked.plotline_status, "resolved")
+                self.assertNotIn("明确展示了该行动带来的下一步推进", blocked.consequence)
+                self.assertFalse(any(
+                    relation.relation_type == "enables"
+                    for relation in chain_report.plot.relations
+                ))
+                self.assertFalse(any(
+                    state.status == "paid_off"
+                    for state in chain_report.foreshadowing.states
+                ))
+                reader = chain_report.reader_experience.items[-1]
+                self.assertLessEqual(reader.emotional_valence or 0.0, 0.0)
+                self.assertNotIn("阶段性回应或情绪缓解", reader.payoff)
+
+        for text in ("不久后打开门。", "不但帮助还公开真相。", "无意间找到钥匙。", "无论如何都要找到答案。"):
+            with self.subTest(affirmative=text):
+                report = DepthAnalysisEngine(_snapshot([text])).build()
+                self.assertEqual(report.plot.events[0].plotline_status, "resolved")
+        double_negative = DepthAnalysisEngine(_snapshot(["不是没有找到钥匙。"])).build()
+        self.assertEqual(double_negative.plot.events[0].plotline_status, "resolved")
+
     def test_noun_and_waiting_sentences_do_not_create_completion_or_reader_payoff(self) -> None:
         for text in ("答案仍在桌上。", "林舟等待答案。"):
             with self.subTest(text=text):
