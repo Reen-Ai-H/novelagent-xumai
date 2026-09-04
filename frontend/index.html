@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111827" />
     <title>叙脉｜新一代写作体验</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
-    <link rel="stylesheet" href="/static/styles.css?v=stage32-20260905" />
+    <link rel="stylesheet" href="/static/styles.css?v=stage33-20260905" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -228,6 +228,7 @@
             <div class="editor-heading"><p class="kicker"><span class="kicker-line"></span><span id="editorModeLabel">独立创作</span> / <span id="editorProjectTitle">—</span></p><h1 id="editorChapterHeading">开始你的第一章</h1></div>
             <div class="editor-top-actions" aria-label="章节状态">
               <span id="editorSaveState" class="editor-save-state">尚未开始</span>
+              <span id="editorAnalysisState" class="editor-analysis-state" aria-live="polite">等待开始</span>
               <span id="editorWordCount" class="editor-word-count mono">0 字</span>
               <button id="completeChapterButton" class="button button-primary" type="button" disabled>完成本章 <span aria-hidden="true">→</span></button>
             </div>
@@ -402,7 +403,7 @@
         <button id="closePendingChangesButton" class="dialog-close" type="button" aria-label="关闭修改确认">×</button>
         <p class="kicker"><span class="kicker-line"></span>旧章修改确认</p>
         <h2 id="pendingChangesTitle">确认全部修改</h2>
-        <p class="dialog-intro">这些旧章已经逐字保存，但暂时没有替换正式档案。请确认影响范围，再决定是否重建。</p>
+        <p class="dialog-intro">这些旧章已经逐字保存，但暂时没有替换正式档案。忽略会保留现有档案与拆解结果，全文重建会同步更新两者。</p>
         <div id="pendingChangesContent" class="review-content"></div>
         <div class="review-actions"><button id="ignoreChangesButton" class="button button-outline" type="button">忽略轻微措辞并继续</button><button id="rebuildChangesButton" class="button button-primary" type="button">根据当前全文重建档案</button></div>
       </div>
@@ -416,6 +417,16 @@
         <p class="dialog-intro">历史稿本只读。恢复会创建新的当前稿本，不改写这条历史记录。</p>
         <div id="versionHistoryContent" class="version-history-content"></div>
         <div id="versionPreviewContent" class="version-preview-content is-hidden"></div>
+      </div>
+    </dialog>
+
+    <dialog id="restoreVersionDialog" class="review-dialog restore-version-dialog" aria-labelledby="restoreVersionTitle">
+      <div class="review-dialog-shell restore-version-dialog-shell">
+        <button id="closeRestoreVersionButton" class="dialog-close" type="button" aria-label="关闭恢复确认">×</button>
+        <p class="kicker"><span class="kicker-line"></span>历史稿本 / 二次确认</p>
+        <h2 id="restoreVersionTitle" tabindex="-1">确认恢复历史稿本</h2>
+        <div id="restoreVersionContent" class="restore-version-content" aria-live="polite"></div>
+        <div class="review-actions"><button id="cancelRestoreVersionButton" class="button button-outline" type="button">取消</button><button id="confirmRestoreVersionButton" class="button button-primary" type="button">确认并创建新的当前稿本</button></div>
       </div>
     </dialog>
 
@@ -444,6 +455,6 @@
       </div>
     </dialog>
 
-    <script src="/static/app.js?v=stage32-20260905" defer></script>
+    <script src="/static/app.js?v=stage33-20260905" defer></script>
   </body>
 </html>

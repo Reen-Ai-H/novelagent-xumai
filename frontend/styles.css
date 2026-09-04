@@ -570,3 +570,55 @@ input, textarea { color: var(--ink); }
 @media (prefers-reduced-motion: reduce) {
   .depth-tab, .depth-overview-link, .deconstruction-evidence-dialog-actions .button { transition: none !important; }
 }
+
+/* 阶段 33：独立创作状态、完整稿本预览与恢复确认。 */
+.editor-top-actions { flex-wrap: wrap; justify-content: flex-end; }
+.editor-analysis-state { display: inline-flex; align-items: center; min-height: 24px; padding: 4px 8px; color: #778499; border: 1px solid #dce3eb; background: #fbfcfe; font-size: .72rem; white-space: nowrap; }
+.editor-analysis-state.is-ready { color: #52785f; border-color: #b9d4c0; background: #f3faf5; }
+.editor-analysis-state.is-analyzing { color: var(--cobalt); border-color: #b9c8ff; background: var(--cobalt-pale); }
+.editor-analysis-state.is-pending { color: #826934; border-color: #e5d2ab; background: #fff9ec; }
+.editor-analysis-state.is-error { color: #9a473c; border-color: #efc0b8; background: var(--red-pale); }
+.editor-analysis-state::before { content: ""; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: currentColor; }
+.version-history-item.is-previewed { border-color: #9eb2ff; box-shadow: inset 3px 0 0 var(--cobalt); }
+.version-actions button:disabled { color: #9aa5b4; cursor: not-allowed; }
+.version-preview-content { min-width: 0; max-height: min(590px, calc(100vh - 290px)); overflow: auto; }
+.version-preview-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; min-width: 0; }
+.version-preview-heading h3 { margin: 9px 0 0; color: var(--ink); font-family: var(--serif); font-size: 1.35rem; font-weight: 600; overflow-wrap: anywhere; }
+.version-preview-heading > strong { flex: 0 0 auto; color: var(--ink-soft); font-family: var(--mono); font-size: .68rem; }
+.version-preview-note { margin: 13px 0 0 !important; color: #718096 !important; font-family: var(--sans) !important; font-size: .72rem !important; line-height: 1.65 !important; }
+.version-preview-chapter-tabs { display: flex; gap: 7px; min-width: 0; margin-top: 17px; padding-bottom: 2px; overflow-x: auto; }
+.version-preview-chapter-tab { flex: 0 0 auto; min-height: 39px; padding: 0 11px; color: #68758a; border: 1px solid #d9e2ef; background: var(--paper); font-family: var(--serif); font-size: .72rem; text-align: left; }
+.version-preview-chapter-tab:hover, .version-preview-chapter-tab[aria-selected="true"] { color: var(--cobalt); border-color: #aebff1; background: #edf2ff; }
+.version-preview-chapter { min-width: 0; margin-top: 15px; padding: 15px; border: 1px solid #dfe6ef; background: var(--paper); }
+.version-preview-chapter-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; padding-bottom: 11px; border-bottom: 1px solid #e7ecf2; }
+.version-preview-chapter-meta strong { font-family: var(--serif); font-size: .98rem; }
+.version-preview-chapter-meta > span:last-child { color: #8996a8; font-size: .63rem; }
+.version-preview-body { max-height: min(360px, 42vh); margin-top: 14px; padding: 15px 16px; overflow: auto; color: #46566c; background: #fbfcfe; font-family: var(--serif); font-size: .88rem; line-height: 1.95; white-space: pre-wrap; overflow-wrap: anywhere; }
+.version-preview-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 15px; color: #8996a8; font-size: .65rem; line-height: 1.55; }
+.version-preview-footer .button { flex: 0 0 auto; min-height: 40px; padding-inline: 14px; font-size: .7rem; }
+.restore-version-dialog { width: min(590px, calc(100% - 28px)); }
+.restore-version-dialog-shell { width: 100%; }
+.restore-version-content { display: grid; gap: 9px; margin-top: 22px; padding: 15px; color: #5f6d82; border-left: 2px solid var(--cobalt); background: #f7f9ff; font-size: .78rem; line-height: 1.7; }
+.restore-version-content p { margin: 0; }
+.restore-version-content strong { color: var(--ink); font-family: var(--serif); font-size: .96rem; }
+
+@media (max-width: 1024px) {
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .screen, .editor-main, .version-dialog-shell, .version-preview-content { min-width: 0; }
+  .editor-top-actions { gap: 10px 14px; }
+  .version-dialog-shell { width: min(790px, calc(100vw - 32px)); }
+  .version-preview-footer { align-items: stretch; flex-direction: column; }
+  .version-preview-footer .button { width: 100%; }
+}
+
+@media (max-width: 820px) {
+  .editor-top-actions { justify-content: space-between; }
+  .editor-analysis-state { order: 2; }
+  .version-preview-content { max-height: min(560px, calc(100vh - 220px)); }
+  .version-preview-heading { align-items: start; flex-direction: column; gap: 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .editor-analysis-state, .version-preview-chapter-tab, .restore-version-dialog .button { transition: none !important; animation: none !important; }
+}
