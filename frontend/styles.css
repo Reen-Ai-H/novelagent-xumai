@@ -570,3 +570,45 @@ input, textarea { color: var(--ink); }
 @media (prefers-reduced-motion: reduce) {
   .depth-tab, .depth-overview-link, .deconstruction-evidence-dialog-actions .button { transition: none !important; }
 }
+
+/* Stage 33: keep persistence and background analysis legible as separate channels. */
+.editor-analysis-state { color: #758298; font-size: .78rem; white-space: nowrap; }
+.editor-analysis-state::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: #9aa7b7; }
+.editor-analysis-state.is-saving::before { background: var(--cobalt); box-shadow: 0 0 0 4px rgba(47,91,255,.12); }
+.editor-analysis-state.is-saved::before { background: #6e9c77; }
+.editor-analysis-state.is-error::before { background: var(--red); }
+.version-preview-content { min-width: 0; max-height: min(560px, calc(100vh - 210px)); overflow-y: auto; overflow-x: hidden; }
+.version-preview-head h3 { margin: 7px 0 0; color: var(--ink); font-family: var(--serif); font-size: 1.28rem; font-weight: 500; letter-spacing: -.03em; }
+.version-preview-chapters { display: grid; gap: 12px; min-width: 0; }
+.version-preview-chapter { min-width: 0; border: 1px solid #dbe3f1; background: rgba(255,255,255,.72); }
+.version-preview-chapter header { display: flex; justify-content: space-between; gap: 12px; padding: 11px 13px; border-bottom: 1px solid #e5eaf3; }
+.version-preview-chapter header strong { min-width: 0; color: var(--ink); font-family: var(--serif); font-size: .9rem; font-weight: 600; overflow-wrap: anywhere; }
+.version-preview-chapter header span { flex: 0 0 auto; color: #8996a8; font-family: var(--mono); font-size: .62rem; }
+.version-preview-body { max-height: 260px; overflow: auto; padding: 14px 15px 17px; color: #5f6d82; font-family: var(--serif); font-size: .85rem; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
+.version-preview-body:focus, #versionPreviewTitle:focus, #restoreVersionTitle:focus { outline: 2px solid rgba(47,91,255,.42); outline-offset: 4px; }
+.version-preview-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 15px; }
+.version-preview-actions small { margin-top: 0; min-width: 0; }
+.version-preview-actions .button { flex: 0 0 auto; }
+.restore-version-dialog { width: min(610px, calc(100% - 28px)); }
+.restore-version-dialog-shell { width: 100%; }
+.restore-version-content { margin-top: 20px; color: #5f6d82; font-size: .82rem; line-height: 1.75; }
+.restore-version-content > p { margin: 0 0 13px; }
+.restore-version-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin: 17px 0; }
+.restore-version-facts div { min-width: 0; padding: 12px; border: 1px solid var(--line); background: #fbfcfe; }
+.restore-version-facts dt { color: #8996a8; font-size: .66rem; }
+.restore-version-facts dd { margin: 5px 0 0; color: var(--ink); font-family: var(--serif); font-size: .9rem; overflow-wrap: anywhere; }
+.restore-version-warning { padding: 12px 13px; border-left: 2px solid var(--cobalt); background: var(--cobalt-pale); }
+.restore-version-actions { justify-content: end; }
+
+@media (max-width: 1024px) {
+  .editor-main, .archive-main, .deconstruction-main, .version-dialog-shell, .restore-version-dialog-shell { min-width: 0; }
+  .editor-top-actions { flex-wrap: wrap; gap: 11px 16px; }
+  .version-preview-actions { align-items: stretch; flex-direction: column; }
+  .version-preview-actions .button { width: 100%; }
+}
+
+@media (max-width: 520px) {
+  .editor-analysis-state, .editor-save-state { white-space: normal; }
+  .version-preview-chapter header { align-items: start; flex-direction: column; gap: 5px; }
+  .restore-version-facts { grid-template-columns: 1fr; }
+}

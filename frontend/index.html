@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111827" />
     <title>叙脉｜新一代写作体验</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
-    <link rel="stylesheet" href="/static/styles.css?v=stage32-20260905" />
+    <link rel="stylesheet" href="/static/styles.css?v=stage33-20260905" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -228,6 +228,7 @@
             <div class="editor-heading"><p class="kicker"><span class="kicker-line"></span><span id="editorModeLabel">独立创作</span> / <span id="editorProjectTitle">—</span></p><h1 id="editorChapterHeading">开始你的第一章</h1></div>
             <div class="editor-top-actions" aria-label="章节状态">
               <span id="editorSaveState" class="editor-save-state">尚未开始</span>
+              <span id="editorAnalysisState" class="editor-analysis-state" role="status" aria-live="polite">尚未开始</span>
               <span id="editorWordCount" class="editor-word-count mono">0 字</span>
               <button id="completeChapterButton" class="button button-primary" type="button" disabled>完成本章 <span aria-hidden="true">→</span></button>
             </div>
@@ -419,6 +420,19 @@
       </div>
     </dialog>
 
+    <dialog id="restoreVersionDialog" class="review-dialog restore-version-dialog" aria-labelledby="restoreVersionTitle">
+      <div class="review-dialog-shell restore-version-dialog-shell">
+        <button id="closeRestoreVersionButton" class="dialog-close" type="button" data-action="cancel-restore-version" aria-label="关闭恢复确认">×</button>
+        <p class="kicker"><span class="kicker-line"></span>版本恢复 / 二次确认</p>
+        <h2 id="restoreVersionTitle" tabindex="-1">恢复确认</h2>
+        <div id="restoreVersionContent" class="restore-version-content" aria-live="polite"></div>
+        <div class="review-actions restore-version-actions">
+          <button id="cancelRestoreVersionButton" class="button button-outline" type="button" data-action="cancel-restore-version">取消</button>
+          <button id="confirmRestoreVersionButton" class="button button-primary" type="button" data-action="confirm-restore-version">创建新的当前稿本 <span aria-hidden="true">→</span></button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="trialDialog" class="review-dialog" aria-labelledby="trialDialogTitle">
       <div class="review-dialog-shell trial-dialog-shell">
         <button id="closeTrialButton" class="dialog-close" type="button" aria-label="关闭角色试绘">×</button>
@@ -444,6 +458,6 @@
       </div>
     </dialog>
 
-    <script src="/static/app.js?v=stage32-20260905" defer></script>
+    <script src="/static/app.js?v=stage33-20260905" defer></script>
   </body>
 </html>
