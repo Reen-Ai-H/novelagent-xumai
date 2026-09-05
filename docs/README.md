@@ -32,12 +32,13 @@
 | `templates/` | 任务级进度与阻塞模板 | 模板结构改变时 |
 | `goals/V1_IMPLEMENTATION.md` | 已排队的 A 版首版实现目标 | 首版范围或完成状态改变时 |
 | `goals/STAGE_32_DECONSTRUCTION_DEPTH.md` | Windows 接棒后可直接执行的阶段 32 任务书 | 阶段 32 范围、顺序或验收改变时 |
+| `goals/STAGE_33_INDEPENDENT_EXPERIENCE.md` | 阶段 33 独立创作连续写作与恢复体验合同 | 阶段 33 范围、顺序或验收改变时 |
 | `STAGE_32_CONTRACT.md` | 阶段 32 冻结的版本化 schema、证据、状态、锁与前后端接缝 | 架构合同经复核调整时 |
 
 ## 当前状态
 
 - 文档收口日期：2026-09-05；阶段 32 深度作品拆解独立审计 P0/P1/P2/P3 均为 0。
-- GitHub `main` 是当前 V1 开发基线；阶段 32 候选为 204 tests、0 failed、0 skipped，Windows/Ubuntu CI 已通过。
+- GitHub `main=ec2f31a` 是当前 V1 开发基线；阶段 32 已合并，门禁为 204 tests、0 failed、0 skipped，Windows/Ubuntu CI 已通过。
 - 当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations；真实 DeepSeek 三章链路已验证。
 - 独立作品拆解已接入总览与人物、剧情、伏笔、章节节奏、读者体验、文笔技法六视角，支持七种 canonical 状态、服务端后台恢复、当前/历史证据回链和账户隔离。
 - 项目外离线质量门 Q2 已验证：36 例脱敏黄金集、宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过、外部请求/Token/费用为 0。真实生成质量增益、产品集成和 Q3 仍 pending。
@@ -45,7 +46,7 @@
 - A、B、C 共 21 张探索图保留；A 是现役实现基准，B/C 只作后续灵感参考。
 - Windows 迁移步骤见 `WINDOWS_MIGRATION.md`；CI 覆盖 Ubuntu/Windows、Python 3.12 和 Node LTS。
 - 后续每个阶段必须在独立 `codex/stage-<编号>-<主题>` 分支提交并推送；需复核的阶段保持 Draft PR，通过后再合并主线。
-- 下一阶段及长期顺序以 `ROADMAP.md` 为唯一入口；阶段 32 合并后进入阶段 33“独立创作体验收口”，不得仅凭聊天记录推断范围。
+- 当前阶段及长期顺序以 `ROADMAP.md` 为唯一入口；正在执行阶段 33“独立创作体验收口”，不得仅凭聊天记录推断范围。
 
 ## 给新智能体的最短入口
 

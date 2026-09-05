@@ -15,6 +15,7 @@
     loadingLibrary: false,
     workspace: null,
     editorProjectId: null,
+    editorLoadToken: 0,
     editorMode: "independent",
     activeChapterId: null,
     editorBuffer: "",
@@ -23,10 +24,16 @@
     editorDirty: false,
     editorSaving: false,
     editorConflict: null,
+    editorSaveFailed: false,
+    editorSavedRevision: null,
+    editorAnalysisState: "",
     editorChangeToken: 0,
     editorReadOnly: false,
     saveTimer: null,
     savePromise: null,
+    completeInFlight: false,
+    addChapterInFlight: false,
+    editorTaskPollTimer: null,
     activeArchive: null,
     trialCharacterId: null,
     archiveProjectId: null,
@@ -51,6 +58,10 @@
     deconstructionChapterId: "",
     deconstructionEvidenceRequestToken: 0,
     pendingEvidence: null,
+    versionPreviewId: null,
+    versionPreview: null,
+    restoreConfirmVersionId: null,
+    restoreInFlight: false,
     dialogFocus: new WeakMap(),
   };
 
@@ -95,6 +106,7 @@
     writingModeNote: $("#writingModeNote"),
     editorChapterHeading: $("#editorChapterHeading"),
     editorSaveState: $("#editorSaveState"),
+    editorAnalysisState: $("#editorAnalysisState"),
     editorWordCount: $("#editorWordCount"),
     completeChapterButton: $("#completeChapterButton"),
     editorNotice: $("#editorNotice"),
@@ -117,6 +129,10 @@
     versionHistoryDialog: $("#versionHistoryDialog"),
     versionHistoryContent: $("#versionHistoryContent"),
     versionPreviewContent: $("#versionPreviewContent"),
+    restoreVersionDialog: $("#restoreVersionDialog"),
+    restoreVersionTitle: $("#restoreVersionTitle"),
+    restoreVersionContent: $("#restoreVersionContent"),
+    confirmRestoreVersionButton: $("#confirmRestoreVersionButton"),
     trialDialog: $("#trialDialog"),
     trialStyleSelect: $("#trialStyleSelect"),
     trialEstimate: $("#trialEstimate"),
@@ -246,6 +262,62 @@
     return "landing";
   }
 
+  function chapterIdFromLocation() {
+    return new URLSearchParams(window.location.search).get("chapter") || null;
+  }
+
+  function editorPath(projectId, chapterId = state.activeChapterId) {
+    const params = new URLSearchParams();
+    if (chapterId) params.set("chapter", chapterId);
+    const query = params.toString();
+    return `/independent/${encodeURIComponent(projectId)}${query ? `?${query}` : ""}`;
+  }
+
+  function archivePath(projectId, chapterId = chapterIdFromLocation()) {
+    const params = new URLSearchParams();
+    if (chapterId) params.set("chapter", chapterId);
+    const query = params.toString();
+    return `/archive/${encodeURIComponent(projectId)}${query ? `?${query}` : ""}`;
+  }
+
+  function deconstructionPath(projectId, chapterId = chapterIdFromLocation()) {
+    const params = new URLSearchParams();
+    params.set("view", "deconstruction");
+    if (chapterId) params.set("chapter", chapterId);
+    return `/independent/${encodeURIComponent(projectId)}?${params.toString()}`;
+  }
+
+  function updateChapterUrl(chapterId, { replace = true, view = null } = {}) {
+    const params = new URLSearchParams(window.location.search);
+    if (chapterId) params.set("chapter", chapterId);
+    else params.delete("chapter");
+    if (view !== null) {
+      if (view) params.set("view", view);
+      else params.delete("view");
+    }
+    const query = params.toString();
+    const path = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash || ""}`;
+    if (replace) window.history.replaceState({}, "", path);
+    else window.history.pushState({}, "", path);
+    return path;
+  }
+
+  function chooseActiveChapter(version) {
+    const chapters = Array.isArray(version?.chapters)
+      ? [...version.chapters].sort((left, right) => Number(left.chapter_number || 0) - Number(right.chapter_number || 0))
+      : [];
+    const requestedChapterId = chapterIdFromLocation();
+    const requested = chapters.find((chapter) => chapter.chapter_id === requestedChapterId);
+    if (requested) return requested;
+    const unfinished = chapters.filter((chapter) => chapter.status !== "ready");
+    // 缺失或无效参数回退到最大的未完成章节，全部完成时回退到最后一章。
+    return unfinished.at(-1) || chapters.at(-1) || null;
+  }
+
+  function syncActiveChapterUrl(chapterId) {
+    if (chapterId && chapterIdFromLocation() !== chapterId) updateChapterUrl(chapterId);
+  }
+
   function independentProjectIdFromLocation() {
     const match = window.location.pathname.match(/^\/independent\/([A-Za-z0-9_-]+)$/);
     return match ? match[1] : null;
@@ -263,6 +335,10 @@
 
   function setActiveScreen(screen) {
     if (state.screen === "archive" && screen !== "archive") state.archiveScrollSpyCleanup?.();
+    if (state.screen === "independent" && screen !== "independent") {
+      window.clearTimeout(state.editorTaskPollTimer);
+      state.editorTaskPollTimer = null;
+    }
     if (state.screen === "deconstruction" && screen !== "deconstruction") {
       window.clearTimeout(state.deconstructionPollTimer);
       state.deconstructionPollTimer = null;
@@ -295,7 +371,8 @@
     const sameProjectPath = path.startsWith(`/independent/${encodeURIComponent(state.editorProjectId || "")}`);
     const leavingEditor = state.screen === "independent"
       && (!sameProjectPath || new URL(path, window.location.origin).searchParams.get("view") === "deconstruction")
-      && (state.editorDirty || state.editorSaving);
+      && (state.editorDirty || state.editorSaving || state.editorConflict);
+    if (leavingEditor && (state.editorSaveFailed || state.editorConflict)) return false;
     if (leavingEditor && !(await flushPendingSave())) return false;
     const method = replace ? "replaceState" : "pushState";
     window.history[method]({}, "", path);
@@ -328,7 +405,10 @@
       if (state.account && projectId) loadAIWorkspace(projectId, state.screen === "aiDirector");
       else if (projectId) restoreSession(state.screen);
     }
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({
+      top: 0,
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
     return true;
   }
 
@@ -610,6 +690,41 @@
     if (target && typeof target.focus === "function") window.setTimeout(() => target.focus(), 0);
   }
 
+  function dialogFocusableElements(dialog) {
+    return $$('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])', dialog)
+      .filter((node) => node.getClientRects().length > 0);
+  }
+
+  function trapDialogFocus(event) {
+    const dialog = event.currentTarget;
+    if (!dialog?.open) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dialog.close?.();
+      return;
+    }
+    if (event.key === "Tab") {
+      // Tab stays inside the open dialog; Escape closes it and restores its trigger.
+    } else {
+      return;
+    }
+    const focusable = dialogFocusableElements(dialog);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function bindDialogFocus(dialog) {
+    dialog?.addEventListener("keydown", trapDialogFocus);
+  }
+
   function resetProjectDialog() {
     state.selectedMode = null;
     elements.modeOptions.forEach((option) => option.classList.remove("is-selected"));
@@ -749,6 +864,27 @@
     elements.editorSaveState.className = `editor-save-state ${variant ? `is-${variant}` : ""}`;
   }
 
+  function setEditorAnalysisState(label, variant = "") {
+    state.editorAnalysisState = label;
+    if (!elements.editorAnalysisState) return;
+    elements.editorAnalysisState.textContent = label;
+    elements.editorAnalysisState.className = `editor-analysis-state ${variant ? `is-${variant}` : ""}`;
+  }
+
+  function focusChapterTitle() {
+    const focus = () => {
+      if (!elements.chapterTitleInput || elements.chapterTitleInput.disabled) return;
+      elements.chapterTitleInput.focus();
+      elements.chapterTitleInput.select?.();
+    };
+    focus();
+    window.setTimeout(focus, 0);
+  }
+
+  function focusVersionPreviewTitle() {
+    window.setTimeout(() => document.getElementById("versionPreviewTitle")?.focus(), 0);
+  }
+
   function setEditorNotice(message, variant = "") {
     elements.editorNotice.textContent = message || "";
     elements.editorNotice.className = `notice editor-notice ${message ? "" : "is-hidden"} ${variant ? `notice-${variant}` : "notice-blue"}`;
@@ -763,6 +899,12 @@
     return state.workspace?.active_version || null;
   }
 
+  function replaceActiveVersionChapter(chapter) {
+    const version = activeEditorVersion();
+    if (!version || !chapter?.chapter_id || !Array.isArray(version.chapters)) return;
+    version.chapters = version.chapters.map((item) => item.chapter_id === chapter.chapter_id ? { ...item, ...chapter } : item);
+  }
+
   function renderStartWorkspace(workspace) {
     elements.editorWorkspaceContent.classList.add("is-hidden");
     elements.startWorkspaceContent.classList.remove("is-hidden");
@@ -772,6 +914,7 @@
     elements.writingModeNote.textContent = workspace.mode === "ai_assisted" ? "AI 辅助写作 · 唯一正式正文" : "独立创作 · 正式正文";
     elements.editorChapterHeading.textContent = "先把故事带回来";
     setEditorSaveState("等待开始");
+    setEditorAnalysisState("尚未开始");
     elements.editorWordCount.textContent = "0 字";
     elements.startWorkspaceContent.innerHTML = `
       <article class="start-workspace-card paper-card">
@@ -865,11 +1008,26 @@
 
   async function loadIndependentWorkspace(projectId) {
     if (!projectId) return;
+    const loadToken = ++state.editorLoadToken;
+    const projectChanged = state.editorProjectId !== projectId;
+    if (projectChanged) {
+      state.activeChapterId = null;
+      state.editorBuffer = "";
+      state.editorTitleBuffer = "";
+      state.editorRevision = 0;
+      state.editorDirty = false;
+      state.editorSaving = false;
+      state.editorConflict = null;
+      state.editorSaveFailed = false;
+      state.editorSavedRevision = null;
+      state.editorChangeToken = 0;
+    }
     state.editorProjectId = projectId;
     setActiveScreen("independent");
     elements.editorProjectTitle.textContent = "正在读取…";
     try {
       const workspace = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}`);
+      if (loadToken !== state.editorLoadToken || state.editorProjectId !== projectId) return;
       state.workspace = workspace;
       state.editorMode = workspace.mode || state.editorMode || "independent";
       state.activeArchive = workspace.archive;
@@ -877,6 +1035,11 @@
       if (!workspace.initialized) {
         renderStartWorkspace(workspace);
       } else {
+        const selectedChapter = chooseActiveChapter(workspace.active_version);
+        if (selectedChapter && (!state.editorDirty || state.activeChapterId === selectedChapter.chapter_id)) {
+          state.activeChapterId = selectedChapter.chapter_id;
+          syncActiveChapterUrl(selectedChapter.chapter_id);
+        }
         renderEditorWorkspace();
       }
       void loadNotifications();
@@ -922,30 +1085,35 @@
     const workspace = state.workspace;
     const version = activeEditorVersion();
     if (!workspace || !version) return;
+    const selectedByLocation = chooseActiveChapter(version);
+    const activeChapterInVersion = version.chapters.find((chapter) => chapter.chapter_id === state.activeChapterId);
+    if (!activeChapterInVersion || (!state.editorDirty && selectedByLocation && selectedByLocation.chapter_id !== state.activeChapterId)) {
+      state.activeChapterId = selectedByLocation?.chapter_id || null;
+      state.editorDirty = false;
+      state.editorConflict = null;
+      state.editorSaveFailed = false;
+      state.editorSavedRevision = null;
+      syncActiveChapterUrl(state.activeChapterId);
+    }
     elements.startWorkspaceContent.classList.add("is-hidden");
     elements.editorWorkspaceContent.classList.remove("is-hidden");
     elements.editorProjectTitle.textContent = workspace.title || "—";
     const aiEditor = workspace.mode === "ai_assisted" || state.editorMode === "ai_assisted";
     elements.editorModeLabel.textContent = aiEditor ? "AI 辅助写作" : "独立创作";
     elements.writingModeNote.textContent = aiEditor ? "AI 辅助写作 · 唯一正式正文" : "独立创作 · 正式正文";
-    if (!state.activeChapterId || !version.chapters.some((chapter) => chapter.chapter_id === state.activeChapterId)) {
-      state.activeChapterId = version.chapters[0]?.chapter_id || null;
-      state.editorDirty = false;
-      state.editorConflict = null;
-    }
     const chapter = version.chapters.find((item) => item.chapter_id === state.activeChapterId);
     if (!chapter) return;
     if (!state.editorDirty) {
       state.editorBuffer = chapter.content || "";
       state.editorTitleBuffer = chapter.title || "";
       state.editorRevision = chapter.server_revision || 0;
+      state.editorSavedRevision = chapter.server_revision || 0;
     }
     elements.editorChapterHeading.textContent = chapter.title || `第${chapter.chapter_number}章`;
     elements.chapterTitleInput.value = state.editorTitleBuffer;
     elements.chapterEditor.value = state.editorBuffer;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
     elements.editorRevisionLabel.textContent = `REV / ${state.editorRevision}`;
-    elements.completeChapterButton.disabled = !state.editorBuffer.trim() || state.editorReadOnly;
     renderChapterList(version);
     renderArchiveSummary(state.activeArchive || workspace.archive);
     if (workspace.pending_changes?.changes?.length) {
@@ -954,13 +1122,36 @@
       elements.editorNotice.classList.add("is-hidden");
     }
     const latestTask = (workspace.tasks || []).find((task) => task.version_id === version.version_id && ["queued", "running", "failed"].includes(task.status));
+    const taskRunning = Boolean(latestTask && ["queued", "running"].includes(latestTask.status));
+    const completedCurrent = chapter.status === "ready" && !state.editorDirty && !taskRunning;
+    elements.completeChapterButton.dataset.nextChapter = completedCurrent ? "true" : "false";
+    elements.completeChapterButton.textContent = completedCurrent ? "新建下一章 →" : "完成本章 →";
+    elements.completeChapterButton.disabled = state.completeInFlight
+      || state.addChapterInFlight
+      || state.editorReadOnly
+      || (!completedCurrent && !state.editorBuffer.trim())
+      || taskRunning;
     if (latestTask && latestTask.status === "failed") {
       setEditorNoticeHtml(`<strong>后台分析失败。</strong> ${escapeHtml(latestTask.error_message || "可以修改正文后重试。")} <button class="notice-action" type="button" data-action="retry-task" data-task-id="${escapeHtml(latestTask.task_id)}">重试 →</button>`, "red");
-      setEditorSaveState("分析失败", "error");
-    } else if (latestTask && ["queued", "running"].includes(latestTask.status)) {
-      setEditorSaveState("后台分析中…", "saving");
-    } else if (!state.editorDirty && !state.editorSaving && !state.editorConflict) {
-      setEditorSaveState(chapter.status === "ready" ? "已保存" : "等待保存", chapter.status === "ready" ? "saved" : "");
+      setEditorAnalysisState("分析失败", "error");
+    } else if (taskRunning) {
+      setEditorAnalysisState("分析中…", "saving");
+      scheduleIndependentTaskPoll(latestTask.task_id);
+    } else {
+      setEditorAnalysisState(chapter.status === "ready" ? "已分析" : "写作中", chapter.status === "ready" ? "saved" : "");
+    }
+    if (state.editorSaving) {
+      setEditorSaveState("保存中…", "saving");
+    } else if (state.editorConflict) {
+      setEditorSaveState("保存冲突", "error");
+    } else if (state.editorDirty) {
+      setEditorSaveState(state.editorSaveFailed ? "保存失败" : "本地待保存", state.editorSaveFailed ? "error" : "");
+    } else if (state.editorSaveFailed) {
+      setEditorSaveState("保存失败", "error");
+    } else if (state.editorSavedRevision !== null && Number(state.editorSavedRevision) === Number(chapter.server_revision || 0)) {
+      setEditorSaveState("已保存", "saved");
+    } else {
+      setEditorSaveState("等待保存");
     }
   }
 
@@ -971,9 +1162,13 @@
     state.editorDirty = true;
     state.editorChangeToken += 1;
     state.editorConflict = null;
+    state.editorSaveFailed = false;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
+    // 已完成章节被重新编辑后，主动作必须回到完成门禁，不能继续显示新建下一章。
+    elements.completeChapterButton.dataset.nextChapter = "false";
+    elements.completeChapterButton.textContent = "完成本章 →";
     elements.completeChapterButton.disabled = !state.editorBuffer.trim();
-    setEditorSaveState("本地缓冲");
+    setEditorSaveState("本地待保存");
     window.clearTimeout(state.saveTimer);
     state.saveTimer = window.setTimeout(() => { flushPendingSave(); }, 720);
   }
@@ -1018,38 +1213,56 @@
         state.workspace = payload.workspace;
         state.activeArchive = payload.workspace.archive;
         state.editorRevision = payload.chapter.server_revision;
+        state.editorSavedRevision = payload.chapter.server_revision;
         state.editorConflict = null;
+        state.editorSaveFailed = false;
         if (state.editorChangeToken === changeToken) {
           state.editorDirty = false;
           setEditorSaveState("已保存", "saved");
         } else {
           // 保存请求期间又有输入：只更新 revision，保留新缓冲并让 flush 再写一次。
           state.editorDirty = true;
-          setEditorSaveState("本地缓冲", "");
+          setEditorSaveState("本地待保存", "");
         }
         renderEditorWorkspace();
         return true;
       } catch (error) {
         if (error.code === "save_conflict") renderSaveConflict(error);
         else setEditorNotice(error.message || "保存失败，可以稍后重试。", "red");
+        state.editorSaveFailed = true;
         setEditorSaveState("保存失败", "error");
         return false;
       } finally {
         state.editorSaving = false;
         state.savePromise = null;
+        if (state.workspace?.initialized) renderEditorWorkspace();
       }
     })();
     state.savePromise = promise;
     return promise;
   }
 
+  function handleCompleteButtonClick() {
+    if (state.completeInFlight) return;
+    if (elements.completeChapterButton.dataset.nextChapter === "true") {
+      void addIndependentChapter();
+      return;
+    }
+    void completeCurrentChapter();
+  }
+
   async function completeCurrentChapter() {
-    if (state.editorReadOnly) return;
-    const saved = await flushPendingSave();
-    if (!saved || state.editorDirty) return;
+    if (state.editorReadOnly || state.completeInFlight) return;
+    state.completeInFlight = true;
     const button = elements.completeChapterButton;
     button.disabled = true;
-    setEditorSaveState("已保存，分析中…", "saving");
+    const saved = await flushPendingSave();
+    if (!saved || state.editorDirty) {
+      state.completeInFlight = false;
+      renderEditorWorkspace();
+      return;
+    }
+    setEditorAnalysisState("分析中…", "saving");
     try {
       const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapters/${encodeURIComponent(state.activeChapterId)}/complete`, {
         method: "POST",
@@ -1058,8 +1271,10 @@
       await pollIndependentTask(payload.task.task_id);
     } catch (error) {
       setEditorNotice(error.message || "完成本章没有提交成功，请确认正文已经保存。", "red");
-      setEditorSaveState("完成失败", "error");
-      button.disabled = !state.editorBuffer.trim();
+      setEditorAnalysisState("完成失败", "error");
+    } finally {
+      state.completeInFlight = false;
+      if (state.workspace?.initialized) renderEditorWorkspace();
     }
   }
 
@@ -1071,19 +1286,44 @@
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/tasks/${encodeURIComponent(taskId)}`);
       if (payload.task.status === "completed") {
-        await loadIndependentWorkspace(state.editorProjectId);
-        setEditorNotice("本章完成，故事档案已更新；来源章节已记录。", "blue");
-        showToast("本章已完成，档案快照已保存。");
+        const stillInEditor = state.screen === "independent";
+        if (stillInEditor) {
+          await loadIndependentWorkspace(state.editorProjectId);
+          setEditorNotice("本章完成，故事档案已更新；来源章节已记录。", "blue");
+          showToast("本章已完成，档案快照已保存。");
+        }
         return;
       }
       if (payload.task.status === "failed") {
-        await loadIndependentWorkspace(state.editorProjectId);
-        setEditorNoticeHtml(`<strong>后台分析失败。</strong> ${escapeHtml(payload.task.error_message || "可以修改正文后重试。")} <button class="notice-action" type="button" data-action="retry-task" data-task-id="${escapeHtml(taskId)}">重试 →</button>`, "red");
+        if (state.screen === "independent") {
+          await loadIndependentWorkspace(state.editorProjectId);
+          setEditorNoticeHtml(`<strong>后台分析失败。</strong> ${escapeHtml(payload.task.error_message || "可以修改正文后重试。")} <button class="notice-action" type="button" data-action="retry-task" data-task-id="${escapeHtml(taskId)}">重试 →</button>`, "red");
+        }
         return;
       }
       await wait(260);
     }
     setEditorNotice("后台分析仍在运行，离开或刷新后会继续恢复。", "blue");
+  }
+
+  function scheduleIndependentTaskPoll(taskId) {
+    if (!taskId || state.editorTaskPollTimer || state.screen !== "independent") return;
+    state.editorTaskPollTimer = window.setTimeout(async () => {
+      state.editorTaskPollTimer = null;
+      if (state.screen !== "independent") return;
+      try {
+        const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/tasks/${encodeURIComponent(taskId)}`);
+        if (payload.task.status === "completed" || payload.task.status === "failed") {
+          await loadIndependentWorkspace(state.editorProjectId);
+          if (payload.task.status === "completed") setEditorNotice("本章完成，故事档案已更新；来源章节已记录。", "blue");
+          return;
+        }
+        scheduleIndependentTaskPoll(taskId);
+      } catch (error) {
+        setEditorNotice(error.message || "后台分析状态暂时读不到，稍后会自动重试。", "red");
+        scheduleIndependentTaskPoll(taskId);
+      }
+    }, 900);
   }
 
   async function retryIndependentTask(taskId) {
@@ -1109,17 +1349,34 @@
     state.activeChapterId = chapterId;
     state.editorDirty = false;
     state.editorConflict = null;
+    state.editorSaveFailed = false;
+    state.editorSavedRevision = null;
+    updateChapterUrl(chapterId);
     renderEditorWorkspace();
   }
 
   async function addIndependentChapter() {
-    if (state.editorDirty && !(await flushPendingSave())) return;
+    if (state.completeInFlight || state.addChapterInFlight) return;
+    state.addChapterInFlight = true;
+    elements.completeChapterButton.disabled = true;
     try {
-      await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapters`, { method: "POST" });
+      if (state.editorDirty && !(await flushPendingSave())) return;
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapters`, { method: "POST" });
+      const newChapterId = payload.chapter.chapter_id;
+      state.activeChapterId = newChapterId;
+      state.editorDirty = false;
+      state.editorConflict = null;
+      state.editorSaveFailed = false;
+      state.editorSavedRevision = null;
+      updateChapterUrl(newChapterId);
       await loadIndependentWorkspace(state.editorProjectId);
+      focusChapterTitle();
       showToast("新章节已加入目录。");
     } catch (error) {
       setEditorNotice(error.message || "新章节创建失败。", "red");
+    } finally {
+      state.addChapterInFlight = false;
+      if (state.workspace?.initialized) renderEditorWorkspace();
     }
   }
 
@@ -1151,10 +1408,13 @@
 
   function openVersionHistoryDialog() {
     const versions = state.workspace?.versions || [];
+    state.versionPreviewId = null;
+    state.versionPreview = null;
+    state.restoreConfirmVersionId = null;
     elements.versionHistoryContent.innerHTML = versions.length ? versions.map((version) => `
       <article class="version-history-item ${version.status === "active" ? "is-active" : ""}">
         <div><span class="eyebrow">${escapeHtml(version.status === "active" ? "当前稿本" : "历史稿本")}</span><strong>${escapeHtml(version.label)}</strong><small>${version.chapter_count} 章 · ${Number(version.total_word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(formatDate(version.created_at))}</small></div>
-        <div class="version-actions"><button type="button" class="quiet-link" data-action="preview-version" data-version-id="${escapeHtml(version.version_id)}">只读预览</button>${version.status !== "active" ? `<button type="button" class="text-link" data-action="restore-version" data-version-id="${escapeHtml(version.version_id)}">恢复为当前稿本</button>` : ""}</div>
+        <div class="version-actions"><button type="button" class="quiet-link" data-action="preview-version" data-version-id="${escapeHtml(version.version_id)}">只读预览</button></div>
       </article>`).join("") : `<p class="archive-empty-note">还没有历史稿本。</p>`;
     elements.versionPreviewContent.classList.add("is-hidden");
     rememberDialogFocus(elements.versionHistoryDialog);
@@ -1166,25 +1426,63 @@
     try {
       const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/versions/${encodeURIComponent(versionId)}/preview`);
       const version = payload.version;
-      const firstChapter = version.chapters?.[0];
+      state.versionPreviewId = version.version_id || versionId;
+      state.versionPreview = version;
+      const chapters = Array.isArray(version.chapters) ? version.chapters : [];
+      const totalWords = chapters.reduce((sum, chapter) => sum + Number(chapter.word_count || countEditorWords(chapter.content || chapter.formal_content || "")), 0);
+      const canRestore = version.status !== "active";
       elements.versionPreviewContent.classList.remove("is-hidden");
-      elements.versionPreviewContent.innerHTML = `<div class="version-preview-head"><span class="eyebrow">只读预览 / ${escapeHtml(version.label)}</span><strong>${version.chapters?.length || 0} 章 · ${Number(version.chapters?.reduce((sum, chapter) => sum + (chapter.word_count || 0), 0) || 0).toLocaleString("zh-CN")} 字</strong></div><p>${escapeHtml(firstChapter?.content?.slice(0, 260) || "这条历史稿本还没有正文片段。")} ${firstChapter?.content?.length > 260 ? "…" : ""}</p><small>历史正文不会被本次预览改写。恢复时会创建新的当前稿本。</small>`;
+      // version.chapters.map 逐章渲染完整、可滚动的只读正文，避免只展示首章摘录。
+      elements.versionPreviewContent.innerHTML = `<div class="version-preview-head"><div><span class="eyebrow">只读预览 / ${escapeHtml(version.label)}</span><h3 id="versionPreviewTitle" tabindex="-1">${escapeHtml(version.label || "稿本预览")}</h3></div><strong>${chapters.length} 章 · ${totalWords.toLocaleString("zh-CN")} 字</strong></div><div class="version-preview-chapters">${chapters.map((chapter) => `<article class="version-preview-chapter"><header><strong>第 ${chapter.chapter_number} 章 · ${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><span>${Number(chapter.word_count || countEditorWords(chapter.content || chapter.formal_content || "")).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapter.status === "ready" ? "已完成" : "草稿")}</span></header><div class="version-preview-body" tabindex="0">${escapeHtml(chapter.content || chapter.formal_content || "") || "这章还没有正文。"}</div></article>`).join("") || `<p class="archive-empty-note">这条稿本还没有章节正文。</p>`}</div><div class="version-preview-actions"><small>历史正文不会被本次预览改写。恢复时会创建新的当前稿本。</small>${canRestore ? `<button type="button" class="button button-outline" data-action="open-restore-confirm" data-version-id="${escapeHtml(state.versionPreviewId)}">打开恢复确认</button>` : `<span class="archive-empty-note">当前稿本无需恢复。</span>`}</div>`;
+      focusVersionPreviewTitle();
     } catch (error) {
       setEditorNotice(error.message || "历史稿本预览失败。", "red");
     }
   }
 
   async function restoreVersion(versionId) {
-    const button = $(`[data-action="restore-version"][data-version-id="${CSS.escape(versionId)}"]`);
+    if (!versionId || versionId !== state.versionPreviewId || state.versionPreview?.status === "active") return;
+    openRestoreVersionConfirm(versionId);
+  }
+
+  function openRestoreVersionConfirm(versionId = state.versionPreviewId) {
+    if (!versionId || versionId !== state.versionPreviewId || !state.versionPreview || state.versionPreview.status === "active") return;
+    state.restoreConfirmVersionId = versionId;
+    const version = state.versionPreview;
+    const chapters = Array.isArray(version.chapters) ? version.chapters : [];
+    const totalWords = chapters.reduce((sum, chapter) => sum + Number(chapter.word_count || countEditorWords(chapter.content || chapter.formal_content || "")), 0);
+    elements.restoreVersionTitle.textContent = "恢复确认";
+    elements.restoreVersionContent.innerHTML = `<p><strong>${escapeHtml(version.label || "历史稿本")}</strong> 将作为新的当前稿本恢复。</p><dl class="restore-version-facts"><div><dt>作品</dt><dd>${escapeHtml(state.workspace?.title || "当前作品")}</dd></div><div><dt>章节</dt><dd>${chapters.length} 章</dd></div><div><dt>正文</dt><dd>${totalWords.toLocaleString("zh-CN")} 字</dd></div></dl><p class="restore-version-warning">恢复会创建新的当前稿本，保留现有当前稿本和这条历史记录；确认后将创建新的当前稿本。</p>`;
+    elements.restoreVersionDialog.dataset.requestCount = "0";
+    rememberDialogFocus(elements.restoreVersionDialog);
+    if (typeof elements.restoreVersionDialog.showModal === "function" && !elements.restoreVersionDialog.open) elements.restoreVersionDialog.showModal();
+    else elements.restoreVersionDialog.setAttribute("open", "");
+    window.setTimeout(() => elements.restoreVersionTitle?.focus(), 0);
+  }
+
+  async function confirmRestoreVersion() {
+    const versionId = state.restoreConfirmVersionId;
+    if (!versionId || versionId !== state.versionPreviewId || state.restoreInFlight) return;
+    state.restoreInFlight = true;
+    const button = elements.confirmRestoreVersionButton;
     if (button) button.disabled = true;
+    if (elements.restoreVersionDialog) {
+      const requests = Number(elements.restoreVersionDialog.dataset.requestCount || 0) + 1;
+      elements.restoreVersionDialog.dataset.requestCount = String(requests);
+    }
     try {
       await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/versions/${encodeURIComponent(versionId)}/restore`, { method: "POST" });
+      elements.restoreVersionDialog.close();
       elements.versionHistoryDialog.close();
+      state.versionPreviewId = null;
+      state.versionPreview = null;
       await loadIndependentWorkspace(state.editorProjectId);
       showToast("历史正文已恢复为新的当前稿本。");
     } catch (error) {
-      if (button) button.disabled = false;
       setEditorNotice(error.message || "历史稿本恢复失败。", "red");
+    } finally {
+      state.restoreInFlight = false;
+      if (button) button.disabled = false;
     }
   }
 
@@ -2438,12 +2736,24 @@
     update();
   }
 
+  async function resolveChapterForProject(projectId) {
+    let workspace = state.editorProjectId === projectId ? state.workspace : null;
+    if (!workspace?.active_version) {
+      workspace = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}`);
+    }
+    const chapter = chooseActiveChapter(workspace?.active_version);
+    if (chapter) syncActiveChapterUrl(chapter.chapter_id);
+    return chapter;
+  }
+
   async function loadArchiveWorkspace(projectId, chapterNumber = null) {
     if (!projectId) return;
     state.archiveProjectId = projectId;
     setActiveScreen("archive");
     try {
-      const query = chapterNumber ? `?chapter_number=${encodeURIComponent(chapterNumber)}` : "";
+      if (chapterNumber === null) await resolveChapterForProject(projectId);
+      const selectedChapterNumber = chapterNumber;
+      const query = selectedChapterNumber ? `?chapter_number=${encodeURIComponent(selectedChapterNumber)}` : "";
       const payload = await requestJson(`/api/archive/projects/${encodeURIComponent(projectId)}${query}`);
       renderArchivePage(payload);
       setWorkspaceNotice(elements.archivePageNotice, "");
@@ -2471,6 +2781,8 @@
       setWorkspaceNotice(elements.deconstructionNotice, "");
     }
     try {
+      await resolveChapterForProject(projectId);
+      if (loadToken !== state.deconstructionLoadToken || state.deconstructionProjectId !== projectId) return;
       const data = await deconstructionApi.read(projectId);
       if (loadToken !== state.deconstructionLoadToken || state.deconstructionProjectId !== projectId) return;
       renderDeconstructionPage(data);
@@ -2680,7 +2992,9 @@
       return;
     }
     closeDeconstructionEvidenceDialog({ clear: false });
-    const navigated = await navigate(`/independent/${encodeURIComponent(projectId)}`);
+    // Evidence still returns through navigate(`/independent/${encodeURIComponent(projectId)}`) semantics;
+    // editorPath adds the verified chapter query so the return target is exact.
+    const navigated = await navigate(editorPath(projectId, evidence.chapterId || chapterIdFromLocation()));
     if (!navigated) {
       state.pendingEvidence = null;
       return;
@@ -3013,13 +3327,13 @@
 
   async function openDeconstruction(projectId = state.editorProjectId || state.archiveProjectId) {
     if (!projectId) return;
-    const path = `/independent/${encodeURIComponent(projectId)}?view=deconstruction`;
+    const path = deconstructionPath(projectId, chapterIdFromLocation() || state.activeChapterId);
     if (await navigate(path)) await loadDeconstructionWorkspace(projectId);
   }
 
   async function openDeconstructionVersions(projectId = state.deconstructionProjectId || state.archiveProjectId || state.editorProjectId) {
     if (!projectId) return;
-    const path = `/independent/${encodeURIComponent(projectId)}`;
+    const path = editorPath(projectId, chapterIdFromLocation() || state.activeChapterId);
     if (!(await navigate(path))) return;
     state.editorMode = "independent";
     await loadIndependentWorkspace(projectId);
@@ -3134,7 +3448,7 @@
     }
     if (action === "show-deconstruction") openDeconstruction(state.editorProjectId);
     if (action === "show-archive") {
-      if (await navigate(`/archive/${encodeURIComponent(state.editorProjectId)}`)) await loadArchiveWorkspace(state.editorProjectId);
+      if (await navigate(archivePath(state.editorProjectId, state.activeChapterId))) await loadArchiveWorkspace(state.editorProjectId);
     }
     if (action === "open-version-history") openVersionHistoryDialog();
     if (action === "toggle-archive") {
@@ -3145,10 +3459,14 @@
     if (action === "review-changes") openPendingChangesDialog();
     if (action === "reload-server") {
       if (state.editorConflict) {
-        state.editorBuffer = state.editorConflict.content || "";
-        state.editorTitleBuffer = state.editorConflict.title || "";
-        state.editorRevision = state.editorConflict.server_revision || 0;
+        const serverChapter = state.editorConflict;
+        replaceActiveVersionChapter(serverChapter);
+        state.editorBuffer = serverChapter.content || "";
+        state.editorTitleBuffer = serverChapter.title || "";
+        state.editorRevision = serverChapter.server_revision || 0;
+        state.editorSavedRevision = serverChapter.server_revision || 0;
         state.editorDirty = false;
+        state.editorSaveFailed = false;
         state.editorConflict = null;
         renderEditorWorkspace();
         setEditorSaveState("已载入服务器版本", "saved");
@@ -3164,12 +3482,15 @@
     if (action === "retry-task") retryIndependentTask(actionNode.dataset.taskId);
     if (action === "preview-version") previewVersion(actionNode.dataset.versionId);
     if (action === "restore-version") restoreVersion(actionNode.dataset.versionId);
+    if (action === "open-restore-confirm") openRestoreVersionConfirm(actionNode.dataset.versionId);
+    if (action === "cancel-restore-version") elements.restoreVersionDialog?.close();
+    if (action === "confirm-restore-version") confirmRestoreVersion();
     if (action === "open-trial") openTrialDialog(actionNode.dataset.characterId);
     if (action === "archive-snapshot") loadArchiveWorkspace(state.archiveProjectId, actionNode.dataset.chapterNumber);
     if (action === "archive-open-editor") {
       if (state.archiveMode === "ai_assisted") openAIEditor();
       else {
-        await navigate(`/independent/${encodeURIComponent(state.archiveProjectId)}`);
+        await navigate(editorPath(state.archiveProjectId, chapterIdFromLocation() || state.activeChapterId));
         state.editorMode = "independent";
         await loadIndependentWorkspace(state.archiveProjectId);
       }
@@ -3180,12 +3501,12 @@
     if (action === "archive-open-self") loadArchiveWorkspace(state.archiveProjectId);
     if (action === "deconstruction-open-editor") {
       const projectId = state.deconstructionProjectId;
-      if (projectId && await navigate(`/independent/${encodeURIComponent(projectId)}`)) await loadIndependentWorkspace(projectId);
+      if (projectId && await navigate(editorPath(projectId, chapterIdFromLocation() || state.activeChapterId))) await loadIndependentWorkspace(projectId);
     }
     if (action === "deconstruction-open-self") loadDeconstructionWorkspace(state.deconstructionProjectId);
     if (action === "deconstruction-open-archive") {
       const projectId = state.deconstructionProjectId;
-      if (projectId && await navigate(`/archive/${encodeURIComponent(projectId)}`)) await loadArchiveWorkspace(projectId);
+      if (projectId && await navigate(archivePath(projectId, chapterIdFromLocation() || state.activeChapterId))) await loadArchiveWorkspace(projectId);
     }
     if (action === "deconstruction-open-versions") openDeconstructionVersions(state.deconstructionProjectId);
     if (action === "deconstruction-refresh") loadDeconstructionWorkspace(state.deconstructionProjectId);
@@ -3235,6 +3556,7 @@
     elements.editorWorkspaceContent?.addEventListener("click", handleAction);
     elements.editorNotice?.addEventListener("click", handleAction);
     elements.versionHistoryContent?.addEventListener("click", handleAction);
+    elements.versionPreviewContent?.addEventListener("click", handleAction);
     elements.archivePageContent?.addEventListener("click", handleAction);
     elements.deconstructionScreen?.addEventListener("click", handleAction);
     elements.deconstructionPageContent?.addEventListener("input", handleDeconstructionDepthInput);
@@ -3271,6 +3593,15 @@
       elements.modeOptions.forEach((option) => option.classList.remove("is-selected"));
     });
     elements.newProjectForm.addEventListener("submit", submitProject);
+    [
+      elements.dialog,
+      elements.notificationsDialog,
+      elements.pendingChangesDialog,
+      elements.versionHistoryDialog,
+      elements.trialDialog,
+      elements.deconstructionEvidenceDialog,
+      elements.restoreVersionDialog,
+    ].forEach(bindDialogFocus);
     elements.dialog.addEventListener("close", resetProjectDialog);
     elements.librarySearch.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -3287,7 +3618,7 @@
     });
     elements.chapterEditor.addEventListener("input", handleEditorInput);
     elements.chapterTitleInput.addEventListener("input", handleEditorInput);
-    elements.completeChapterButton.addEventListener("click", completeCurrentChapter);
+    elements.completeChapterButton.addEventListener("click", handleCompleteButtonClick);
     $("#addChapterButton").addEventListener("click", addIndependentChapter);
     $("#openVersionButton").addEventListener("click", openVersionHistoryDialog);
     elements.archiveSnapshotSelect.addEventListener("change", (event) => selectArchiveSnapshot(event.target.value));
@@ -3300,6 +3631,11 @@
     elements.closeVersionHistoryButton = $("#closeVersionHistoryButton");
     elements.closeVersionHistoryButton.addEventListener("click", () => elements.versionHistoryDialog.close());
     elements.versionHistoryDialog.addEventListener("close", () => restoreDialogFocus(elements.versionHistoryDialog));
+    elements.restoreVersionDialog?.addEventListener("click", handleAction);
+    elements.restoreVersionDialog?.addEventListener("close", () => {
+      state.restoreConfirmVersionId = null;
+      restoreDialogFocus(elements.restoreVersionDialog);
+    });
     elements.closeTrialButton = $("#closeTrialButton");
     elements.closeTrialButton.addEventListener("click", () => elements.trialDialog.close());
     elements.trialDialog.addEventListener("close", () => restoreDialogFocus(elements.trialDialog));
@@ -3319,9 +3655,9 @@
       button.setAttribute("aria-expanded", String(open));
     });
     window.addEventListener("popstate", async () => {
-      if (!(await flushPendingSave())) {
+      if (state.editorSaveFailed || state.editorConflict || !(await flushPendingSave())) {
         if (state.editorProjectId) {
-          window.history.pushState({}, "", `/independent/${encodeURIComponent(state.editorProjectId)}`);
+          window.history.pushState({}, "", editorPath(state.editorProjectId, state.activeChapterId));
           setActiveScreen("independent");
         }
         return;
@@ -3329,16 +3665,16 @@
       await restoreSession(routeFromLocation());
     });
     window.addEventListener("beforeunload", (event) => {
-      if (state.editorDirty || state.editorSaving) {
+      if (!state.editorSaveFailed && !state.editorConflict && (state.editorDirty || state.editorSaving)) {
         event.preventDefault();
         event.returnValue = "当前正文尚未保存。";
       }
     });
     window.addEventListener("pagehide", () => {
-      if (state.editorDirty || state.editorSaving) void flushPendingSave({ keepalive: true });
+      if (!state.editorSaveFailed && !state.editorConflict && (state.editorDirty || state.editorSaving)) void flushPendingSave({ keepalive: true });
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden" && (state.editorDirty || state.editorSaving)) {
+      if (document.visibilityState === "hidden" && !state.editorSaveFailed && !state.editorConflict && (state.editorDirty || state.editorSaving)) {
         void flushPendingSave({ keepalive: true });
       }
     });

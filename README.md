@@ -119,7 +119,7 @@ LLM_TEMPERATURE=0.7
 ## 开发状态
 
 - 阶段 27 独立审计：P0/P1/P2/P3 均为 0。
-- 阶段 32 深度作品拆解候选：204 tests，0 failed，0 skipped；独立审计 P0/P1/P2/P3 均为 0。
+- 阶段 32 深度作品拆解已合并到 `main`：204 tests，0 failed，0 skipped；独立审计 P0/P1/P2/P3 均为 0。
 - API 基线：OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations。
 - 真实 DeepSeek 连续三章链路已验证。
 - 独立作品拆解工作区已升级为总览与人物、剧情、伏笔、章节节奏、读者体验、文笔技法六个视角；重要结论可打开证据抽屉，当前稿本可精确定位，历史证据保持只读。

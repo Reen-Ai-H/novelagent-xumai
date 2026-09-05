@@ -5,9 +5,9 @@
 ## 当前基线
 
 - 本任务书的阶段 31 产品基线：`e55ee722bc755c0f2562895e18f36e39803c8af0`；后续接棒始终以 GitHub 最新 `main` 为准，不按该 SHA 回退。阶段 31 作品拆解 MVP 已完成并通过独立审计。
-- 现役阶段 32 候选门禁：204 tests、0 failed、0 skipped；OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations；Ubuntu 与 Windows CI 均通过，独立审计 P0/P1/P2/P3 均为 0。
+- 现役 `main=ec2f31a` 门禁：204 tests、0 failed、0 skipped；OpenAPI 58 paths / 61 operations；旧 `/novel` 16 paths / 19 operations；Ubuntu 与 Windows CI 均通过，阶段 32 独立审计 P0/P1/P2/P3 均为 0。
 - 已实现：独立创作、故事档案、版本恢复、六视角深度作品拆解、AI 辅助写作基本闭环。
-- 未完成：阶段 32 合并、独立创作体验收口、类型与文笔引擎、真实质量增益、AI 暂停介入后的隐形恢复、生产化。
+- 未完成：独立创作体验收口、类型与文笔引擎、真实质量增益、AI 暂停介入后的隐形恢复、生产化。
 
 ## 明确顺序
 
