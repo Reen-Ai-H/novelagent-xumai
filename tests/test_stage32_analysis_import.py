@@ -80,6 +80,28 @@ class AnalysisImportTest(unittest.TestCase):
         bad["report"]["story_order"] = ["unknown"]
         self.assertEqual(self.client.post(self.url + "/import", json=bad).status_code, 422)
 
+    def test_revised_report_evidence_resolves_active_document(self):
+        self.prepare()
+        first = self.client.post(self.url + "/import", json=self.payload).json()["result"]
+        self.payload["report"]["findings"][0]["text"] = "新一版的解释。"
+        revised = self.client.post(self.url + "/import", json=self.payload).json()["result"]
+        self.assertNotEqual(first["document_id"], revised["document_id"])
+        linked = self.client.get(self.url + "/evidence/Q1").json()
+        self.assertEqual(linked["evidence"]["document_id"], revised["document_id"])
+        self.assertTrue(linked["source_matches_current"])
+
+    def test_portrait_evidence_and_episode_range_are_validated(self):
+        self.prepare()
+        report = self.payload["report"]
+        report["characters"][0]["portrait"] = copy.deepcopy(report["events"][0]["action"])
+        report["events"][0]["chapter_end"] = 1
+        self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 200)
+        report["characters"][0]["portrait"]["evidence_ids"] = ["missing"]
+        self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 422)
+        report["characters"][0]["portrait"]["evidence_ids"] = ["Q1"]
+        report["events"][0]["chapter_end"] = 2
+        self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 422)
+
 
 # Avoid rediscovering the imported fixture's tests in this module.
 del Stage31DeconstructionApiTest

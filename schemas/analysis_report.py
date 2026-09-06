@@ -26,12 +26,14 @@ class Character(StrictModel):
     identity: Claim
     motivation: Claim
     change: Claim
+    portrait: Claim | None = None
 
 
 class Event(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     title: str = Field(min_length=1, max_length=80)
     chapter_number: int = Field(ge=1)
+    chapter_end: int | None = Field(default=None, ge=1)
     story_time: str = Field(min_length=1, max_length=160)
     actor_ids: list[str] = Field(max_length=20)
     action: Claim
@@ -79,7 +81,11 @@ class AnalysisReport(StrictModel):
         claims = [*self.findings, *self.relations]
         for person in self.characters:
             claims.extend((person.identity, person.motivation, person.change))
+            if person.portrait is not None:
+                claims.append(person.portrait)
         for event in self.events:
+            if event.chapter_end is not None and (event.chapter_end < event.chapter_number or not set(range(event.chapter_number, event.chapter_end + 1)) <= chapters):
+                raise ValueError("剧情章节范围超出已读范围")
             if event.chapter_number not in chapters or not set(event.actor_ids) <= character_ids:
                 raise ValueError("事件章节或人物引用无效")
             claims.extend((event.action, event.consequence))

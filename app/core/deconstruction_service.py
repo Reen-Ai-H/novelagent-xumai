@@ -1308,7 +1308,9 @@ class DeconstructionService:
         record = self._record(project_id, account_id)
         if record is None:
             raise DeconstructionServiceError("evidence_missing", "这条拆解证据不存在。", status_code=404)
-        for document in record.documents:
+        # Imported revisions may reuse model-assigned quote IDs. Resolve the
+        # active document first; the client still verifies the document identity.
+        for document in sorted(record.documents, key=lambda item: item.document_id != record.active_document_id):
             for item in document.evidence:
                 if item.evidence_id != evidence_id:
                     continue
