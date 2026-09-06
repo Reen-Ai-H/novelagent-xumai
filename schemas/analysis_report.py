@@ -19,6 +19,10 @@ class Finding(Claim):
     title: str = Field(min_length=1, max_length=80)
 
 
+class CharacterInsight(Claim):
+    title: str = Field(min_length=1, max_length=80)
+
+
 class Character(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     name: str = Field(min_length=1, max_length=80)
@@ -27,6 +31,7 @@ class Character(StrictModel):
     motivation: Claim
     change: Claim
     portrait: Claim | None = None
+    insights: list[CharacterInsight] = Field(default_factory=list, max_length=8)
 
 
 class Event(StrictModel):
@@ -66,6 +71,7 @@ class AnalysisReport(StrictModel):
     time_note: str = Field(min_length=1, max_length=500)
     evidence: list[ReportEvidence] = Field(min_length=1, max_length=500)
     open_questions: list[str] = Field(max_length=30)
+    contradictions: list[CharacterInsight] = Field(default_factory=list, max_length=30)
 
     @model_validator(mode="after")
     def valid_references(self):
@@ -78,9 +84,10 @@ class AnalysisReport(StrictModel):
         evidence_ids = {x.id for x in self.evidence}
         character_ids = {x.id for x in self.characters}
         event_ids = {x.id for x in self.events}
-        claims = [*self.findings, *self.relations]
+        claims = [*self.findings, *self.relations, *self.contradictions]
         for person in self.characters:
             claims.extend((person.identity, person.motivation, person.change))
+            claims.extend(person.insights)
             if person.portrait is not None:
                 claims.append(person.portrait)
         for event in self.events:
@@ -105,3 +112,10 @@ class AnalysisImport(StrictModel):
     expected_source_revision: int = Field(ge=0)
     expected_source_hash: str = Field(min_length=16, max_length=128)
     report: AnalysisReport
+
+
+class AnalysisRequest(StrictModel):
+    expected_source_version_id: str = Field(min_length=1, max_length=128)
+    expected_source_revision: int = Field(ge=0)
+    expected_source_hash: str = Field(min_length=16, max_length=128)
+    chapter_numbers: list[int] = Field(min_length=1, max_length=20)

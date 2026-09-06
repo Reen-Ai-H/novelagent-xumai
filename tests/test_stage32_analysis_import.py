@@ -1,6 +1,8 @@
 """Source binding and author-data safety for externally authored analysis."""
 import copy
 import unittest
+from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 
 from test_stage31_deconstruction import Stage31DeconstructionApiTest
 
@@ -100,6 +102,45 @@ class AnalysisImportTest(unittest.TestCase):
         self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 422)
         report["characters"][0]["portrait"]["evidence_ids"] = ["Q1"]
         report["events"][0]["chapter_end"] = 2
+        self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 422)
+
+    def test_model_preview_uses_source_and_does_not_replace_report(self):
+        self.prepare()
+        before = self.client.get(self.url).json()["result"]["document_id"]
+        runtime = SimpleNamespace(model="fake-deepseek", structured=AsyncMock(return_value=SimpleNamespace(data=self.payload["report"])))
+        request = {k: v for k, v in self.payload.items() if k != "report"}
+        request["chapter_numbers"] = [1]
+        with patch("app.deconstruction_routes.create_runtime", return_value=runtime):
+            response = self.client.post(self.url + "/analyze-preview", json=request)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["report"]["producer"], "fake-deepseek")
+        self.assertIn("沈禾没有开门", runtime.structured.call_args.kwargs["messages"][1]["content"])
+        self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], before)
+        self.assertEqual(self.client.post(self.url + "/import", json=response.json()).status_code, 200)
+
+    def test_bad_model_quote_and_invalid_scope_preserve_current(self):
+        self.prepare()
+        before = self.client.get(self.url).json()["result"]["document_id"]
+        bad = copy.deepcopy(self.payload["report"])
+        bad["evidence"][0]["quote"] = "沈禾打开门走了出去。"
+        runtime = SimpleNamespace(model="fake", structured=AsyncMock(return_value=SimpleNamespace(data=bad)))
+        request = {k: v for k, v in self.payload.items() if k != "report"}
+        request["chapter_numbers"] = [1]
+        with patch("app.deconstruction_routes.create_runtime", return_value=runtime):
+            self.assertEqual(self.client.post(self.url + "/analyze-preview", json=request).status_code, 422)
+            runtime.structured.reset_mock()
+            request["chapter_numbers"] = [999]
+            self.assertEqual(self.client.post(self.url + "/analyze-preview", json=request).status_code, 422)
+            runtime.structured.assert_not_called()
+        self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], before)
+
+    def test_insight_and_contradiction_evidence_checked(self):
+        self.prepare()
+        detail = {"title": "选择", **self.payload["report"]["characters"][0]["identity"]}
+        self.payload["report"]["characters"][0]["insights"] = [detail]
+        self.payload["report"]["contradictions"] = [detail]
+        self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 200)
+        detail["evidence_ids"] = ["not-read"]
         self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 422)
 
 

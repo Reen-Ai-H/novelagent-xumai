@@ -862,7 +862,14 @@
     try {
       const workspace = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}`);
       state.workspace = workspace;
+      state.editorAnalysis = null;
+      if (workspace.mode !== "ai_assisted") {
+        void deconstructionApi.read(projectId).then(data => {
+          if (state.editorProjectId === projectId && state.workspace === workspace) { state.editorAnalysis = data; renderArchiveSummary(workspace.archive); }
+        }).catch(() => { if (state.workspace === workspace) { state.editorAnalysis = null; renderArchiveSummary(workspace.archive); } });
+      }
       state.editorMode = workspace.mode || state.editorMode || "independent";
+      document.querySelector('[data-action="show-archive"]').classList.toggle("is-hidden", state.editorMode !== "ai_assisted");
       state.activeArchive = workspace.archive;
       state.editorConflict = null;
       if (!workspace.initialized) {
@@ -894,6 +901,20 @@
 
   function renderArchiveSummary(archive, selectedChapterNumber = null) {
     state.activeArchive = archive || { characters: [], storylines: [], foreshadowing: [], questions: [], snapshots: [] };
+    const independent = state.workspace?.mode !== "ai_assisted";
+    document.querySelector("[data-action='show-archive']").classList.toggle("is-hidden", independent);
+    elements.archiveDrawer.querySelector(".eyebrow").textContent = independent ? "作品拆解" : "故事档案";
+    [elements.archiveSnapshotSelect, elements.archiveDrawer.querySelector(".archive-select-label"), elements.analysisLabel, document.getElementById("toggleArchiveButton")].filter(Boolean).forEach(e => e.classList.toggle("is-hidden", independent));
+    if (independent) {
+      elements.archiveDrawer.classList.remove("is-collapsed");
+      elements.archiveDrawer.setAttribute("aria-label", "作品拆解摘要");
+      elements.archiveDrawerTitle.textContent = "最新状态";
+      const data = state.editorAnalysis;
+      const report = data?.projectId === state.editorProjectId && data.sourceMatch && data.effectiveStatus === "completed" && !state.editorDirty ? data.result?.report : null;
+      const counts = [["人物", report?.characters.length, "characters"], ["关键大剧情", report?.events.length, "plot"], ["矛盾点", report ? (report.contradictions || []).length : null, "questions"], ["疑问点", report?.open_questions.length, "questions"]];
+      elements.archiveSummary.innerHTML = counts.map(([label, count, section]) => `<button type="button" class="analysis-stat" data-action="show-deconstruction" data-section="${section}"><span>${label}</span><strong>${count ?? "—"}</strong><span aria-hidden="true">↗</span></button>`).join("") + (report ? "" : '<p class="archive-empty-note">暂无当前正文的拆解</p>');
+      return;
+    }
     const characters = state.activeArchive.characters || [];
     const storylines = state.activeArchive.storylines || [];
     const foreshadowing = state.activeArchive.foreshadowing || [];
@@ -959,7 +980,7 @@
     if (state.editorReadOnly) return;
     state.editorBuffer = elements.chapterEditor.value;
     state.editorTitleBuffer = elements.chapterTitleInput.value;
-    state.editorDirty = true;
+    state.editorDirty = true; if (state.workspace?.mode !== "ai_assisted") { state.editorAnalysis = null; renderArchiveSummary(state.activeArchive); }
     state.editorChangeToken += 1;
     state.editorConflict = null;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
@@ -1015,7 +1036,7 @@
           setEditorSaveState("已保存", "saved");
         } else {
           // 保存请求期间又有输入：只更新 revision，保留新缓冲并让 flush 再写一次。
-          state.editorDirty = true;
+          state.editorDirty = true; if (state.workspace?.mode !== "ai_assisted") { state.editorAnalysis = null; renderArchiveSummary(state.activeArchive); }
           setEditorSaveState("本地缓冲", "");
         }
         renderEditorWorkspace();
@@ -1670,7 +1691,7 @@
     const working = ["queued", "running"].includes(data.runStatus);
     elements.deconstructionRefreshButton.disabled = working;
     elements.deconstructionPageContent.setAttribute("aria-busy", String(working));
-    const content = [renderDeconstructionStatus(data)];
+    const content = data.effectiveStatus === "completed" && data.sourceMatch ? [] : [renderDeconstructionStatus(data)];
     if (data.effectiveStatus === "empty") {
       content.push(`<section class="deconstruction-empty-panel"><div class="deconstruction-empty-mark">⌇</div><h2>先让正文留下可观察的章节</h2><p>作品拆解只读取这本作品当前稿本的真实正文。完成导入或写下至少一章后，服务端才会生成概览、节奏节点和章节证据；这里不会用标题、简介或固定模板填充结果。</p><div class="deconstruction-empty-actions"><button class="button button-outline" type="button" data-action="deconstruction-open-editor">回到正文 <span aria-hidden="true">→</span></button></div></section>`);
     } else if (hasDeconstructionResults(data) && data.effectiveStatus === "completed" && data.sourceMatch) {
@@ -1684,10 +1705,26 @@
     } else {
       content.push(`<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>结果会在这里出现</h2><p>任务在服务端继续运行；离开页面或刷新后，重新读取即可恢复。</p></section>`);
     }
-    if (data.effectiveStatus !== "empty") content.push(`<p class="deconstruction-source-note"><span>分析来源</span>${escapeHtml(data.analysisLabel)}${data.source.versionId ? ` · 当前稿本 ${escapeHtml(data.source.versionId.slice(0, 12))}` : ""}${data.source.revision === null ? "" : ` · REV / ${data.source.revision}`}</p>`);
-    content.push(renderDeconstructionHistory(data));
     elements.deconstructionPageContent.innerHTML = content.join("");
-    if (data.result?.report && window.XumaiAnalysis) window.XumaiAnalysis.mount(elements.deconstructionPageContent, data.result.report, data.result.evidenceRefs, renderDeconstructionEvidence);
+    if (data.result?.report && window.XumaiAnalysis) {
+      const params = new URLSearchParams(location.search);
+      const section = ["plot", "characters", "time"].includes(params.get("section")) ? params.get("section") : "characters";
+      let initialView = true;
+      state.analysisView = window.XumaiAnalysis.mount(elements.deconstructionPageContent, data.result.report, data.result.evidenceRefs, renderDeconstructionEvidence, {
+        section, character: params.get("character"),
+        characterUrl: id => `/independent/${encodeURIComponent(data.projectId)}?view=deconstruction&section=characters&character=${encodeURIComponent(id)}`,
+        onView(section, character) {
+          const url = new URL(location.href);
+          url.searchParams.set("section", section);
+          if (character) url.searchParams.set("character", character); else url.searchParams.delete("character");
+          if (character || section !== "plot") url.searchParams.delete("focus");
+          if (url.href !== location.href) history[initialView ? "replaceState" : "pushState"]({}, "", url);
+          initialView = false;
+          document.querySelectorAll("[data-action='deconstruction-section']").forEach(b => b.setAttribute("aria-current", b.dataset.section === section ? "page" : "false"));
+        }
+      });
+      if (params.get("focus") === "questions") document.getElementById("analysisQuestions")?.scrollIntoView();
+    }
     scheduleDeconstructionPoll(data);
   }
 
@@ -1882,6 +1919,7 @@
     try {
       const query = chapterNumber ? `?chapter_number=${encodeURIComponent(chapterNumber)}` : "";
       const payload = await requestJson(`/api/archive/projects/${encodeURIComponent(projectId)}${query}`);
+      if (payload.mode === "independent") { await navigate(`/independent/${encodeURIComponent(projectId)}?view=deconstruction`, { replace: true }); return; }
       renderArchivePage(payload);
       setWorkspaceNotice(elements.archivePageNotice, "");
       void loadNotifications();
@@ -1899,7 +1937,14 @@
   async function loadDeconstructionWorkspace(projectId, { silent = false } = {}) {
     if (!projectId) return;
     const loadToken = ++state.deconstructionLoadToken;
+    if (state.deconstructionProjectId !== projectId) {
+      state.modelAnalysisCandidate = null;
+      document.getElementById("modelAnalysisPreview").innerHTML = "";
+      document.getElementById("modelAnalysisStatus").textContent = "先预览，再采用。";
+    }
     state.deconstructionProjectId = projectId;
+    document.getElementById("deconstructionSubnav").hidden = false;
+    document.querySelector('[data-action="deconstruction-open-self"]').setAttribute("aria-expanded", "true");
     window.clearTimeout(state.deconstructionPollTimer);
     state.deconstructionPollTimer = null;
     setActiveScreen("deconstruction");
@@ -2371,9 +2416,54 @@
     loadAIWorkspace(state.aiProjectId, false);
   }
 
-  async function openDeconstruction(projectId = state.editorProjectId || state.archiveProjectId) {
+  async function previewModelAnalysis(button) {
+    if (state.modelAnalysisBusy) return;
+    const projectId = state.deconstructionProjectId;
+    const status = document.getElementById("modelAnalysisStatus");
+    const preview = document.getElementById("modelAnalysisPreview");
+    const raw = document.getElementById("modelAnalysisChapters").value.trim();
+    const numbers = [];
+    for (const part of raw.split(/[,，]/)) {
+      const match = part.trim().match(/^(\d+)(?:\s*[-–]\s*(\d+))?$/);
+      if (!match) { status.textContent = "请输入章节号，例如 1-5 或 1,3。"; return; }
+      const start = Number(match[1]), end = Number(match[2] || start);
+      if (start < 1 || end < start || end - start >= 20) { status.textContent = "每轮请选择 1 至 20 章。"; return; }
+      for (let n = start; n <= end; n++) numbers.push(n);
+    }
+    if (numbers.length > 20 || new Set(numbers).size !== numbers.length) { status.textContent = "每轮最多 20 章，请勿重复选择。"; return; }
+    state.modelAnalysisBusy = true; button.disabled = true;
+    state.modelAnalysisCandidate = null; preview.innerHTML = "";
+    status.textContent = "正在阅读和拆解，请保持本页打开…";
+    try {
+      const current = await deconstructionApi.read(projectId);
+      const candidate = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}/deconstruction/analyze-preview`, {
+        method: "POST", body: JSON.stringify({ expected_source_version_id: current.source.versionId, expected_source_revision: current.source.revision, expected_source_hash: current.source.contentHash, chapter_numbers: numbers })
+      });
+      if (state.deconstructionProjectId !== projectId) return;
+      state.modelAnalysisCandidate = { projectId, candidate };
+      status.textContent = `第 ${numbers.join("、")} 章试拆完成，尚未替换当前结果。`;
+      preview.innerHTML = '<div class="model-preview-actions"><button type="button" class="button button-primary" data-action="model-adopt">采用这份拆解</button><button type="button" class="quiet-link" data-action="model-discard">关闭预览</button></div><nav class="model-preview-tabs" aria-label="试拆视角"><button data-action="model-section" data-section="characters">人物卡</button><button data-action="model-section" data-section="plot">剧情地图</button><button data-action="model-section" data-section="time">双时间线</button></nav>' + window.XumaiAnalysis.render(candidate.report);
+      state.modelPreviewView = window.XumaiAnalysis.mount(preview, candidate.report, candidate.report.evidence, refs => refs.map(e => `<blockquote>第 ${e.chapter_number} 章 · ${escapeHtml(e.quote)}</blockquote>`).join(""));
+    } catch (error) { status.textContent = error.message || "试拆失败，当前结果已保留。"; }
+    finally { state.modelAnalysisBusy = false; button.disabled = false; }
+  }
+
+  async function adoptModelAnalysis(button) {
+    const selected = state.modelAnalysisCandidate;
+    if (!selected || selected.projectId !== state.deconstructionProjectId) return;
+    button.disabled = true;
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(selected.projectId)}/deconstruction/import`, { method: "POST", body: JSON.stringify(selected.candidate) });
+      state.modelAnalysisCandidate = null;
+      document.getElementById("modelAnalysisPreview").innerHTML = "";
+      document.getElementById("modelAnalysisStatus").textContent = "已采用，正文右侧统计会同步更新。";
+      await loadDeconstructionWorkspace(selected.projectId);
+    } catch (error) { document.getElementById("modelAnalysisStatus").textContent = error.message; button.disabled = false; }
+  }
+
+  async function openDeconstruction(projectId = state.editorProjectId || state.archiveProjectId, section = "characters") {
     if (!projectId) return;
-    const path = `/independent/${encodeURIComponent(projectId)}?view=deconstruction`;
+    const path = `/independent/${encodeURIComponent(projectId)}?view=deconstruction&section=${section === "questions" ? "plot&focus=questions" : encodeURIComponent(section)}`;
     if (await navigate(path)) await loadDeconstructionWorkspace(projectId);
   }
 
@@ -2438,7 +2528,7 @@
       elements.archiveDrawer.classList.remove("is-collapsed");
       elements.archiveDrawer.querySelector(".archive-drawer-body")?.removeAttribute("hidden");
     }
-    if (action === "show-deconstruction") openDeconstruction(state.editorProjectId);
+    if (action === "show-deconstruction") openDeconstruction(state.editorProjectId, actionNode.dataset.section);
     if (action === "show-archive") {
       if (await navigate(`/archive/${encodeURIComponent(state.editorProjectId)}`)) await loadArchiveWorkspace(state.editorProjectId);
     }
@@ -2488,7 +2578,17 @@
       const projectId = state.deconstructionProjectId;
       if (projectId && await navigate(`/independent/${encodeURIComponent(projectId)}`)) await loadIndependentWorkspace(projectId);
     }
-    if (action === "deconstruction-open-self") loadDeconstructionWorkspace(state.deconstructionProjectId);
+    if (action === "deconstruction-open-self") {
+      const nav = document.getElementById("deconstructionSubnav");
+      nav.hidden = !nav.hidden;
+      actionNode.setAttribute("aria-expanded", String(!nav.hidden));
+    }
+    if (action === "deconstruction-section") state.analysisView?.select(actionNode.dataset.section);
+    if (action === "model-analyze") await previewModelAnalysis(actionNode);
+    if (action === "model-adopt") await adoptModelAnalysis(actionNode);
+    if (action === "model-section") state.modelPreviewView?.select(actionNode.dataset.section);
+    if (action === "model-discard") { state.modelAnalysisCandidate = null; document.getElementById("modelAnalysisPreview").innerHTML = ""; document.getElementById("modelAnalysisStatus").textContent = "预览已关闭，当前结果保留。"; }
+
     if (action === "deconstruction-open-archive") {
       const projectId = state.deconstructionProjectId;
       if (projectId && await navigate(`/archive/${encodeURIComponent(projectId)}`)) await loadArchiveWorkspace(projectId);

@@ -74,3 +74,12 @@ git diff --check
 ## 发布边界
 
 GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 27 功能独立审计通过；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。
+
+
+## 独立拆解模型配置
+
+在本地 `.env` 配置 `DECONSTRUCTION_API_KEY`、`DECONSTRUCTION_BASE_URL`、`DECONSTRUCTION_MODEL`。密钥仅由服务端读取，勿提交或回显。默认端点 https://api.deepseek.com，默认模型 deepseek-v4-pro；显式设置支持其他兼容服务。该配置不改变现有生成模型。
+
+API 规则在 `app/agents/deconstruction_prompt.md`，和本地 Skill v0.4 的已确认反馈同步。选择章节试拆后先预览，采用通过已有来源/引文校验接口。调试自动化使用 fake runtime，不读取真实配置；真实请求仅在用户授权的手工试拆中运行。
+
+参数依据：[DeepSeek JSON Output](https://api-docs.deepseek.com/guides/json_mode/)、[思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)。

@@ -21,7 +21,10 @@ class Stage31CDeconstructionFrontendContractTest(unittest.TestCase):
             self.assertIn(f">{label}</strong>", self.index_source)
         self.assertIn('data-action="show-deconstruction"', self.index_source)
         self.assertIn('data-action="deconstruction-open-self"', self.index_source)
-        self.assertIn('data-action="deconstruction-open-archive"', self.index_source)
+        self.assertNotIn('data-action="deconstruction-open-archive"', self.index_source)
+        self.assertIn('id="deconstructionSubnav"', self.index_source)
+        for section in ("plot", "characters", "time"):
+            self.assertIn(f'data-section="{section}"', self.index_source)
 
     def test_adapter_uses_the_real_stage31_read_and_action_contract(self) -> None:
         self.assertIn("const deconstructionApi = Object.freeze({", self.app_source)

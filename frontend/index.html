@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111827" />
     <title>叙脉｜新一代写作体验</title>
     <link rel="stylesheet" href="/static/styles.css?v=stage4-20260810b" />
-    <link rel="stylesheet" href="/static/deconstruction-report.css?v=stage32a" />
+    <link rel="stylesheet" href="/static/deconstruction-report.css?v=stage32b3" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -288,18 +288,23 @@
           <a class="spine-brand deconstruction-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
           <nav class="spine-links deconstruction-spine-links">
             <button class="spine-link" type="button" data-action="deconstruction-open-editor"><span class="spine-icon">▤</span><strong>正文</strong></button>
-            <button class="spine-link is-active" type="button" data-action="deconstruction-open-self"><span class="spine-icon">⌇</span><strong>作品拆解</strong></button>
-            <button class="spine-link" type="button" data-action="deconstruction-open-archive"><span class="spine-icon">⌁</span><strong>故事档案</strong></button>
+            <button class="spine-link is-active" type="button" data-action="deconstruction-open-self" aria-expanded="true" aria-controls="deconstructionSubnav"><span class="spine-icon">⌇</span><strong>作品拆解</strong></button>
+            <div class="deconstruction-subnav" id="deconstructionSubnav" aria-label="拆解视角">
+              <button type="button" data-action="deconstruction-section" data-section="plot">剧情地图</button>
+              <button type="button" data-action="deconstruction-section" data-section="characters">人物卡</button>
+              <button type="button" data-action="deconstruction-section" data-section="time">双时间线</button>
+            </div>
             <button class="spine-link" type="button" data-action="deconstruction-open-versions"><span class="spine-icon">◫</span><strong>版本记录</strong></button>
           </nav>
           <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">XRAY / 04</span><button id="deconstructionLogoutButton" class="spine-logout" type="button">退出</button></div>
         </aside>
         <main class="deconstruction-main">
           <header class="deconstruction-header">
-            <div class="deconstruction-heading"><p class="kicker"><span class="kicker-line"></span>独立创作 / <span id="deconstructionProjectTitle">—</span></p><h1 id="deconstructionPageTitle">作品拆解</h1><p class="deconstruction-lede">把正文里的结构线索放回可回看的章节证据里。</p></div>
+            <div class="deconstruction-heading"><p class="kicker"><span class="kicker-line"></span>独立创作 / <span id="deconstructionProjectTitle">—</span></p><h1 id="deconstructionPageTitle">作品拆解</h1></div>
             <div class="deconstruction-header-actions"><span id="deconstructionStatusPill" class="deconstruction-status-pill">等待读取</span><button id="deconstructionRefreshButton" class="button button-outline" type="button" data-action="deconstruction-refresh">刷新拆解</button></div>
           </header>
           <div id="deconstructionNotice" class="notice deconstruction-notice is-hidden" role="status"></div>
+          <details class="model-analysis-panel"><summary>用 DeepSeek 试拆</summary><div class="model-analysis-controls"><label>章节范围 <input id="modelAnalysisChapters" type="text" value="1-5" placeholder="例如 1-5 或 1,3" /></label><button type="button" class="button button-outline" data-action="model-analyze">开始试拆</button><span id="modelAnalysisStatus" role="status">先预览，再采用。</span></div><div id="modelAnalysisPreview"></div></details>
           <section id="deconstructionPageContent" class="deconstruction-page-content" aria-live="polite" aria-busy="false"></section>
         </main>
       </section>
@@ -431,7 +436,7 @@
       </div>
     </dialog>
 
-    <script src="/static/deconstruction-report.js?v=stage32a" defer></script>
-    <script src="/static/app.js?v=stage32a" defer></script>
+    <script src="/static/deconstruction-report.js?v=stage32b3" defer></script>
+    <script src="/static/app.js?v=stage32b3" defer></script>
   </body>
 </html>

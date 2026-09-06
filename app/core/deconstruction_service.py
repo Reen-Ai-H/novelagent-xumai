@@ -18,7 +18,7 @@ from typing import Any
 
 from app.core.deconstruction_store import DeconstructionStore, DeconstructionStoreError
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
-from schemas.analysis_report import AnalysisImport
+from schemas.analysis_report import AnalysisImport, AnalysisRequest, AnalysisReport
 from schemas.deconstruction import (
     ChapterBreakdown,
     DeconstructionActions,
@@ -580,6 +580,41 @@ class DeconstructionService:
             self.enqueue_for_project(project_id, account_id, reason="首次读取补建")
             record = self._record(project_id, account_id)
         return self._response(source, record)
+
+    async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
+        """Read a bounded source snapshot; model failure never replaces the current result."""
+        from app.agents.deconstruction_model import analysis_messages
+        from app.agents.llm_runtime import LLMRuntimeError
+        source = self._source(project_id, account_id)
+        bindings = payload.model_dump(exclude={"chapter_numbers"})
+        self._check_source_precondition(source, **bindings)
+        if not source.sufficient or source.pending_changes:
+            raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        requested = set(payload.chapter_numbers)
+        chapters = [c for c in source.chapters if c.chapter_number in requested]
+        if len(requested) != len(payload.chapter_numbers) or len(chapters) != len(requested):
+            raise DeconstructionServiceError("report_scope_invalid", "请选择当前稿本中不重复的章节。", status_code=422)
+        if sum(len(c.content) for c in chapters) > 30000:
+            raise DeconstructionServiceError("report_scope_large", "本轮请缩小章节范围至约三万字以内。", status_code=422)
+        try:
+            result = await asyncio.wait_for(runtime.structured(
+                call_id=f"deconstruction:{project_id}:{source.source_hash}",
+                messages=analysis_messages([dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters]),
+                response_model=AnalysisReport, max_tokens=8192, temperature=0.3,
+            ), timeout=240)
+        except TimeoutError:
+            raise DeconstructionServiceError("model_timeout", "本轮拆解等待超时，请缩小范围后重试；现有结果已保留。", status_code=504) from None
+        except LLMRuntimeError as exc:
+            raise DeconstructionServiceError(exc.code, "模型拆解未完成，请稍后重试；现有结果已保留。", status_code=exc.status_code) from None
+        report = AnalysisReport.model_validate(result.data)
+        report.producer = runtime.model
+        if set(report.chapter_numbers) != requested:
+            raise DeconstructionServiceError("report_scope_invalid", "模型返回的章节范围不一致，现有结果已保留。", status_code=422)
+        by_number = {c.chapter_number: c for c in chapters}
+        if any(by_number[e.chapter_number].content.count(e.quote) != 1 for e in report.evidence):
+            raise DeconstructionServiceError("report_evidence_invalid", "模型引文未逐字匹配正文，现有结果已保留。", status_code=422)
+        self._check_source_precondition(self._source(project_id, account_id), **bindings)
+        return AnalysisImport(**bindings, report=report)
 
     def import_report(self, project_id: str, account_id: str, payload: AnalysisImport) -> dict[str, object]:
         """Bind model-authored claims to exact current text. Never modify the author's manuscript."""

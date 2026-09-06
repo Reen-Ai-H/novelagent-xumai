@@ -36,6 +36,7 @@ class LLMRuntimeSettings:
     provider: str = "unavailable"
     temperature: float = 0.7
     timeout_seconds: float = 45.0
+    thinking: str | None = None
 
     @property
     def key_configured(self) -> bool:
@@ -359,6 +360,8 @@ class LLMRuntime:
             "max_tokens": max_tokens,
         }
         request_messages = list(messages)
+        if self.settings.thinking in {"enabled", "disabled"} and self.settings.base_host == "api.deepseek.com":
+            body_payload["thinking"] = {"type": self.settings.thinking}
         if json_schema is not None:
             schema_text = json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
             if not any("schema" in str(message.get("content", "")) for message in request_messages):
