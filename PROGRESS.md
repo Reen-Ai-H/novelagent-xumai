@@ -8,7 +8,7 @@
 - 第二次模型试拆修正了人物卡的传闻限定和匿名群体卡问题，但文本矛盾分类与部分证据支持仍需调试。未采用 DeepSeek 预览，保留用户已认可样板，不宣称模型质量一致。
 - 实际浏览器：1440桌面与390窄屏、三视角与导航折叠、人物详情/刷新/返回、正文统计跳转、原文精确选区、试拆输入/返回/关闭，控制台无错误警告。
 - 最终隔离全量145 tests，0失败/错误/跳过，13.994秒；compileall、两份node --check、Skill quick_validate通过。自动测试阻断9次依赖外连，真实付费请求仅在授权的手工试拆中执行。
-- 继续分支 `codex/stage-32-codex-deconstruction-preview` 与 [Draft PR #8](https://github.com/Reen-Ai-H/novelagent-xumai/pull/8)，未合并或部署。原有test_stage15与两个PowerShell脚本的修改未纳入本次提交。
+- 本轮实现提交 `612f76c`。继续分支 `codex/stage-32-codex-deconstruction-preview` 与 [Draft PR #8](https://github.com/Reen-Ai-H/novelagent-xumai/pull/8)，未合并或部署。原有test_stage15与两个PowerShell脚本的修改未纳入本次提交。
 
 
 ## 阶段 32A 体验反馈更新
