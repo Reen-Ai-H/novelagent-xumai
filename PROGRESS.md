@@ -10,7 +10,7 @@
 - 当前样板：4 条发现、6 张人物卡、12 个剧情节点、39 条原文引文；实际 API 导入、刷新与全部 39 条证据回链核对通过。样板存本地预览账户，小说及结果不提交。Skill v0.2 同步了平台流程及时间/文本矛盾处理。
 - 验证：隔离全量 `review_runner.py` 139 tests，0 failed/errors/skipped，13.772 秒；`compileall`、两份前端 JS 的 `node --check`、`git diff --check` 通过。测试阻断 9 次依赖外部连接尝试；无真实模型付费调用。Skill 格式及引用脚本 1 正例 / 6 类反例通过。
 - 尚未完成：浏览器控制工具中途不可用，无法进行点击、窄屏、键盘与控制台验收；保留 Draft，不宣称页面或文学质量已获用户认可。详见 [阶段 32A](docs/goals/STAGE_32A_CODEX_PREVIEW.md)。
-- GitHub：实现提交与 Draft PR 链接在推送后补记；不合并、不部署。
+- GitHub：实现提交 `d9dc76c` 已推送；[Draft PR #8](https://github.com/Reen-Ai-H/novelagent-xumai/pull/8)。浏览器验收前保持 Draft，不合并、不部署。
 
 ## 阶段 31J：Windows 零上下文接棒任务书（2026-09-05）
 
