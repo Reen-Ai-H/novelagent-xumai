@@ -18,6 +18,7 @@ from typing import Any
 
 from app.core.deconstruction_store import DeconstructionStore, DeconstructionStoreError
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
+from schemas.analysis_report import AnalysisImport
 from schemas.deconstruction import (
     ChapterBreakdown,
     DeconstructionActions,
@@ -470,7 +471,7 @@ class DeconstructionService:
             "source_version_id": source.version_id,
             "source_revision": source.source_revision,
             "source_hash": source.source_hash,
-            "analysis_label": ANALYSIS_LABEL,
+            "analysis_label": active.analysis_label if active else ANALYSIS_LABEL,
             "empty_reason": empty_reason,
             "error_message": error_message,
             "retryable": retryable,
@@ -580,6 +581,60 @@ class DeconstructionService:
             record = self._record(project_id, account_id)
         return self._response(source, record)
 
+    def import_report(self, project_id: str, account_id: str, payload: AnalysisImport) -> dict[str, object]:
+        """Bind model-authored claims to exact current text. Never modify the author's manuscript."""
+        try:
+            with self.independent._author_write_guard(project_id, account_id), self._lock:
+                source = self._source(project_id, account_id)
+                self._check_source_precondition(source, **payload.model_dump(exclude={"report"}))
+                if not source.sufficient or source.pending_changes:
+                    raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+                report = payload.report
+                chapters = {x.chapter_number: x for x in source.chapters}
+                if not set(report.chapter_numbers) <= set(chapters):
+                    raise DeconstructionServiceError("report_scope_invalid", "拆解范围包含当前稿本不存在的章节。", status_code=422)
+                digest = hashlib.sha256(report.model_dump_json().encode("utf-8")).hexdigest()
+                document_id = self._slug(f"analysis:{project_id}:{source.source_hash}:{digest}")
+                evidence = []
+                for item in report.evidence:
+                    chapter = chapters[item.chapter_number]
+                    start = chapter.content.find(item.quote)
+                    if start < 0 or chapter.content.find(item.quote, start + 1) >= 0:
+                        raise DeconstructionServiceError("report_evidence_invalid", f"证据 {item.id} 未在指定章节唯一匹配，请修正引文。", status_code=422)
+                    evidence.append(EvidenceRef(
+                        evidence_id=item.id, document_id=document_id,
+                        source_version_id=source.version_id, source_revision=source.source_revision,
+                        source_hash=source.source_hash, chapter_id=chapter.chapter_id,
+                        chapter_number=chapter.chapter_number,
+                        start_offset=len(chapter.content[:start].encode("utf-16-le")) // 2,
+                        end_offset=len(chapter.content[:start + len(item.quote)].encode("utf-16-le")) // 2,
+                        excerpt=item.quote, label="拆解依据",
+                    ))
+                record = self._record(project_id, account_id) or DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
+                if self._document(record, document_id) is None:
+                    now = self._now()
+                    record.documents.append(DeconstructionDocument(
+                        document_id=document_id, project_id=project_id, account_id=account_id,
+                        source_version_id=source.version_id, source_revision=source.source_revision,
+                        source_hash=source.source_hash, status="completed", progress_percent=100,
+                        current_stage="拆解结果已导入", idempotency_key=digest,
+                        analysis_label=f"{report.producer} · 导入分析",
+                        overview=DeconstructionOverview(title=report.title, chapter_count=len(report.chapter_numbers),
+                            total_word_count=sum(self._word_count(chapters[n].content) for n in report.chapter_numbers)),
+                        report=report, evidence=evidence, completed_at=now,
+                    ))
+                record.active_document_id = document_id
+                record.updated_at = self._now()
+                # Keep the active result even when re-importing an older identical package.
+                active = self._document(record, document_id)
+                record.documents = [x for x in record.documents if x.document_id != document_id][-(MAX_HISTORY - 1):] + [active]
+                self.store.save(record)
+                return self._response(source, record)
+        except IndependentServiceError as exc:
+            raise DeconstructionServiceError(exc.code, exc.message, status_code=exc.status_code) from None
+        except DeconstructionStoreError:
+            raise DeconstructionServiceError("deconstruction_store_unavailable", "拆解结果暂时无法保存，请重试。", status_code=503) from None
+
     def enqueue_for_project(
         self,
         project_id: str,
@@ -620,7 +675,7 @@ class DeconstructionService:
             existing = next(
                 (
                     item
-                    for item in record.documents
+                    for item in sorted(record.documents, key=lambda item: item.document_id != record.active_document_id)
                     if item.source_version_id == source.version_id and item.source_hash == source.source_hash
                 ),
                 None,

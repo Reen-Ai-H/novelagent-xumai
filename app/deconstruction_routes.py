@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from schemas.analysis_report import AnalysisImport
 
 from app import entry_routes, independent_routes
 from app.core.deconstruction_service import DeconstructionService, DeconstructionServiceError
@@ -16,6 +17,15 @@ from schemas.deconstruction import (
 router = APIRouter(prefix="/api/independent", tags=["deconstruction"])
 deconstruction_service = DeconstructionService(independent=independent_routes.independent_service)
 independent_routes.independent_service.deconstruction_service = deconstruction_service
+
+
+@router.post("/projects/{project_id}/deconstruction/import", response_model=DeconstructionResponse)
+async def import_deconstruction(project_id: str, request: Request, payload: AnalysisImport):
+    account = _current_independent_account(request, project_id)
+    try:
+        return _service().import_report(project_id, account.account_id, payload)
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
 
 
 def _raise_service_error(error: DeconstructionServiceError) -> None:

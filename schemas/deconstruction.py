@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from schemas.analysis_report import AnalysisReport
 
 
 DeconstructionStatus = Literal[
@@ -146,6 +147,7 @@ class DeconstructionDocument(BaseModel):
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview | None = None
     timeline: list[TimelineNode] = Field(default_factory=list)
+    report: AnalysisReport | None = None
     chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     uncertainty: list[str] = Field(default_factory=list, max_length=40)
@@ -234,6 +236,7 @@ class DeconstructionDocumentPublic(BaseModel):
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview | None = None
     timeline: list[TimelineNode] = Field(default_factory=list)
+    report: AnalysisReport | None = None
     chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     uncertainty: list[str] = Field(default_factory=list, max_length=40)
@@ -256,6 +259,7 @@ class DeconstructionResult(BaseModel):
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview
     timeline: list[TimelineNode] = Field(default_factory=list)
+    report: AnalysisReport | None = None
     chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     uncertainty: list[str] = Field(default_factory=list, max_length=40)

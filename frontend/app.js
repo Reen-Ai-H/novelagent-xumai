@@ -1425,6 +1425,7 @@
       sourceHash: String(value.source_hash || ""),
       analysisLabel: deconstructionText(value.analysis_label, "服务端结构拆解"),
       overview: normalizeOverview(value.overview),
+      report: value.report || null,
       timeline: Array.isArray(value.timeline) ? value.timeline.map(normalizeTimelineNode) : [],
       chapters: Array.isArray(value.chapter_breakdowns) ? value.chapter_breakdowns.map(normalizeChapterBreakdown) : [],
       evidenceRefs: normalizeEvidenceRefs(value.evidence),
@@ -1656,6 +1657,7 @@
   function renderDeconstructionResult(data) {
     const result = data.result;
     if (!result) return "";
+    if (result.report && window.XumaiAnalysis) return window.XumaiAnalysis.render(result.report);
     return `<div class="deconstruction-result">${renderDeconstructionOverview(data)}${renderDeconstructionTimeline(data)}${renderDeconstructionChapterTable(data)}<section class="deconstruction-panel deconstruction-evidence-card"><header class="deconstruction-panel-heading"><div><span class="eyebrow">证据回链 / 正文最小片段</span><h2>每个结论都能回到原文</h2></div><span class="deconstruction-panel-note">${result.evidenceRefs.length} 条</span></header>${result.evidenceRefs.length ? `<div class="deconstruction-evidence-grid">${result.evidenceRefs.map((ref) => `<article class="deconstruction-evidence-item"><div class="deconstruction-evidence-item-head"><span class="mono">第 ${Number(ref.chapterNumber || 0)} 章</span><span>${escapeHtml(ref.label)}</span></div><blockquote>${escapeHtml(ref.excerpt || "正文片段未保留，请回到章节查看。")}</blockquote><div class="deconstruction-evidence-item-foot"><span>位移 ${Number(ref.charStart || 0).toLocaleString("zh-CN")}–${Number(ref.charEnd || 0).toLocaleString("zh-CN")} · UTF-16</span>${renderDeconstructionEvidence([ref])}</div></article>`).join("")}</div>` : `<p class="deconstruction-muted">服务端没有返回可回链证据。</p>`}</section><footer class="deconstruction-result-footer"><span>${escapeHtml(result.analysisLabel)}</span><span class="mono">DOCUMENT / ${escapeHtml(result.documentId.slice(0, 16))} · SOURCE / ${escapeHtml(result.sourceVersionId.slice(0, 16))} · REV / ${escapeHtml(result.sourceRevision ?? "—")}</span></footer></div>`;
   }
 
@@ -1685,6 +1687,7 @@
     if (data.effectiveStatus !== "empty") content.push(`<p class="deconstruction-source-note"><span>分析来源</span>${escapeHtml(data.analysisLabel)}${data.source.versionId ? ` · 当前稿本 ${escapeHtml(data.source.versionId.slice(0, 12))}` : ""}${data.source.revision === null ? "" : ` · REV / ${data.source.revision}`}</p>`);
     content.push(renderDeconstructionHistory(data));
     elements.deconstructionPageContent.innerHTML = content.join("");
+    if (data.result?.report && window.XumaiAnalysis) window.XumaiAnalysis.mount(elements.deconstructionPageContent, data.result.report, data.result.evidenceRefs, renderDeconstructionEvidence);
     scheduleDeconstructionPoll(data);
   }
 
