@@ -23,9 +23,17 @@ class CharacterInsight(Claim):
     title: str = Field(min_length=1, max_length=80)
 
 
+class SubEvent(CharacterInsight):
+    """副本内的小事件：短语标题 + 正文说明 + 证据。与人物形象共用同一形状。"""
+
+
 class Character(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    # 新报告可提供跨卷语义键；旧报告没有此字段时仍按原 schema 解析，
+    # 聚合器会退回到姓名/别名的保守匹配。
+    entity_key: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     name: str = Field(min_length=1, max_length=80)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
     role: str = Field(min_length=1, max_length=80)
     identity: Claim
     motivation: Claim
@@ -43,6 +51,7 @@ class Event(StrictModel):
     actor_ids: list[str] = Field(max_length=20)
     action: Claim
     consequence: Claim
+    sub_events: list[SubEvent] = Field(default_factory=list, max_length=30)
 
 
 class Relation(Claim):
@@ -96,6 +105,7 @@ class AnalysisReport(StrictModel):
             if event.chapter_number not in chapters or not set(event.actor_ids) <= character_ids:
                 raise ValueError("事件章节或人物引用无效")
             claims.extend((event.action, event.consequence))
+            claims.extend(event.sub_events)
         if any(not set(x.evidence_ids) <= evidence_ids for x in claims):
             raise ValueError("判断引用了不存在的证据")
         if any(x.chapter_number not in chapters for x in self.evidence):
@@ -108,9 +118,11 @@ class AnalysisReport(StrictModel):
 
 
 class AnalysisImport(StrictModel):
-    expected_source_version_id: str = Field(min_length=1, max_length=128)
-    expected_source_revision: int = Field(ge=0)
-    expected_source_hash: str = Field(min_length=16, max_length=128)
+    """绑定当前来源导入。范围拆解（report 覆盖连续章节）可不提供整本三元组。"""
+
+    expected_source_version_id: str | None = Field(default=None, min_length=1, max_length=128)
+    expected_source_revision: int | None = Field(default=None, ge=0)
+    expected_source_hash: str | None = Field(default=None, min_length=16, max_length=128)
     report: AnalysisReport
 
 

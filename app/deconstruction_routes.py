@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from schemas.analysis_report import AnalysisImport, AnalysisRequest
 from app.agents.deconstruction_model import create_runtime
+from app.core.book_analysis import BookAnalysis
 
 from app import entry_routes, independent_routes
 from app.core.deconstruction_service import DeconstructionService, DeconstructionServiceError
@@ -18,6 +19,31 @@ from schemas.deconstruction import (
 router = APIRouter(prefix="/api/independent", tags=["deconstruction"])
 deconstruction_service = DeconstructionService(independent=independent_routes.independent_service)
 independent_routes.independent_service.deconstruction_service = deconstruction_service
+book_analysis = BookAnalysis(deconstruction_service)
+
+
+@router.get("/projects/{project_id}/deconstruction/book")
+async def read_book_analysis(project_id: str, request: Request):
+    account = _current_independent_account(request, project_id)
+    _service()
+    job = book_analysis.load(project_id, account.account_id)
+    if job:
+        book_analysis.ensure_task(job)
+    return {"job": book_analysis.public(job)}
+
+
+@router.post("/projects/{project_id}/deconstruction/book/{action}")
+async def control_book_analysis(project_id: str, action: str, request: Request):
+    account = _current_independent_account(request, project_id)
+    _service()
+    try:
+        if action == "start":
+            return {"job": book_analysis.start(project_id, account.account_id)}
+        if action == "pause":
+            return {"job": book_analysis.pause(project_id, account.account_id)}
+        raise HTTPException(404, "未知操作")
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
 
 
 @router.post("/projects/{project_id}/deconstruction/analyze-preview", response_model=AnalysisImport)
@@ -69,10 +95,22 @@ def _service() -> DeconstructionService:
 
 
 @router.get("/projects/{project_id}/deconstruction", response_model=DeconstructionResponse)
-async def read_deconstruction(project_id: str, request: Request) -> dict[str, object]:
+async def read_deconstruction(project_id: str, request: Request, document_id: str | None = None) -> dict[str, object]:
     account = _current_independent_account(request, project_id)
     try:
-        return _service().read(project_id, account.account_id)
+        return _service().read(project_id, account.account_id, document_id=document_id)
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
+    raise AssertionError("unreachable")
+
+
+@router.get("/projects/{project_id}/deconstruction/guide")
+async def read_deconstruction_guide(project_id: str, request: Request) -> dict[str, object]:
+    """Read the source-bound cross-volume guide projection."""
+
+    account = _current_independent_account(request, project_id)
+    try:
+        return _service().guide(project_id, account.account_id)
     except DeconstructionServiceError as exc:
         _raise_service_error(exc)
     raise AssertionError("unreachable")

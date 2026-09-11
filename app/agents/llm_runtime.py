@@ -53,6 +53,10 @@ class LLMUsage:
     completion_tokens: int = 0
     total_tokens: int = 0
     known: bool = True
+    # DeepSeek may expose cache hits either as a top-level counter or inside
+    # prompt_tokens_details. Keep prompt_tokens as the provider total for
+    # backward compatibility and retain the disjoint cache count separately.
+    cache_read_tokens: int = 0
 
     @classmethod
     def from_payload(cls, payload: Any) -> "LLMUsage":
@@ -65,13 +69,19 @@ class LLMUsage:
         prompt = int(payload.get("prompt_tokens") or payload.get("input_tokens") or 0)
         completion = int(payload.get("completion_tokens") or payload.get("output_tokens") or 0)
         total = int(payload.get("total_tokens") or prompt + completion)
-        return cls(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total, known=known)
+        details = payload.get("prompt_tokens_details")
+        cache = payload.get("prompt_cache_hit_tokens")
+        if cache is None and isinstance(details, Mapping):
+            cache = details.get("cached_tokens")
+        cache_read = max(0, int(cache or 0))
+        return cls(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total, known=known, cache_read_tokens=cache_read)
 
     def as_dict(self) -> dict[str, int]:
         return {
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
         }
 
 
@@ -321,6 +331,7 @@ class LLMRuntime:
             completion_tokens=first.completion_tokens + second.completion_tokens,
             total_tokens=first.total_tokens + second.total_tokens,
             known=first.known and second.known,
+            cache_read_tokens=first.cache_read_tokens + second.cache_read_tokens,
         )
 
     @staticmethod

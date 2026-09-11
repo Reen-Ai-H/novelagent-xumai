@@ -516,7 +516,13 @@ class IndependentWorkspaceService:
                 file_format=suffix,
                 error_message="文件编码无法读取，请保留原文件后重新上传。",
             )
-        raw_text = content.decode("utf-8-sig", errors="replace")
+        if content.startswith((b"\xff\xfe", b"\xfe\xff")):
+            raw_text = content.decode("utf-16", errors="replace")
+        else:
+            try:
+                raw_text = content.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raw_text = content.decode("gb18030", errors="replace")
         if len(content) > MAX_IMPORT_BYTES:
             return self._set_failure(
                 record,

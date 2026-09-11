@@ -155,6 +155,10 @@ class DeconstructionDocument(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     completed_at: datetime | None = None
+    # 范围拆解：当且仅当文档覆盖正文的一个连续章节范围时设置（None=整本稿本旧式文档）。
+    scope_start: int | None = Field(default=None, ge=1)
+    scope_end: int | None = Field(default=None, ge=1)
+    scope_hash: str = Field(default="", max_length=128)
 
 
 class DeconstructionProjectRecord(BaseModel):
@@ -244,6 +248,30 @@ class DeconstructionDocumentPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    scope_start: int | None = Field(default=None, ge=1)
+    scope_end: int | None = Field(default=None, ge=1)
+    scope_hash: str = Field(default="", max_length=128)
+
+
+class DeconstructionVolumeItem(BaseModel):
+    """卷级拆解条目：作品内一份拆解文档及其覆盖的章节范围与当前状态。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    scope_start: int | None = None
+    scope_end: int | None = None
+    scope_label: str = ""
+    status: DeconstructionStatus = "queued"
+    run_status: DeconstructionRunStatus = "none"
+    match: bool = False
+    analysis_label: str = "确定性结构拆解（无模型）"
+    chapter_count: int = Field(default=0, ge=0)
+    evidence_count: int = Field(default=0, ge=0)
+    latest: bool = True
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
 
 
 class DeconstructionResult(BaseModel):
@@ -263,6 +291,9 @@ class DeconstructionResult(BaseModel):
     chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     uncertainty: list[str] = Field(default_factory=list, max_length=40)
+    scope_start: int | None = Field(default=None, ge=1)
+    scope_end: int | None = Field(default=None, ge=1)
+    scope_hash: str = Field(default="", max_length=128)
 
 
 class DeconstructionHistoryItem(BaseModel):
@@ -328,6 +359,9 @@ class DeconstructionResponse(BaseModel):
     error: DeconstructionError | None = None
     actions: DeconstructionActions = Field(default_factory=DeconstructionActions)
     history: list[DeconstructionHistoryItem] = Field(default_factory=list)
+    # 范围拆解：当前聚焦文档与全部卷条目（未聚焦的旧整本文档留在 history）。
+    focus_document_id: str | None = None
+    volumes: list[DeconstructionVolumeItem] = Field(default_factory=list)
     # 兼容阶段 31A 客户端；这些字段始终由 canonical state 同步生成。
     status: DeconstructionEffectiveStatus
     progress_percent: int = Field(default=0, ge=0, le=100)

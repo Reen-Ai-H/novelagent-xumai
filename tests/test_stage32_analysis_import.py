@@ -143,6 +143,44 @@ class AnalysisImportTest(unittest.TestCase):
         detail["evidence_ids"] = ["not-read"]
         self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 422)
 
+    def test_cross_volume_guide_keeps_character_stages(self):
+        project, _ = self.prepare()
+        self.payload["report"]["characters"][0].update({"entity_key": "shen-he", "aliases": ["小沈"]})
+        self.assertEqual(self.client.post(self.url + "/import", json=self.payload).status_code, 200)
+
+        added = self.client.post(f"/api/independent/projects/{project}/chapters").json()["chapter"]
+        saved = self.client.put(
+            f"/api/independent/projects/{project}/chapters/{added['chapter_id']}/draft",
+            json={"content": "沈禾终于开门。", "expected_revision": added["server_revision"]},
+        ).json()["chapter"]
+        self.client.post(
+            f"/api/independent/projects/{project}/chapters/{added['chapter_id']}/complete",
+            json={"content": saved["content"], "expected_revision": saved["server_revision"], "idempotency_key": f"guide-{project}"},
+        )
+        source = self.client.get(self.url).json()["source"]
+        later = copy.deepcopy(self.payload)
+        later.update({"expected_source_version_id": source["version_id"], "expected_source_revision": source["revision"], "expected_source_hash": source["hash"]})
+        later["report"].update({"chapter_numbers": [2], "scope": "第二章阶段"})
+        later["report"]["findings"][0]["id"] = "F2"
+        later["report"]["characters"][0].update({"id": "C2", "name": "沈禾", "aliases": ["小禾"], "change": {**later["report"]["characters"][0]["change"], "text": "后卷开始主动面对后果。"}})
+        later["report"]["events"][0].update({"id": "E2", "chapter_number": 2, "actor_ids": ["C2"]})
+        later["report"]["story_order"] = ["E2"]
+        later["report"]["evidence"][0].update({"id": "Q2", "chapter_number": 2, "quote": "沈禾终于开门。"})
+        for key in ("identity", "motivation", "change"):
+            later["report"]["characters"][0][key]["evidence_ids"] = ["Q2"]
+        for key in ("action", "consequence"):
+            later["report"]["events"][0][key]["evidence_ids"] = ["Q2"]
+        later["report"]["findings"][0]["evidence_ids"] = ["Q2"]
+        self.assertEqual(self.client.post(self.url + "/import", json=later).status_code, 200)
+
+        guide = self.client.get(f"/api/independent/projects/{project}/deconstruction/guide")
+        self.assertEqual(guide.status_code, 200, guide.text)
+        characters = guide.json()["characters"]
+        self.assertEqual(len(characters), 1)
+        self.assertEqual(len(characters[0]["stages"]), 2)
+        self.assertEqual(characters[0]["stages"][0]["scope_start"], 1)
+        self.assertEqual(characters[0]["stages"][1]["scope_start"], 2)
+
 
 # Avoid rediscovering the imported fixture's tests in this module.
 del Stage31DeconstructionApiTest

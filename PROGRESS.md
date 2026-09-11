@@ -1,5 +1,13 @@
 # 当前任务进度
 
+## 阶段 32B · 全书收口准备（2026-09-11，进行中）
+
+- 分支：`codex/stage-32-codex-deconstruction-preview`。本轮先冻结既有章节/卷级结果，不启动 70 万字真实付费重跑。
+- 已实现：跨卷人物阶段聚合接口 `/api/independent/projects/{project_id}/deconstruction/guide`；稳定 `entity_key`/别名字段；旧证据无当前稿本绑定时的静态核对展示；全文任务预算账与请求前止损门；DeepSeek 运行时保留 cache-read token 统计；运行时拆解 prompt 与本地 `xumai-deconstruct` Skill 同步到 v0.5。
+- 已同步：`docs/DECISIONS.md`、`docs/ROADMAP.md`、`docs/ACCEPTANCE.md` 和阶段 32 任务书固定“冻结 → 聚合 → 小样 → 成本试验 → 全书整合”顺序。
+- 验证：全量 `161 tests / 0 failed / 0 skipped`；`compileall`、两份 `node --check`、`git diff --check` 和 Skill `quick_validate` 通过。未调用真实模型，未做浏览器交互验收。
+- 尚未完成：全书层的明暗线/悬念揭示/节奏分析，真实同源小样，真实费用试验，以及全文 runner 从“累计报告重发”改为真正增量合同。当前预算门是安全止损基础，不代表 10 元目标已验证。
+
 ## 阶段 32A · 独立档案合并与 DeepSeek 试拆（最新）
 
 - 移除拆解完成说明、发现总览和历史块；左侧作品拆解展开三视角，人物卡进入可返回/刷新的详情页。独立档案合并，正文右侧四项数量同源。
