@@ -122,7 +122,7 @@ print({
         result = subprocess.run(
             [sys.executable, "-c", script],
             cwd=tempfile.gettempdir(),
-            env={**os.environ, "PYTHONPATH": str(root)},
+            env={**os.environ, "PYTHONPATH": str(root), "OPENAI_API_KEY": "stage15-test-key"},
             capture_output=True,
             text=True,
             check=True,

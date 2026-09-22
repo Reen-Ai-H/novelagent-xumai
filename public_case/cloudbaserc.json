@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.cloudbase.net/cli/cloudbaserc.schema.json",
+  "version": "2.0",
+  "envId": "xvmai-d1grww3kw98852ee1",
+  "app": {
+    "serviceName": "xumai-public-case",
+    "root": "./",
+    "framework": "static",
+    "installCommand": "",
+    "buildCommand": "",
+    "outputDir": "./",
+    "deployPath": "/",
+    "ignore": [
+      "README.md",
+      "Deploy-CloudBase.ps1",
+      "Deploy-CloudBase.cmd",
+      "cloudbaserc.json"
+    ]
+  }
+}

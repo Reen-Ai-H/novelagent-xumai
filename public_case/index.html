@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="叙脉公开案例：魔道祖师全书拆解" />
+  <meta name="robots" content="noindex" />
+  <title>叙脉｜魔道祖师全书拆解</title>
+  <link rel="stylesheet" href="styles.css?v=modal-fix-20260907" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#guide" aria-label="回到全书导读"><span class="brand-mark">叙</span><span>叙脉</span></a>
+    <div class="header-meta"><span class="eyebrow">PUBLIC CASE / 01</span><span>新一代写作体验</span></div>
+  </header>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-kicker">作品拆解 · 全书案例</div>
+      <h1 id="page-title">魔道祖师全书拆解</h1>
+      <p id="page-subtitle"></p>
+      <div class="stat-row" id="stats"></div>
+      <p class="notice" id="notice"></p>
+    </section>
+    <div class="workspace">
+      <aside class="volume-rail" aria-label="阅读窗口">
+        <div class="rail-title">阅读窗口</div>
+        <div id="volume-list"></div>
+      </aside>
+      <section class="content">
+        <nav class="tabs" aria-label="拆解方向">
+          <button class="tab active" data-view="guide">全书导读</button>
+          <button class="tab" data-view="plot">剧情地图</button>
+          <button class="tab" data-view="characters">人物卡</button>
+          <button class="tab" data-view="timeline">双时间线</button>
+          <button class="tab" data-view="questions">矛盾与疑问</button>
+        </nav>
+        <div id="view-root"></div>
+      </section>
+    </div>
+  </main>
+  <div id="modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close="1"></div>
+    <article class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <button class="modal-close" data-close="1" aria-label="关闭">×</button>
+      <div id="modal-content"></div>
+    </article>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
