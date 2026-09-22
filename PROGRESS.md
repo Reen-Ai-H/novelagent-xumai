@@ -14,7 +14,7 @@
 - 下一项实际交付：复用既有结果，整理 1–2 位主要人物、2–3 个相连大事件和一条覆盖前后揭晓的线索，附必要节奏与地点信息，先让用户看内容。
 - 本轮仅文档修改。未修改应用或小说数据，未运行真实模型、全量测试或浏览器功能验收；历史测试结果不作为本轮重新验证。10 元整书成本仍未验证。
 - 文档核查：研究稿 32 项脚注完整、18 个固定版本源码路径存在、5 个关键文件哈希匹配；`git diff --check` 通过（既有测试文件存在 LF/CRLF 提示）。目标文档的引用、范围一致性与空白检查单独复核。
-- 分支仍为 `codex/stage-32-codex-deconstruction-preview`；本轮目标文档、公开案例包和部署脚本已在 `f0ae3fe` 提交并推送，继续保留 [Draft PR #8](https://github.com/Reen-Ai-H/novelagent-xumai/pull/8)。功能阶段尚未完成，`xumai_deconstruct_run/` 实验现场继续留在本机。
+- 分支仍为 `codex/stage-32-codex-deconstruction-preview`；本轮目标文档、公开案例包和部署脚本已在 `6282520` 提交并推送，继续保留 [Draft PR #8](https://github.com/Reen-Ai-H/novelagent-xumai/pull/8)。功能阶段尚未完成，`xumai_deconstruct_run/` 实验现场继续留在本机。
 
 ## 阶段 32B · 全书收口准备（2026-09-11，进行中）
 
