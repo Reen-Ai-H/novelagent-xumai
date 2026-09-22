@@ -282,8 +282,8 @@
 
 研究依据见 [公开产品调研](research/NOVEL_GENERATION_PRODUCT_RESEARCH_2026-09-13.md)；现役任务见 [阶段 32](goals/STAGE_32_DECONSTRUCTION_DEPTH.md)。
 
-## 2026-09-23 · 发布公开案例静态站
+## 2026-09-23 · GitHub 同步，恢复 CloudBase 原站
 
-- 用户明确要求把本地目前维护的版本推到云端；本次按既有边界仅发布 `public_case/` 只读静态案例到腾讯云 CloudBase，不改变本地 FastAPI 主应用的“非生产部署”定位。
-- 发布前只读检查确认已有 CloudBase 登录态和 `xumai-public-case` 站点；发布后版本为 `xumai-public-case-003`、状态 `SUCCESS`，线上 HTTP 200。
-- 不上传 `.env`、真实密钥、`.novel_*` 本地数据、小说全文或 `xumai_deconstruct_run/` 实验现场；GitHub 代码同步与静态案例发布分别记录。
+- 用户澄清“推到云端”仅指 GitHub，不授权更新线上公开案例；`public_case/` 不再作为本次 CloudBase 发布目标。
+- 此前误发布的 `xumai-public-case-003` 已用发布前备份恢复为当前版本 `xumai-public-case-004`；线上静态文件与备份逐项核对一致。
+- 不创建新 CloudBase 站点，不上传 `.env`、真实密钥、`.novel_*` 本地数据、小说全文或 `xumai_deconstruct_run/` 实验现场。后续任何 CloudBase 发布必须单独确认。

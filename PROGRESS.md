@@ -1,11 +1,11 @@
 # 当前任务进度
 
-## 2026-09-23 · 公开案例静态站云端发布
+## 2026-09-23 · GitHub 同步与 CloudBase 恢复
 
-- 已将本地 `public_case/` 只读案例包发布到腾讯云 CloudBase `xumai-public-case`，环境 `xvmai-d1grww3kw98852ee1`，版本 `xumai-public-case-003`，状态 `SUCCESS`。
-- 线上回读：`https://xumai-public-case-xvmai-d1grww3kw98852ee1.webapps.tcloudbase.com/` 返回 HTTP 200，页面标题为“叙脉｜魔道祖师全书拆解”。
-- 修复部署脚本对空安装/构建参数的 PowerShell 绑定错误，并改为动态输出当前 CloudBase 地址。
-- 本次只发布静态公开案例，不代表 FastAPI 主应用、账户、本地 `.novel_*` 数据或生产环境已部署；GitHub 阶段分支同步仍单独执行。
+- 用户澄清本次目标是把本地版本推到 GitHub，不是更新线上公开案例；此前误触发的 CloudBase `xumai-public-case-003` 已停止作为当前线上内容。
+- 已从发布前备份恢复 `xumai-public-case` 原静态内容，当前恢复版本为 `xumai-public-case-004`，状态 `SUCCESS`；线上五个静态文件与备份逐项 SHA-256 一致。
+- 未创建新 CloudBase 站点，也未上传 FastAPI 主应用、账户、本地 `.novel_*` 数据或生产内容；后续 CloudBase 发布需单独确认。
+- 部署脚本的空参数和地址输出修复仍保留在 GitHub 代码中，便于未来明确授权后使用。
 
 ## 阶段 32B · 目标收敛（2026-09-13，文档完成／实现待续）
 
