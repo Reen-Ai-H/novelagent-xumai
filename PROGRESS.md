@@ -8,7 +8,7 @@
 - 隔离复测：main 204 tests / 0 failures / 0 errors / 0 skipped；候选 161 tests / 1 failure / 0 errors / 0 skipped，失败是开发 `.env` 存在性依赖，未伪造配置转绿。两者 compileall、app.js 语法均通过；候选额外 report.js 语法通过；OpenAPI 为 58/61 与 63/66，旧 `/novel` 均 16/19。
 - 微型诊断：旧记忆检索以第 3 章查询可返回第 100 章资料；候选账本 100 次未知 usage 后花费仍为 0 且允许后续预检。仅证明函数边界缺口，不宣称真实泄漏或超支；未修改代码，详见报告。
 - 安全与限制：只使用隔离源码副本、fake 与合成数据；未读取真实小说、未输出密钥、未调用付费模型、未部署。没有重跑浏览器、文学质量或容量压测。
-- 报告分支：`codex/stage-32-platform-assessment`；交付提交与 Draft PR 在报告检查后记录。未合并候选功能分支。
+- 报告分支：`codex/stage-32-platform-assessment`；报告提交 `25ed56c` 已推送，交付为 [Draft PR #9](https://github.com/Reen-Ai-H/novelagent-xumai/pull/9)。三份文档本地链接检查缺失 0，diff 检查通过。未合并候选功能分支；远端 CI 状态以 PR 当前 head 为准。
 
 ## 阶段 32：深度作品拆解（审计通过，待合并，2026-09-05）
 
