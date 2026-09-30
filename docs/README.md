@@ -26,6 +26,7 @@
 | `AGENT_WORKFLOW.md` | 长任务如何开始、续跑和交接 | 协作方式改变时 |
 | `ROADMAP.md` | 后续阶段顺序、依赖和完成门槛 | 长期优先级或阶段顺序改变时 |
 | `USER_GUIDE.md` | 面向作者的安装、操作、备份和常见问题 | 用户流程或限制改变时 |
+| `FIRST_PRINCIPLES_REVIEW.md` | 阶段 33 的作者目标、检查结论、重构与质量边界 | 创作闭环合同改变时 |
 | `ARCHITECTURE.md` | 当前分层、数据、事务和隐私边界 | 架构合同改变时 |
 | `DEVELOPMENT.md` | 本地开发、检查、恢复与发布边界 | 工程流程改变时 |
 | `CLOSEOUT_MATRIX.md` | 代码、运行态、文档、规则和质量事实矩阵 | 收口状态改变时 |
@@ -36,6 +37,8 @@
 
 ## 当前状态
 
+- 2026-09-30：阶段 32 已合并；阶段 33 创作闭环候选见 [第一性原理检查说明](FIRST_PRINCIPLES_REVIEW.md) 和根进度，旧日期与 204 项为阶段 32 基线。本阶段独立审计与真实文学质量增益未验证。
+
 - 文档收口日期：2026-09-05；阶段 32 深度作品拆解独立审计 P0/P1/P2/P3 均为 0。
 - GitHub `main` 是当前 V1 开发基线；阶段 32 候选为 204 tests、0 failed、0 skipped，Windows/Ubuntu CI 已通过。
 - 当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations；真实 DeepSeek 三章链路已验证。
@@ -45,7 +48,7 @@
 - A、B、C 共 21 张探索图保留；A 是现役实现基准，B/C 只作后续灵感参考。
 - Windows 迁移步骤见 `WINDOWS_MIGRATION.md`；CI 覆盖 Ubuntu/Windows、Python 3.12 和 Node LTS。
 - 后续每个阶段必须在独立 `codex/stage-<编号>-<主题>` 分支提交并推送；需复核的阶段保持 Draft PR，通过后再合并主线。
-- 下一阶段及长期顺序以 `ROADMAP.md` 为唯一入口；阶段 32 合并后进入阶段 33“独立创作体验收口”，不得仅凭聊天记录推断范围。
+- 下一阶段及长期顺序以 `ROADMAP.md` 为唯一入口；阶段 33 本次扩展范围以 2026-09-30 决策与检查说明为准，后续阶段仍从路线图进入，不得仅凭聊天记录推断范围。
 
 ## 给新智能体的最短入口
 

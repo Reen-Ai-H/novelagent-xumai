@@ -10,7 +10,7 @@ AI 专属状态和阶段 2 的正文/档案稿本分开存储：本文件只描�
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,11 +68,23 @@ class ProfessionalRoleStatus(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class WritingPreferences(BaseModel):
+    """作者的表达意图；不把风格偏好冒充故事事实。"""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    genre: str = Field(default="", max_length=120)
+    point_of_view: str = Field(default="", max_length=120)
+    tone: str = Field(default="", max_length=600)
+    avoid: str = Field(default="", max_length=600)
+
+
 class AISettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     strategy: DirectorStrategy = "pause_at_key_nodes"
     reveal_consequences: bool = False
+    writing_preferences: WritingPreferences = Field(default_factory=WritingPreferences)
 
 
 class DirectorChoice(BaseModel):
@@ -121,6 +133,34 @@ class BlueprintAssistantResponse(BaseModel):
     blueprint_patch: BlueprintPatch = Field(default_factory=BlueprintPatch)
 
 
+class BlueprintSuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suggestion_id: str
+    field: Literal["core_premise", "core_conflict", "protagonist", "protagonist_motivation", "key_relationships", "world_rules", "target_length", "ending_direction", "volume_outline"]
+    before: str | list[str]
+    after: str | list[str]
+    source_message_id: str
+    status: Literal["pending", "accepted", "dismissed"] = "pending"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class BlueprintSuggestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(..., ge=0)
+    decision: Literal["accept", "dismiss"]
+
+
+class WritingCheck(BaseModel):
+    """章末可解释提示，不是文学打分或判错。"""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    kind: Literal["repeated_paragraph", "previous_chapter_overlap", "editor_question"]
+    message: str = Field(..., min_length=1, max_length=600)
+
+
 class StoryCharacterSimulationResponse(BaseModel):
     """故事人物模型的公开产出；不得把私有记忆原文带入这些字段。"""
 
@@ -159,6 +199,7 @@ class DirectorReviewResponse(BaseModel):
     source_chapter: int = Field(..., ge=1)
     summary: str = Field(..., min_length=1, max_length=1200)
     public_character_updates: list[str] = Field(default_factory=list, max_length=20)
+    revision_questions: list[Annotated[str, Field(min_length=1, max_length=600)]] = Field(default_factory=list, max_length=6)
 
 
 class DirectorArchiveResponse(BaseModel):
@@ -294,6 +335,12 @@ class DirectorRun(BaseModel):
     review_summary: str = ""
     archive_candidates: dict[str, list[str]] = Field(default_factory=dict)
     archive_source_chapter: int | None = Field(default=None, ge=1)
+    chapter_goal: str = Field(default="", max_length=1200)
+    writing_preferences: WritingPreferences = Field(default_factory=WritingPreferences)
+    context_token: str = ""
+    generation_epoch: int = Field(default=0, ge=0)
+    recovery_from_run_id: str | None = None
+    writing_checks: list[WritingCheck] = Field(default_factory=list)
 
 
 class CreditLedgerEntry(BaseModel):
@@ -343,6 +390,7 @@ class AIProjectRecord(BaseModel):
     # 仅保存通过正文长度、格式和私密内容校验的服务端待用正文；绝不返回浏览器。
     text_cache: dict[str, str] = Field(default_factory=dict)
     last_model_error: ModelCallMetadata | None = None
+    blueprint_suggestions: list[BlueprintSuggestion] = Field(default_factory=list)
 
 
 class AIMessageRequest(BaseModel):
@@ -379,6 +427,7 @@ class DirectorStartRequest(BaseModel):
     strategy: DirectorStrategy = "pause_at_key_nodes"
     idempotency_key: str | None = Field(default=None, max_length=120)
     defer: bool = False
+    chapter_goal: str = Field(default="", max_length=1200)
 
 
 class DirectorChoiceRequest(BaseModel):
@@ -392,3 +441,4 @@ class DirectorSettingsRequest(BaseModel):
 
     strategy: DirectorStrategy | None = None
     reveal_consequences: bool | None = None
+    writing_preferences: WritingPreferences | None = None

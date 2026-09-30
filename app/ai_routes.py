@@ -9,6 +9,7 @@ from app.core.ai_service import AIServiceError, AIStudioService
 from schemas.ai import (
     AIMessageRequest,
     BlueprintUpdateRequest,
+    BlueprintSuggestionRequest,
     ConfirmBlueprintRequest,
     DirectorChoiceRequest,
     DirectorSettingsRequest,
@@ -125,6 +126,19 @@ async def confirm_ai_blueprint(project_id: str, request: Request, payload: Confi
     raise AssertionError("unreachable")
 
 
+@router.post("/projects/{project_id}/blueprint/suggestions/{suggestion_id}")
+async def resolve_ai_blueprint_suggestion(project_id: str, suggestion_id: str, request: Request, payload: BlueprintSuggestionRequest) -> dict:
+    account = _current_ai_account(request, project_id)
+    try:
+        return ai_service.resolve_blueprint_suggestion(
+            project_id, account.account_id, suggestion_id,
+            expected_revision=payload.expected_revision, decision=payload.decision,
+        )
+    except AIServiceError as exc:
+        _raise_service_error(exc)
+    raise AssertionError("unreachable")
+
+
 @router.put("/projects/{project_id}/settings")
 async def update_ai_settings(project_id: str, request: Request, payload: DirectorSettingsRequest) -> dict:
     account = _current_ai_account(request, project_id)
@@ -134,6 +148,7 @@ async def update_ai_settings(project_id: str, request: Request, payload: Directo
             account.account_id,
             strategy=payload.strategy,
             reveal_consequences=payload.reveal_consequences,
+            writing_preferences=payload.writing_preferences,
         )
     except AIServiceError as exc:
         _raise_service_error(exc)
@@ -150,6 +165,7 @@ async def start_ai_director(project_id: str, request: Request, payload: Director
             strategy=payload.strategy,
             idempotency_key=payload.idempotency_key,
             defer=payload.defer,
+            chapter_goal=payload.chapter_goal,
         )
     except AIServiceError as exc:
         _raise_service_error(exc)

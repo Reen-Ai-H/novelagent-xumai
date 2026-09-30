@@ -1,5 +1,18 @@
 # 当前任务进度
 
+## 阶段 33：创作闭环重构（实现与本地验收完成，2026-09-30）
+
+- 分支：`codex/stage-33-writing-experience`；起点为最新 `main=ec2f31a71f5f7839d9f34f03832afa89ced31d4e`，工作树起初干净。阶段 32 已由 PR #4 合并；下方“待合并”为历史记录。
+- 基线实际执行 `.venv/bin/python -W ignore tests/run_quality_gates.py`：204 tests / 0 failed / 0 skipped（15.966s），OpenAPI 58 paths / 61 operations，旧 `/novel` 16/19，静态门禁通过。
+- 检查发现：正文/协调缺少前章正式正文；主编请求没有多轮历史，非空蓝图字段建议被丢弃；导演台含固定“旧档案”文案，缺乏本章目标和风格控制；新章创建后未主动选中新章。
+- 已实现：有界正式前文与早期章节召回、多轮主编历史、需作者确认的字段提案、本章目标与表达偏好快照、来源改变后的停机与缓存隔离、章末疑问和重复提示、蓝图分组、专注模式、保存后导出和下一章衔接。完整检查结论见 [FIRST_PRINCIPLES_REVIEW.md](docs/FIRST_PRINCIPLES_REVIEW.md)。
+- 最终全量实跑 `.venv/bin/python -W ignore tests/run_quality_gates.py`：227 tests / 0 failed / 0 skipped（23.572s），OpenAPI 59 paths / 62 operations，旧 `/novel` 16/19；compileall、前端和浏览器脚本 Node 语法、`git diff --check` 通过。
+- 专项实跑 `tests.test_stage26_concurrency` 与 `tests.test_stage33_writing_loop`：35 tests / 0 failed / 0 skipped（5.016s），其中新增 23 项。本轮保持原作者事务冲突恢复合同，未放宽断言或跳过旧检查。
+- Chromium 153 / Playwright 在 1440×900 与 1024×900 分别通过无 Key 演示与明确 fake 模型模式的真实 HTTP 流程：保存/导出、专注及 Escape、新章自动聚焦、章末继续、蓝图草稿保留、偏好刷新、本章目标、三选一、全文阅读；fake 模式另验证字段提案保留原文与采用。两个模式各视口均 0 意外 console error/warn、pageerror、request failure，无整页横向溢出；实际截图已目视复核，现场不提交。
+- 发布：准备提交此候选、推送独立分支并创建 Draft PR；GitHub 提交、PR 和同 SHA 双平台 CI 将在发布后补录。
+- 待复核：本阶段独立审计、Windows 浏览器、真实模型文学质量 A/B；不借用阶段 32 审计结论，不自动合并。
+- 保护：仅修改源码、测试和公开文档；不读取 `.env`，不改写或提交现有 `.novel_*`，不调用真实模型，不将机制改善当作文学质量评测结果。
+
 ## 阶段 32：深度作品拆解（审计通过，待合并，2026-09-05）
 
 - 最新里程碑：集成候选 `a631606` 已通过同一独立审计任务最终复验，P0/P1/P2/P3 均为 0。全量 `204 tests / 0 failed / 0 skipped`，阶段 32 专项 69 项，阶段 31 回归 28 项，并发回归 44 项；OpenAPI 58/61、旧 `/novel` 16/19，compileall、Node 与 diff check 均通过。
