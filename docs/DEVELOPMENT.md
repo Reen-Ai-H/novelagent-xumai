@@ -76,3 +76,11 @@ git diff --check
 ## 发布边界
 
 GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 32 深度作品拆解独立审计 P0/P1/P2/P3 均为 0；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。
+
+## 阶段 33 回归与浏览器
+
+全量入口 `python -W ignore tests/run_quality_gates.py` 当前要求至少 226 项、零失败、零 skipped；新 API 为 59 paths / 62 operations，旧 `/novel` 保持 16/19。
+
+专项：`python -W ignore -m unittest tests.test_stage33_writing_loop -q`。
+
+浏览器：安装 Playwright 与 Chromium 后执行 `node tests/browser_stage33.cjs`；默认用 `python` 自动启动真实隔离服务，可通过 `XUMAI_PYTHON` 指定虚拟环境。`XUMAI_CHROMIUM_PATH` 指定已有浏览器，`XUMAI_CHROMIUM_ARGS` 可传 JSON 参数数组。`XUMAI_BROWSER_FAKE=1` 仅给隔离服务注入确定性测试模型，以验证提案和 live 编排，绝不调用付费供应商。省略时为无 Key 演示；也可用 `XUMAI_BROWSER_URL` 指向已经启动的隔离 localhost 服务。截图只留在 Git 忽略的 `test-results/stage33-browser/`，不得提交测试账户或浏览器现场。

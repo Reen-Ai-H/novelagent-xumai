@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#111827" />
     <title>叙脉｜新一代写作体验</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
-    <link rel="stylesheet" href="/static/styles.css?v=stage32-20260905" />
+    <link rel="stylesheet" href="/static/styles.css?v=stage33-20260930" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -229,6 +229,8 @@
             <div class="editor-top-actions" aria-label="章节状态">
               <span id="editorSaveState" class="editor-save-state">尚未开始</span>
               <span id="editorWordCount" class="editor-word-count mono">0 字</span>
+              <button id="focusEditorButton" class="button button-outline" type="button" data-action="focus-editor" aria-pressed="false">专注写作</button>
+              <button class="button button-outline" type="button" data-action="export-manuscript">导出 TXT</button>
               <button id="completeChapterButton" class="button button-primary" type="button" disabled>完成本章 <span aria-hidden="true">→</span></button>
             </div>
           </header>
@@ -327,15 +329,22 @@
             <aside class="blueprint-panel" aria-label="故事蓝图">
               <div class="blueprint-heading"><div><span class="eyebrow">作品方向 / 可直接编辑</span><h2>创作蓝图</h2></div><span id="blueprintRevision" class="blueprint-revision mono">V / 0</span></div>
               <p id="blueprintHint" class="blueprint-hint">先和主编聊一轮，蓝图会从你的话里长出来。</p>
+              <div id="blueprintSuggestions" class="blueprint-suggestions" aria-live="polite"></div>
               <form id="blueprintForm" class="blueprint-form">
+                <fieldset class="blueprint-card"><legend>故事核心</legend><p>故事要追问什么，人物为此付出什么？</p>
                 <label>核心命题<textarea id="blueprintCorePremise" data-blueprint-field="core_premise" rows="2"></textarea></label>
                 <label>主冲突<textarea id="blueprintCoreConflict" data-blueprint-field="core_conflict" rows="2"></textarea></label>
+                </fieldset>
+                <fieldset class="blueprint-card"><legend>人物与关系</legend><p>让欲望、阻力与关系变化推动故事。</p>
                 <div class="blueprint-two-col"><label>主角<input id="blueprintProtagonist" data-blueprint-field="protagonist" type="text" /></label><label>预期体量<input id="blueprintTargetLength" data-blueprint-field="target_length" type="text" /></label></div>
                 <label>主角及动机<textarea id="blueprintMotivation" data-blueprint-field="protagonist_motivation" rows="2"></textarea></label>
                 <label>关键人物关系<textarea id="blueprintRelationships" data-blueprint-field="key_relationships" rows="2"></textarea></label>
+                </fieldset>
+                <fieldset class="blueprint-card"><legend>世界与结构</legend><p>明确规则、阶段与终点，保留探索的空间。</p>
                 <label>世界规则<textarea id="blueprintWorldRules" data-blueprint-field="world_rules" rows="2"></textarea></label>
                 <label>结局方向<textarea id="blueprintEnding" data-blueprint-field="ending_direction" rows="2"></textarea></label>
                 <label>分卷 / 阶段大纲<textarea id="blueprintOutline" data-blueprint-field="volume_outline" rows="3" placeholder="每行一个阶段"></textarea></label>
+                </fieldset>
                 <div id="blueprintMissing" class="blueprint-missing" aria-live="polite"></div>
                 <button id="saveBlueprintButton" class="button button-outline button-wide" type="submit">保存蓝图字段</button>
                 <button id="confirmBlueprintButton" class="button button-primary button-wide" type="button" disabled>确认蓝图并开始创作 <span aria-hidden="true">→</span></button>
@@ -444,6 +453,6 @@
       </div>
     </dialog>
 
-    <script src="/static/app.js?v=stage32-20260905" defer></script>
+    <script src="/static/app.js?v=stage33-20260930" defer></script>
   </body>
 </html>

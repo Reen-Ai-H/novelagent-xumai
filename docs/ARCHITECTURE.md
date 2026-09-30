@@ -107,3 +107,13 @@ DeconstructionService
 `app/core/deconstruction_depth.py` 按章节事实、跨章关系、六视角分析、证据校验和发布顺序构造 `report_version="2.0"`。事件、人物状态和证据 ID 使用来源 token 与章节/span 等固有锚点，不使用遍历序号；否定、拒绝、阻止、能力/许可否定与双重否定按局部谓词作用域处理，缺少证据时保持未知或降低置信。
 
 作者写入、后台分析和跨 store 事务统一进入持久项目锁；发布前重新校验 active version、revision、hash 与 CAS token，正文变更时放弃旧发布并进入 `stale` 或 `rebuild_required`。前端只接受严格 2.0 报告，提供总览和六视角 roving tabs、筛选与证据抽屉；当前来源允许精确定位，历史来源只读且禁用定位。
+
+## 阶段 33 · 创作材料与作者反馈
+
+`app/core/writing_context.py` 是独立的只读材料层，负责近期对话容量、正式前文选择、词面相关的早期章节召回、来源 token 与机械重复检查。正文仍由原事务服务唯一写入；未持久化原始 prompt 或 story_context。专业协调、正文生成、审校、档案增量在每阶段校验同一来源。章号、目标和偏好快照进入运行合同，只有内部来源 token 与缓存代次被公开投影移除。
+
+`schemas/ai.py` 新增有默认值的表达偏好、字段提案、本章目标、来源/缓存代次、章末疑问合同。提案解决 API `POST /api/ai/projects/{project_id}/blueprint/suggestions/{suggestion_id}` 复用 owner 与 mode 校验；采用以 blueprint revision 和 before 值双重门禁保护作者修改，作者需要再次确认蓝图。旧侧车按默认值读取，不批量迁移。
+
+来源或蓝图漂移使运行进入明确失败可重试状态；重试提高 generation epoch，已成功正文/协调等缓存不能跨代次复用。已正式提交的系统章节仍通过原事务幂等证明恢复。模型等待期间重新读取作者蓝图、偏好与消息，避免旧模型请求写回陈旧配置。故事人物上下文保持单人物私有记忆隔离，不注入完整专业材料。
+
+作者事务冲突后的既有恢复合同保留：新运行以内部 `recovery_from_run_id` 绑定被 superseded 的原运行，保留作者第一章草稿并继续新的正式章。该例外仅在服务端验证原运行确为作者 revision 冲突后生效；前文草稿在专业请求里单列 `author_preserved_drafts`，最多两章、每章 600 字符，只作未确认作者意图，不混入正式 story_context 或人物私有推演。内部恢复标识不返回浏览器。

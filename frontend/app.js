@@ -38,6 +38,10 @@
     aiLoadToken: 0,
     directorPollTimer: null,
     aiSaving: false,
+    aiBlueprintDraft: {},
+    aiBlueprintDraftProject: null,
+    aiBriefDraft: null,
+    aiStarting: false,
     archiveAnchorObserver: null,
     archiveAnchorIntent: null,
     archiveAnchorUnlockTimer: null,
@@ -297,6 +301,9 @@
       && (!sameProjectPath || new URL(path, window.location.origin).searchParams.get("view") === "deconstruction")
       && (state.editorDirty || state.editorSaving);
     if (leavingEditor && !(await flushPendingSave())) return false;
+    if (state.screen === "aiStudio" && state.account && Object.keys(state.aiBlueprintDraft).length) {
+      if (!(await saveAIBlueprint())) return false;
+    }
     const method = replace ? "replaceState" : "pushState";
     window.history[method]({}, "", path);
     setActiveScreen(routeFromLocation());
@@ -764,6 +771,8 @@
   }
 
   function renderStartWorkspace(workspace) {
+    $("#focusEditorButton").disabled = true;
+    $("[data-action='export-manuscript']").disabled = true;
     elements.editorWorkspaceContent.classList.add("is-hidden");
     elements.startWorkspaceContent.classList.remove("is-hidden");
     elements.completeChapterButton.disabled = true;
@@ -926,6 +935,8 @@
     elements.editorWorkspaceContent.classList.remove("is-hidden");
     elements.editorProjectTitle.textContent = workspace.title || "—";
     const aiEditor = workspace.mode === "ai_assisted" || state.editorMode === "ai_assisted";
+    $("#focusEditorButton").disabled = false;
+    $("[data-action='export-manuscript']").disabled = state.editorReadOnly;
     elements.editorModeLabel.textContent = aiEditor ? "AI 辅助写作" : "独立创作";
     elements.writingModeNote.textContent = aiEditor ? "AI 辅助写作 · 唯一正式正文" : "独立创作 · 正式正文";
     if (!state.activeChapterId || !version.chapters.some((chapter) => chapter.chapter_id === state.activeChapterId)) {
@@ -1072,7 +1083,7 @@
       const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/tasks/${encodeURIComponent(taskId)}`);
       if (payload.task.status === "completed") {
         await loadIndependentWorkspace(state.editorProjectId);
-        setEditorNotice("本章完成，故事档案已更新；来源章节已记录。", "blue");
+        setEditorNoticeHtml(`<strong>本章已完成，档案与章节快照已保存。</strong><button class="notice-action" type="button" data-action="add-next-chapter">写下一章 →</button><button class="notice-action" type="button" data-action="show-archive">回看本章档案</button>`, "blue");
         showToast("本章已完成，档案快照已保存。");
         return;
       }
@@ -1113,13 +1124,43 @@
   }
 
   async function addIndependentChapter() {
-    if (state.editorDirty && !(await flushPendingSave())) return;
+    if (!(await flushPendingSave())) return;
     try {
-      await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapters`, { method: "POST" });
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapters`, { method: "POST" });
+      state.activeChapterId = payload.chapter.chapter_id;
       await loadIndependentWorkspace(state.editorProjectId);
+      elements.chapterEditor.focus();
       showToast("新章节已加入目录。");
     } catch (error) {
       setEditorNotice(error.message || "新章节创建失败。", "red");
+    }
+  }
+
+  function toggleEditorFocus(force) {
+    const focused = typeof force === "boolean" ? force : !elements.independentScreen.classList.contains("is-focused");
+    elements.independentScreen.classList.toggle("is-focused", focused);
+    const button = $("#focusEditorButton");
+    button.setAttribute("aria-pressed", String(focused));
+    button.textContent = focused ? "退出专注" : "专注写作";
+    elements.chapterEditor.focus();
+  }
+
+  async function exportManuscript() {
+    if (!state.editorProjectId || state.editorReadOnly || !(await flushPendingSave())) return;
+    try {
+      const workspace = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}`);
+      const chapters = workspace.active_version?.chapters || [];
+      if (!chapters.length) { showToast("还没有可以导出的章节。"); return; }
+      const text = [workspace.title, ...chapters.map((chapter) => `${chapter.title}\n\n${chapter.content || ""}`)].join("\n\n\n");
+      const url = URL.createObjectURL(new Blob(["\uFEFF", text], { type: "text/plain;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${String(workspace.title || "作品").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 100)}.txt`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("当前稿本已导出，包含已保存的正文修改。");
+    } catch (error) {
+      setEditorNotice(error.message || "导出失败，请稍后重试。", "red");
     }
   }
 
@@ -2758,6 +2799,10 @@
   }
 
   function renderAIStudio(workspace) {
+    if (state.aiBlueprintDraftProject !== workspace.project_id) {
+      state.aiBlueprintDraftProject = workspace.project_id;
+      state.aiBlueprintDraft = {};
+    }
     state.aiWorkspace = workspace;
     state.aiProjectId = workspace.project_id;
     state.aiRunId = workspace.active_run?.run_id || null;
@@ -2769,7 +2814,7 @@
     const fields = ["core_premise", "core_conflict", "protagonist", "target_length", "protagonist_motivation", "key_relationships", "world_rules", "ending_direction", "volume_outline"];
     fields.forEach((key) => {
       const input = $(`[data-blueprint-field="${key}"]`);
-      if (input && document.activeElement !== input) input.value = blueprintFieldValue(workspace.blueprint, key);
+      if (input && !(key in state.aiBlueprintDraft)) input.value = blueprintFieldValue(workspace.blueprint, key);
     });
     const missingLabels = (workspace.missing_fields || []).map((item) => item.label);
     elements.blueprintMissing.innerHTML = missingLabels.length ? `还需要决定：${missingLabels.map(escapeHtml).join("、")}` : "蓝图字段已齐，待作者确认。";
@@ -2778,6 +2823,9 @@
     elements.confirmBlueprintButton.disabled = !workspace.can_confirm || workspace.blueprint_status === "director_ready";
     elements.confirmBlueprintButton.textContent = "确认蓝图并开始创作 →";
     elements.professionalRoleStatus.innerHTML = (workspace.role_statuses || []).map((role) => `<article class="professional-role"><strong>${escapeHtml(role.label)}</strong><span>${escapeHtml(role.state)}</span><small>${escapeHtml(role.output || "等待主编整理")}</small></article>`).join("");
+    const labels = { core_premise: "核心命题", core_conflict: "主冲突", protagonist: "主角", protagonist_motivation: "主角动机", key_relationships: "人物关系", world_rules: "世界规则", target_length: "预期体量", ending_direction: "结局方向", volume_outline: "阶段大纲" };
+    const formatValue = (value) => escapeHtml(Array.isArray(value) ? value.join("\n") : value);
+    $("#blueprintSuggestions").innerHTML = (workspace.blueprint_suggestions || []).map((item) => `<article class="blueprint-suggestion"><strong>${labels[item.field] || "蓝图"} · 主编建议</strong><div class="blueprint-diff"><div><small>建议提出时的内容</small><p>${formatValue(item.before)}</p></div><div><small>建议内容</small><p>${formatValue(item.after)}</p></div></div><div class="suggestion-actions"><button type="button" class="text-link" data-action="accept-blueprint-suggestion" data-suggestion-id="${escapeHtml(item.suggestion_id)}" data-field="${escapeHtml(item.field)}">采用建议</button><button type="button" class="quiet-link" data-action="dismiss-blueprint-suggestion" data-suggestion-id="${escapeHtml(item.suggestion_id)}">保留原文</button></div></article>`).join("");
   }
 
   async function loadAIWorkspace(projectId, director = false) {
@@ -2814,7 +2862,7 @@
       const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/messages`, { method: "POST", body: JSON.stringify({ content }) });
       elements.aiMessageInput.value = "";
       renderAIStudio(workspace);
-      setWorkspaceNotice(elements.aiStudioNotice, "主编已把这轮讨论写入服务端蓝图。", "blue");
+      setWorkspaceNotice(elements.aiStudioNotice, workspace.blueprint_suggestions?.length ? "本轮讨论已保存。非空字段的变更已列为建议，采用后才会生效。" : "本轮讨论已保存，蓝图已补充。", "blue");
     } catch (error) {
       setWorkspaceNotice(elements.aiStudioNotice, error.message || "主编暂时没有回应，请稍后重试。", "red");
     } finally {
@@ -2825,23 +2873,25 @@
 
   function blueprintPayload() {
     const payload = { expected_revision: state.aiWorkspace?.blueprint_revision || 0 };
-    document.querySelectorAll("[data-blueprint-field]").forEach((input) => {
-      const key = input.dataset.blueprintField;
-      payload[key] = key === "volume_outline" ? input.value.split("\n").map((item) => item.trim()).filter(Boolean) : input.value.trim();
+    Object.entries(state.aiBlueprintDraft).forEach(([key, value]) => {
+      payload[key] = key === "volume_outline" ? value.split("\n").map((item) => item.trim()).filter(Boolean) : value.trim();
     });
     return payload;
   }
 
   async function saveAIBlueprint(event) {
-    event.preventDefault();
+    event?.preventDefault();
     if (!state.aiProjectId || !state.aiWorkspace) return;
     elements.saveBlueprintButton.disabled = true;
     try {
       const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/blueprint`, { method: "PUT", body: JSON.stringify(blueprintPayload()) });
+      state.aiBlueprintDraft = {};
       renderAIStudio(workspace);
       setWorkspaceNotice(elements.aiStudioNotice, "蓝图字段已保存到服务端。", "blue");
+      return true;
     } catch (error) {
       setWorkspaceNotice(elements.aiStudioNotice, error.message || "蓝图保存失败，请重新载入后再试。", "red");
+      return false;
     } finally {
       elements.saveBlueprintButton.disabled = false;
     }
@@ -2851,6 +2901,10 @@
     if (!state.aiProjectId || !state.aiWorkspace || !state.aiWorkspace.can_confirm) return;
     elements.confirmBlueprintButton.disabled = true;
     try {
+      if (Object.keys(state.aiBlueprintDraft).length) {
+        state.aiWorkspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/blueprint`, { method: "PUT", body: JSON.stringify(blueprintPayload()) });
+        state.aiBlueprintDraft = {};
+      }
       const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/blueprint/confirm`, { method: "POST", body: JSON.stringify({ expected_revision: state.aiWorkspace.blueprint_revision, idempotency_key: `blueprint-${state.aiProjectId}-${state.aiWorkspace.blueprint_revision}` }) });
       state.aiWorkspace = workspace;
       showToast("蓝图已确认，导演台准备就绪。");
@@ -2860,6 +2914,53 @@
       setWorkspaceNotice(elements.aiStudioNotice, error.message || "蓝图还不能确认。", "red");
       elements.confirmBlueprintButton.disabled = false;
     }
+  }
+
+  async function resolveBlueprintSuggestion(node, decision) {
+    if (node.dataset.field && node.dataset.field in state.aiBlueprintDraft) {
+      setWorkspaceNotice(elements.aiStudioNotice, "这个字段有尚未保存的编辑，请先保存再审阅建议。", "blue");
+      return;
+    }
+    node.disabled = true;
+    try {
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/blueprint/suggestions/${encodeURIComponent(node.dataset.suggestionId)}`, {
+        method: "POST", body: JSON.stringify({ decision, expected_revision: state.aiWorkspace.blueprint_revision }),
+      });
+      renderAIStudio(workspace);
+      setWorkspaceNotice(elements.aiStudioNotice, decision === "accept" ? "建议已采用。确认当前蓝图后再开始创作。" : "已保留原文。", "blue");
+    } catch (error) {
+      node.disabled = false;
+      setWorkspaceNotice(elements.aiStudioNotice, error.message || "建议处理失败。", "red");
+    }
+  }
+
+  function renderWritingBrief(workspace) {
+    const chapterNumber = Number(workspace.next_chapter_number || 1);
+    const key = `${workspace.project_id}:${chapterNumber}`;
+    if (state.aiBriefDraft?.key !== key) {
+      state.aiBriefDraft = { key, chapter_goal: "", ...(workspace.settings?.writing_preferences || {}) };
+    }
+    const draft = state.aiBriefDraft;
+    return `<section class="writing-brief" aria-label="下一章创作方向"><h3>第 ${chapterNumber} 章，想让故事发生什么变化？</h3><label for="chapterGoalInput">本章目标<textarea id="chapterGoalInput" data-writing-brief="chapter_goal" rows="3" maxlength="1200" placeholder="例如：让主角尝试一个计划，遭遇阻力，发现一条会改变决定的线索。">${escapeHtml(draft.chapter_goal)}</textarea></label><details class="writing-preferences"><summary>表达偏好 · 保存在这部作品</summary><label>小说类型<input data-writing-brief="genre" maxlength="120" placeholder="可留空，例如：现实、悬疑、幻想" value="${escapeHtml(draft.genre || "")}" /></label><label>叙事视角<input data-writing-brief="point_of_view" maxlength="120" placeholder="例如：第三人称有限视角，跟随主角" value="${escapeHtml(draft.point_of_view || "")}" /></label><label>语气与文风<textarea data-writing-brief="tone" maxlength="600" rows="2" placeholder="描述你想要的阅读感受，例如：克制、对白简短、细节具体">${escapeHtml(draft.tone || "")}</textarea></label><label>希望避免<textarea data-writing-brief="avoid" maxlength="600" rows="2" placeholder="例如：过多解释、大段回顾、无代价的转折">${escapeHtml(draft.avoid || "")}</textarea></label><button class="text-link" type="button" data-action="save-writing-preferences">保存表达偏好</button></details><p class="archive-note">留空也可以继续。系统会承接正式前文，目标与偏好只用于下一轮创作。</p></section>`;
+  }
+
+  function writingPreferencesPayload() {
+    const draft = state.aiBriefDraft || {};
+    return { genre: draft.genre || "", point_of_view: draft.point_of_view || "", tone: draft.tone || "", avoid: draft.avoid || "" };
+  }
+
+  async function saveWritingPreferences() {
+    const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/settings`, {
+      method: "PUT", body: JSON.stringify({ writing_preferences: writingPreferencesPayload() }),
+    });
+    state.aiWorkspace = workspace;
+    return workspace;
+  }
+
+  function renderWritingChecks(run) {
+    if (run.status !== "completed") return "";
+    const checks = run.writing_checks || [];
+    return `<section class="chapter-review" aria-label="章末回看"><div class="director-section-heading"><h3>章末回看</h3><span>疑问与建议，由你决定</span></div>${run.chapter_goal ? `<p><b>本章目标</b> ${escapeHtml(run.chapter_goal)}</p>` : ""}${run.review_summary ? `<p>${escapeHtml(run.review_summary)}</p>` : ""}${checks.length ? `<ul>${checks.map((check) => `<li>${escapeHtml(check.message)}</li>`).join("")}</ul>` : `<p class="archive-note">机械检查未发现较长段落的逐字重复；这不代表文学质量评分。</p>`}<details class="chapter-reading"><summary>阅读全文 · ${countEditorWords(run.generated_content)} 字</summary><div class="chapter-reading-body">${escapeHtml(run.generated_content || "")}</div></details></section>`;
   }
 
   const directorStages = ["排队", "角色推演", "等待关键节点选择", "正文生成", "审校", "更新档案", "完成"];
@@ -2889,7 +2990,7 @@
   }
 
   function renderDirectorStart(workspace) {
-    return `<div class="director-workspace-grid"><section class="director-main-column"><div class="director-section-heading"><h2>后台轮转已经准备好</h2><span>确认后只维护一条正式正文</span></div><div class="director-preview"><div class="director-chapter-mark">第一章</div><div class="director-preview-copy"><strong>${escapeHtml(workspace.blueprint?.core_premise || "故事蓝图")}</strong><p>选择一种创作策略。全自动继续会自动走完安全节点；关键节点暂停会在三选一处等待作者决定。</p><small>排队 → 角色推演 → 正文生成 → 审校 → 更新档案</small></div></div><div class="director-completed-actions"><button class="button button-primary" type="button" data-action="start-ai-director" data-strategy="pause_at_key_nodes">关键节点暂停</button><button class="button button-outline" type="button" data-action="start-ai-director" data-strategy="full_auto">全自动继续</button></div></section><aside class="director-choice-panel"><span class="eyebrow">创作策略</span><h2>由谁在关键处做决定？</h2><p>后台专业角色会各自推演，但不会变成四个并列聊天窗口。</p><p class="director-selected-strategy">当前设置：${workspace.settings?.strategy === "full_auto" ? "全自动继续" : "关键节点暂停"}</p><div class="director-settings"><label for="directorRevealConsequences">提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label><small class="archive-note">默认关闭；开启只显示不确定的“可能后果”。</small></div></aside></div>`;
+    return `<div class="director-workspace-grid"><section class="director-main-column"><div class="director-section-heading"><h2>故事已经准备好继续</h2><span>从正式前文承接，只维护一条正文</span></div><div class="director-preview"><div class="director-chapter-mark">第 ${workspace.next_chapter_number || 1} 章</div><div class="director-preview-copy"><strong>${escapeHtml(workspace.blueprint?.core_premise || "故事蓝图")}</strong><p>关键节点暂停会在三选一处等待你决定；全自动继续会完成这一章。选择前可以写下本章目标。</p><small>角色推演 → 正文生成 → 审校 → 更新档案</small></div></div>${renderWritingBrief(workspace)}<div class="director-completed-actions"><button class="button button-primary" type="button" data-action="start-ai-director" data-strategy="pause_at_key_nodes">关键节点暂停</button><button class="button button-outline" type="button" data-action="start-ai-director" data-strategy="full_auto">全自动继续</button></div></section><aside class="director-choice-panel"><span class="eyebrow">创作策略</span><h2>由谁在关键处做决定？</h2><p>每轮开始前会重新读取正式正文、公开档案与表达偏好。选择后只延续一条故事。</p><p class="director-selected-strategy">当前设置：${workspace.settings?.strategy === "full_auto" ? "全自动继续" : "关键节点暂停"}</p><div class="director-settings"><label for="directorRevealConsequences">提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label><small class="archive-note">默认关闭；开启只显示不确定的“可能后果”。</small></div></aside></div>`;
   }
 
   async function renderAIDirector(workspace) {
@@ -2921,9 +3022,9 @@
     let rightPanel = "";
     if (run.status === "waiting_for_choice") {
       const leadName = escapeHtml(workspace.story_characters?.[0]?.name || "故事人物");
-      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">关键节点 / 只选一个</span><h2>${leadName}准备进入旧档案</h2><p>三个方向都只会留下一个继续结果。未选方案不会成为可切换正文。</p><div class="director-choice-list">${(run.choices || []).map((choice, index) => `<button class="director-choice" type="button" data-action="choose-ai-choice" data-choice-id="${escapeHtml(choice.choice_id)}"><span class="director-choice-number">${index + 1}</span><span><strong>${escapeHtml(choice.label)}</strong><small>${escapeHtml(choice.description)}${choice.possible_consequence ? `<br />${escapeHtml(choice.possible_consequence)}` : ""}</small></span><span>→</span></button>`).join("")}</div><div class="director-hidden-note">⌑ 可能后果默认隐藏</div><div class="director-settings"><label for="directorRevealConsequences">提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label></div></aside>`;
+      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">关键节点 / 只选一个</span><h2>${leadName}的下一步，由你决定</h2><p>${escapeHtml(run.chapter_goal || "从人物目标与前文出发，选择故事继续的方向。")}</p><div class="director-choice-list">${(run.choices || []).map((choice, index) => `<button class="director-choice" type="button" data-action="choose-ai-choice" data-choice-id="${escapeHtml(choice.choice_id)}"><span class="director-choice-number">${index + 1}</span><span><strong>${escapeHtml(choice.label)}</strong><small>${escapeHtml(choice.description)}${choice.possible_consequence ? `<br />${escapeHtml(choice.possible_consequence)}` : ""}</small></span><span>→</span></button>`).join("")}</div><div class="director-hidden-note">${workspace.settings?.reveal_consequences ? "可能后果是推演，不是确定结果" : "可能后果默认隐藏"}</div><div class="director-settings"><label for="directorRevealConsequences">提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label></div></aside>`;
     } else if (run.status === "completed") {
-      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">关键节点 / 已定稿</span><h2>唯一正文已经接上</h2><p>作者的选择已成为当前正式路线；未选方向没有被保存为分支。</p><div class="director-completed-actions"><button class="button button-primary" type="button" data-action="start-next-ai" data-strategy="pause_at_key_nodes">开始第 ${Number(workspace.next_chapter_number || run.chapter_number + 1)} 章 →</button><button class="button button-outline" type="button" data-action="ai-open-editor">进入正文编辑器</button><button class="button button-outline" type="button" data-action="ai-open-archive">查看故事档案</button></div><div class="director-settings"><label>提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label></div></aside>`;
+      rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">关键节点 / 已定稿</span><h2>唯一正文已经接上</h2><p>作者的选择已成为当前正式路线；未选方向没有被保存为分支。</p>${renderWritingBrief(workspace)}<div class="director-completed-actions"><button class="button button-primary" type="button" data-action="start-next-ai" data-strategy="pause_at_key_nodes">开始第 ${Number(workspace.next_chapter_number || run.chapter_number + 1)} 章 →</button><button class="button button-outline" type="button" data-action="ai-open-editor">进入正文编辑器</button><button class="button button-outline" type="button" data-action="ai-open-archive">查看故事档案</button></div><div class="director-settings"><label>提前展示选择后果 <input id="directorRevealConsequences" type="checkbox" ${workspace.settings?.reveal_consequences ? "checked" : ""} /></label></div></aside>`;
     } else if (run.status === "failed") {
       rightPanel = `<aside class="director-choice-panel"><div class="director-failure"><strong>导演台没有完成这一轮</strong><p>${escapeHtml(run.error_message || "可以修正蓝图后重试；失败不会重复扣除演示积分。")}</p><button class="button button-outline" type="button" data-action="retry-ai-director">重试这一轮</button></div></aside>`;
     } else if (run.status === "paused") {
@@ -2933,7 +3034,7 @@
     } else {
       rightPanel = `<aside class="director-choice-panel"><span class="eyebrow">后台轮转</span><h2>${escapeHtml(run.current_stage || "正在创作")}</h2><p>关闭页面也不会丢失任务。导演台会从服务端状态继续。</p><div class="director-hidden-note">${workspace.mode === "live" ? "模型正在开发测试中，暂不展示未确认的选择后果。" : "演示推演正在进行，暂不展示未确认的选择后果。"}</div></aside>`;
     }
-    elements.directorPageContent.innerHTML = `<div class="director-workspace-grid"><section class="director-main-column"><div class="director-section-heading"><h2>第 ${run.chapter_number} 章 · ${escapeHtml(run.current_stage || "后台轮转")}</h2><span>${escapeHtml(run.status === "completed" ? "已完成" : run.status === "waiting_for_choice" ? "等待作者选择" : run.status === "failed" ? "需要处理" : "可离页恢复")}</span></div><div class="director-preview"><div class="director-chapter-mark">第 ${run.chapter_number} 章</div><div class="director-preview-copy"><strong>${escapeHtml(workspace.blueprint?.core_premise || "创作蓝图")}</strong><p>${escapeHtml(run.preview_content || "角色推演会把共享世界规则和角色可知事实带到同一条故事脉络上。")}</p><small>阶段记录：${escapeHtml((run.stage_history || []).join(" → ") || "排队")}</small></div></div>${roleMarkup}</section>${rightPanel}</div>`;
+    elements.directorPageContent.innerHTML = `<div class="director-workspace-grid"><section class="director-main-column"><div class="director-section-heading"><h2>第 ${run.chapter_number} 章 · ${escapeHtml(run.current_stage || "后台轮转")}</h2><span>${escapeHtml(run.status === "completed" ? "已完成" : run.status === "waiting_for_choice" ? "等待作者选择" : run.status === "failed" ? "需要处理" : "可离页恢复")}</span></div><div class="director-preview"><div class="director-chapter-mark">第 ${run.chapter_number} 章</div><div class="director-preview-copy"><strong>${escapeHtml(workspace.blueprint?.core_premise || "创作蓝图")}</strong><p>${escapeHtml(run.preview_content || "角色推演会把共享世界规则和角色可知事实带到同一条故事脉络上。")}</p><small>阶段记录：${escapeHtml((run.stage_history || []).join(" → ") || "排队")}</small></div></div>${renderWritingChecks(run)}${roleMarkup}</section>${rightPanel}</div>`;
     bindDirectorSettings();
     if (["queued", "character_simulation", "writing", "reviewing", "updating_archive"].includes(run.status)) {
       state.directorPollTimer = window.setTimeout(() => {
@@ -2961,25 +3062,33 @@
   }
 
   async function startAIDirector(strategy) {
+    if (state.aiStarting) return;
+    state.aiStarting = true;
+    $$("[data-action='start-ai-director'], [data-action='start-next-ai']").forEach((button) => { button.disabled = true; });
     try {
+      if (state.aiBriefDraft) await saveWritingPreferences();
       const chapterNumber = Number(state.aiWorkspace?.next_chapter_number || 1);
-      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/director/start`, { method: "POST", body: JSON.stringify({ strategy, defer: true, idempotency_key: `director-${state.aiProjectId}-${state.aiWorkspace.blueprint_revision}-${chapterNumber}-${strategy}` }) });
+      const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/director/start`, { method: "POST", body: JSON.stringify({ strategy, chapter_goal: state.aiBriefDraft?.chapter_goal || "", defer: true, idempotency_key: `director-${state.aiProjectId}-${state.aiWorkspace.blueprint_revision}-${chapterNumber}-${strategy}` }) });
       navigate(`/ai/${encodeURIComponent(state.aiProjectId)}/director`);
       await renderAIDirector(workspace);
       showToast(strategy === "full_auto" ? "全自动继续已开始。" : "导演台会在关键节点停下来等你选择。", "blue");
     } catch (error) {
       setWorkspaceNotice(elements.aiDirectorNotice, error.message || "导演台没有开始。", "red");
+    } finally {
+      state.aiStarting = false;
+      $$("[data-action='start-ai-director'], [data-action='start-next-ai']").forEach((button) => { button.disabled = false; });
     }
   }
 
   async function chooseAIDirector(choiceId) {
     if (!state.aiRunId) return;
-    $(`[data-action="choose-ai-choice"][data-choice-id="${CSS.escape(choiceId)}"]`)?.setAttribute("disabled", "disabled");
+    $$("[data-action='choose-ai-choice']").forEach((button) => { button.disabled = true; });
     try {
       const workspace = await requestJson(`/api/ai/projects/${encodeURIComponent(state.aiProjectId)}/director/runs/${encodeURIComponent(state.aiRunId)}/choice`, { method: "POST", body: JSON.stringify({ choice_id: choiceId }) });
       await renderAIDirector(workspace);
       showToast("选择已成为唯一正式路线，正文和档案正在接续。", "blue");
     } catch (error) {
+      $$("[data-action='choose-ai-choice']").forEach((button) => { button.disabled = false; });
       setWorkspaceNotice(elements.aiDirectorNotice, error.message || "这个选择没有提交成功。", "red");
     }
   }
@@ -3124,6 +3233,17 @@
       }
     }
     if (action === "start-blank") startBlankWorkspace();
+    if (action === "focus-editor") toggleEditorFocus();
+    if (action === "export-manuscript") await exportManuscript();
+    if (action === "add-next-chapter") await addIndependentChapter();
+    if (action === "accept-blueprint-suggestion") await resolveBlueprintSuggestion(actionNode, "accept");
+    if (action === "dismiss-blueprint-suggestion") await resolveBlueprintSuggestion(actionNode, "dismiss");
+    if (action === "save-writing-preferences") {
+      actionNode.disabled = true;
+      try { await saveWritingPreferences(); showToast("表达偏好已保存，下次创作会采用。", "blue"); }
+      catch (error) { setWorkspaceNotice(elements.aiDirectorNotice, error.message || "表达偏好保存失败。", "red"); }
+      finally { actionNode.disabled = false; }
+    }
     if (action === "start-next-ai") startAIDirector(actionNode.dataset.strategy || "pause_at_key_nodes");
     if (action === "open-import") elements.importFileInput?.click();
     if (action === "confirm-import") confirmImport(actionNode.dataset.previewId);
@@ -3228,6 +3348,8 @@
       if (comingSoon) showToast(`${comingSoon.dataset.comingSoon}即将开放。`);
     });
     elements.emailForm.addEventListener("submit", submitEmail);
+    $(".editor-top-actions").addEventListener("click", handleAction);
+    $("#blueprintSuggestions").addEventListener("click", handleAction);
     elements.libraryContent.addEventListener("click", handleAction);
     elements.readyContent.addEventListener("click", handleAction);
     $('#libraryScreen [data-action="open-notifications"]')?.addEventListener("click", handleAction);
@@ -3319,6 +3441,11 @@
       button.setAttribute("aria-expanded", String(open));
     });
     window.addEventListener("popstate", async () => {
+      if (state.screen === "aiStudio" && state.account && Object.keys(state.aiBlueprintDraft).length && !(await saveAIBlueprint())) {
+        window.history.pushState({}, "", `/ai/${encodeURIComponent(state.aiProjectId)}`);
+        setActiveScreen("aiStudio");
+        return;
+      }
       if (!(await flushPendingSave())) {
         if (state.editorProjectId) {
           window.history.pushState({}, "", `/independent/${encodeURIComponent(state.editorProjectId)}`);
@@ -3329,9 +3456,9 @@
       await restoreSession(routeFromLocation());
     });
     window.addEventListener("beforeunload", (event) => {
-      if (state.editorDirty || state.editorSaving) {
+      if (state.editorDirty || state.editorSaving || Object.keys(state.aiBlueprintDraft).length) {
         event.preventDefault();
-        event.returnValue = "当前正文尚未保存。";
+        event.returnValue = "当前修改尚未保存。";
       }
     });
     window.addEventListener("pagehide", () => {
@@ -3343,12 +3470,26 @@
       }
     });
     document.addEventListener("keydown", (event) => {
+      if (state.screen === "independent" && event.key === "Escape") toggleEditorFocus(false);
+      if (state.screen === "independent" && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void flushPendingSave();
+      }
+      if (state.screen === "aiStudio" && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void saveAIBlueprint();
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         if (state.screen === "library") {
           event.preventDefault();
           elements.librarySearch.focus();
         }
       }
+    });
+    document.addEventListener("input", (event) => {
+      const input = event.target;
+      if (input.dataset.blueprintField) state.aiBlueprintDraft[input.dataset.blueprintField] = input.value;
+      if (input.dataset.writingBrief && state.aiBriefDraft) state.aiBriefDraft[input.dataset.writingBrief] = input.value;
     });
   }
 

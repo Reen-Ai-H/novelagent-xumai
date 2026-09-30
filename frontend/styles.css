@@ -570,3 +570,39 @@ input, textarea { color: var(--ink); }
 @media (prefers-reduced-motion: reduce) {
   .depth-tab, .depth-overview-link, .deconstruction-evidence-dialog-actions .button { transition: none !important; }
 }
+
+/* Stage 33: author direction, review, and a quiet reading/writing surface. */
+.blueprint-card { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 14px; border: 1px solid var(--line); background: #fbfcfe; }
+.blueprint-card legend { padding: 0 7px; color: var(--ink); font-family: var(--serif); font-size: .92rem; }
+.blueprint-card > p { margin: 0; color: #7a8799; font-size: .68rem; line-height: 1.6; }
+.blueprint-suggestions { display: grid; gap: 10px; margin: 18px 24px 0; }
+.blueprint-suggestions:empty { display: none; }
+.blueprint-missing.is-ready { color: var(--cobalt); border-color: var(--cobalt); background: var(--cobalt-pale); }
+.blueprint-suggestion { padding: 14px; border: 1px solid #abc0ff; background: #f8faff; font-size: .76rem; }
+.blueprint-diff { display: grid; gap: 10px; margin-top: 12px; }
+.blueprint-diff small { color: #7a8799; }
+.blueprint-diff p { margin: 5px 0; font-family: var(--serif); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.suggestion-actions { display: flex; gap: 18px; margin-top: 12px; }
+.writing-brief { display: grid; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.writing-brief h3, .chapter-review h3 { margin: 0; font-family: var(--serif); font-size: 1.05rem; font-weight: 500; line-height: 1.6; }
+.writing-brief label { display: grid; gap: 7px; color: #68758a; font-size: .74rem; }
+.writing-brief input, .writing-brief textarea { min-width: 0; width: 100%; padding: 10px; border: 1px solid var(--line-dark); background: #fbfcfe; color: var(--ink); font-family: var(--serif); line-height: 1.7; resize: vertical; }
+.writing-preferences { display: grid; padding-top: 4px; }
+.writing-preferences summary, .chapter-reading summary { cursor: pointer; color: var(--cobalt); font-size: .76rem; line-height: 1.7; }
+.writing-preferences label { margin-top: 12px; }
+.writing-preferences button { margin-top: 12px; }
+.chapter-review { margin-top: 20px; padding: 18px; border: 1px solid var(--line); background: #fbfcfe; color: #68758a; font-size: .78rem; line-height: 1.8; }
+.chapter-review p { white-space: pre-wrap; }
+.chapter-review ul { padding-left: 20px; }
+.chapter-review li + li { margin-top: 8px; }
+.chapter-reading-body { max-height: 65vh; overflow-y: auto; margin-top: 16px; padding: 10px; color: var(--ink-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--serif); font-size: 1rem; line-height: 2; }
+.independent-screen.is-focused .editor-spine, .independent-screen.is-focused .chapter-column, .independent-screen.is-focused .archive-drawer { display: none; }
+.independent-screen.is-focused .editor-main { width: 100%; max-width: 1100px; margin: 0 auto; }
+.independent-screen.is-focused .editor-layout { grid-template-columns: minmax(0, 1fr); max-width: 800px; margin: 0 auto; }
+.independent-screen.is-focused .chapter-editor { min-height: 65vh; font-size: 1.15rem; line-height: 2.1; }
+.editor-top-actions { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .editor-top-actions .button { min-height: 40px; padding-inline: 12px; font-size: .72rem; }
+  .blueprint-card { padding: 10px; }
+  .chapter-review { padding: 12px; }
+}

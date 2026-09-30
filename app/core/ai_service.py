@@ -21,6 +21,7 @@ from uuid import uuid4
 from app.core.ai_store import AIStore
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
 from app.core.project_store import ProjectStore, project_store
+from app.core.writing_context import build_story_context, recent_conversation, source_token, writing_checks
 from app.core.transaction_store import (
     CrossStoreTransactionCoordinator,
     TransactionStore,
@@ -43,6 +44,7 @@ from schemas.ai import (
     DirectorRun,
     DirectorStrategy,
     BlueprintAssistantResponse,
+    BlueprintSuggestion,
     ModelCallMetadata,
     ModelCallRecord,
     ModelUsage,
@@ -52,6 +54,8 @@ from schemas.ai import (
     StoryCharacterContext,
     StoryBlueprint,
     StoryCharacterSimulationResponse,
+    WritingCheck,
+    WritingPreferences,
 )
 from schemas.independent import (
     ArchiveSnapshot,
@@ -143,6 +147,7 @@ class AIStudioService:
         # 同一 FastAPI 进程内，API 请求和持久 worker 可能同时看见同一个
         # pending_choice；内存锁只防并发，真正恢复仍依赖侧车里的安全缓存。
         self._processing_runs: set[str] = set()
+        self._processing_messages: set[str] = set()
 
     def _apply_transaction_ai(
         self,
@@ -449,6 +454,8 @@ class AIStudioService:
     ) -> None:
         """只写安全失败元数据；原始响应和 prompt 永不进入侧车。"""
 
+        self._refresh_author_configuration(record)
+
         known = usage_known if usage_known is not None else usage is not None
         call = ModelCallRecord(
             call_id=call_id,
@@ -473,6 +480,7 @@ class AIStudioService:
         self.store.save(record)
 
     def _commit_model_success(self, record: AIProjectRecord, run: DirectorRun | None, pending: _PendingModelCall) -> None:
+        self._refresh_author_configuration(record)
         if pending.kind == "text":
             content = str(pending.response)
             existing = next((item for item in record.model_calls if item.call_id == pending.call_id), None)
@@ -942,6 +950,7 @@ class AIStudioService:
                 run,
                 ModelCallMetadata.model_validate(completed.model_dump(exclude={"result", "error_code", "error_message"})),
             )
+            self._refresh_author_configuration(record)
             self.store.save(record)
             return content, LLMResult(
                 call_id=call_id,
@@ -1188,7 +1197,7 @@ class AIStudioService:
     def _public_run(self, record: AIProjectRecord, run: DirectorRun | None) -> dict[str, Any] | None:
         if run is None:
             return None
-        payload = run.model_dump(mode="json")
+        payload = run.model_dump(mode="json", exclude={"context_token", "generation_epoch", "recovery_from_run_id"})
         payload.pop("pending_choice_id", None)
         payload["choices"] = [
             self._public_choice(choice, record.settings.reveal_consequences)
@@ -1247,7 +1256,7 @@ class AIStudioService:
             (
                 run
                 for run in record.runs
-                if run.run_id == record.active_run_id and run.blueprint_revision == record.blueprint_revision
+                if run.run_id == record.active_run_id and (run.blueprint_revision == record.blueprint_revision or run.status == "failed")
             ),
             None,
         )
@@ -1264,6 +1273,7 @@ class AIStudioService:
             "blueprint_status": stage,
             "blueprint": record.blueprint,
             "blueprint_revision": record.blueprint_revision,
+            "blueprint_suggestions": [item for item in record.blueprint_suggestions if item.status == "pending"],
             "confirmed_blueprint_revision": record.confirmed_blueprint_revision,
             "missing_fields": self._missing_fields(record),
             "can_confirm": not self._missing_fields(record),
@@ -1293,6 +1303,15 @@ class AIStudioService:
         }
 
     async def send_message(self, project_id: str, account_id: str, content: str) -> dict[str, Any]:
+        if project_id in self._processing_messages:
+            raise AIServiceError("editor_busy", "主编正在整理上一轮，请等回复后继续补充。", status_code=409)
+        self._processing_messages.add(project_id)
+        try:
+            return await self._send_message(project_id, account_id, content)
+        finally:
+            self._processing_messages.discard(project_id)
+
+    async def _send_message(self, project_id: str, account_id: str, content: str) -> dict[str, Any]:
         record = self.ensure_project(project_id, account_id)
         text = content.strip()
         if not text:
@@ -1315,13 +1334,14 @@ class AIStudioService:
                     messages=[
                         {
                             "role": "system",
-                            "content": "你是叙脉唯一的主编。只返回严格 JSON：reply 和 blueprint_patch。patch 只补充作者尚未明确的九个蓝图字段，不能臆造确定事实；volume_outline 必须是字符串数组。",
+                            "content": "你是叙脉唯一的主编。只返回严格 JSON：reply 和 blueprint_patch。先结合近期对话理解作者最新意图；不要每轮重复定稿，不清楚的关键点用简短问题澄清。patch 可以补空字段，也可以针对作者本轮明确修正提出非空字段的新值；后者需作者逐项接受才生效。不能臆造确定事实、模仿具体在世作家或把未决问题当作定论；volume_outline 必须是字符串数组。",
                         },
                         {
                             "role": "user",
                             "content": json.dumps(
                                 {
                                     "author_message": text,
+                                    "recent_conversation": recent_conversation(record.messages[:-1]),
                                     "current_blueprint": record.blueprint.model_dump(mode="json"),
                                     "missing_fields": self._missing_fields(record),
                                 },
@@ -1348,6 +1368,7 @@ class AIStudioService:
                 None,
                 _PendingModelCall(call_id, "blueprint_editor", response, model_result, model_cached),
             )
+            # Success merged the latest author configuration before this patch.
             self._apply_model_blueprint_patch(record, response.blueprint_patch)
             record.blueprint_revision += 1
             self._set_role_suggestions(record)
@@ -1364,7 +1385,7 @@ class AIStudioService:
         return self.workspace(project_id, account_id)
 
     def _apply_model_blueprint_patch(self, record: AIProjectRecord, patch: Any) -> None:
-        """模型只填空字段；作者已经直接编辑的字段永远优先。"""
+        """补空字段；非空变更作为基于原值的提案，不覆盖作者决定。"""
 
         for key, _ in REQUIRED_BLUEPRINT_FIELDS:
             value = getattr(patch, key, None)
@@ -1374,8 +1395,55 @@ class AIStudioService:
                 cleaned = [str(item).strip() for item in value if str(item).strip()]
                 if not record.blueprint.volume_outline and cleaned:
                     record.blueprint.volume_outline = cleaned
-            elif not str(getattr(record.blueprint, key) or "").strip():
-                setattr(record.blueprint, key, str(value).strip())
+                    continue
+                value = cleaned
+            else:
+                value = str(value).strip()
+                if not str(getattr(record.blueprint, key) or "").strip():
+                    setattr(record.blueprint, key, value)
+                    continue
+            before = getattr(record.blueprint, key)
+            if not value or value == before:
+                continue
+            if any(item.status == "pending" and item.field == key and item.before == before and item.after == value
+                   for item in record.blueprint_suggestions):
+                continue
+            # New suggestions for the same field supersede earlier proposals.
+            for item in record.blueprint_suggestions:
+                if item.field == key and item.status == "pending":
+                    item.status = "dismissed"
+            record.blueprint_suggestions.append(BlueprintSuggestion(
+                suggestion_id=uuid4().hex, field=key, before=deepcopy(before), after=value,
+                source_message_id=record.messages[-1].message_id,
+            ))
+        record.blueprint_suggestions = record.blueprint_suggestions[-40:]
+
+    def resolve_blueprint_suggestion(
+        self, project_id: str, account_id: str, suggestion_id: str, *, expected_revision: int, decision: str,
+    ) -> dict[str, Any]:
+        with self.manuscript.project_locks.project_lock(project_id):
+            record = self.ensure_project(project_id, account_id)
+            suggestion = next((item for item in record.blueprint_suggestions if item.suggestion_id == suggestion_id), None)
+            if suggestion is None:
+                raise AIServiceError("suggestion_missing", "这条蓝图建议不存在。", status_code=404)
+            if suggestion.status != "pending":
+                return self.workspace(project_id, account_id)
+            if decision not in {"accept", "dismiss"}:
+                raise AIServiceError("suggestion_decision_invalid", "请选择采用或保留原文。", status_code=422)
+            if decision == "accept":
+                if expected_revision != record.blueprint_revision or getattr(record.blueprint, suggestion.field) != suggestion.before:
+                    raise AIServiceError("blueprint_conflict", "该字段已被修改，旧建议没有覆盖它。请继续和主编讨论。", status_code=409)
+                setattr(record.blueprint, suggestion.field, deepcopy(suggestion.after))
+                record.blueprint_revision += 1
+                # Accepted changes need an explicit whole-blueprint confirmation.
+                record.confirmed_blueprint_revision = None
+                suggestion.status = "accepted"
+            else:
+                suggestion.status = "dismissed"
+            record.stage = self._stage(record)
+            record.updated_at = self._now()
+            self.store.save(record)
+        return self.workspace(project_id, account_id)
 
     def _deterministic_blueprint_fill(self, record: AIProjectRecord, text: str) -> None:
         blueprint = record.blueprint
@@ -1511,12 +1579,15 @@ class AIStudioService:
         *,
         strategy: DirectorStrategy | None = None,
         reveal_consequences: bool | None = None,
+        writing_preferences: WritingPreferences | None = None,
     ) -> dict[str, Any]:
         record = self.ensure_project(project_id, account_id)
         if strategy is not None:
             record.settings.strategy = strategy
         if reveal_consequences is not None:
             record.settings.reveal_consequences = reveal_consequences
+        if writing_preferences is not None:
+            record.settings.writing_preferences = writing_preferences.model_copy(deep=True)
         record.updated_at = self._now()
         self.store.save(record)
         return self.workspace(project_id, account_id)
@@ -1595,7 +1666,7 @@ class AIStudioService:
         self._sync_story_characters(record)
         summaries: list[dict[str, str]] = []
         for agent in record.story_characters:
-            call_id = self._slug(f"director:{run.run_id}:character:{agent.character_id}")
+            call_id = self._director_call_id(run, f"character:{agent.character_id}")
             response, result, cached = await self._call_model(
                 record,
                 call_id=call_id,
@@ -1607,7 +1678,11 @@ class AIStudioService:
                     },
                     {
                         "role": "user",
-                        "content": json.dumps(self._story_character_model_context(record, agent), ensure_ascii=False),
+                        "content": json.dumps({
+                            **self._story_character_model_context(record, agent),
+                            "chapter_number": run.chapter_number,
+                            "author_direction": run.chapter_goal,
+                        }, ensure_ascii=False),
                     },
                 ],
                 response_model=StoryCharacterSimulationResponse,
@@ -1653,7 +1728,8 @@ class AIStudioService:
     ) -> list[DirectorChoice]:
         owned_transaction = transaction is None
         transaction = transaction or _DirectorStageTransaction()
-        call_id = self._slug(f"director:{run.run_id}:coordinator")
+        context = self._professional_writing_context(record, run)
+        call_id = self._director_call_id(run, "coordinator")
         response, result, cached = await self._call_model(
             record,
             call_id=call_id,
@@ -1669,6 +1745,7 @@ class AIStudioService:
                         {
                             "blueprint": record.blueprint.model_dump(mode="json"),
                             "public_character_summaries": summaries,
+                            **context,
                         },
                         ensure_ascii=False,
                     ),
@@ -1740,7 +1817,7 @@ class AIStudioService:
                 status_code=502,
             ) from None
         public_characters = [self._public_story_character(agent) for agent in record.story_characters]
-        call_id = self._slug(f"director:{run.run_id}:body:{selected.choice_id}")
+        call_id = self._director_call_id(run, f"body:{selected.choice_id}")
         response, result, cached = await self._call_model(
             record,
             call_id=call_id,
@@ -1803,7 +1880,8 @@ class AIStudioService:
                 status_code=502,
             ) from None
         public_characters = [self._public_story_character(agent) for agent in record.story_characters]
-        call_id = self._slug(f"director:{run.run_id}:body:{selected.choice_id}")
+        context = self._professional_writing_context(record, run)
+        call_id = self._director_call_id(run, f"body:{selected.choice_id}")
         return await self._call_text(
             record,
             call_id=call_id,
@@ -1811,7 +1889,7 @@ class AIStudioService:
             messages=[
                 {
                     "role": "system",
-                    "content": "你是叙脉正文生成器。只输出完整中文小说正文，不要 JSON、Markdown、标题前缀、解释或平行方案。正文必须是一个正式章节，直接从叙事开始并以完整句子结束；请写约 1500 个可见中文字符，控制在 1200 到 1800 个可见字符内，使用自然段、对白和标点，绝不超过 2000 个可见字符。",
+                    "content": "你是叙脉正文生成器。只输出完整中文小说正文，不要 JSON、Markdown、标题前缀、解释或平行方案。正文必须是一个正式章节，直接从叙事开始并以完整句子结束；请写约 1500 个可见中文字符，控制在 1200 到 1800 个可见字符内，使用自然段、对白和标点，绝不超过 2000 个可见字符。承接 story_context 的上一场景，不重开第一章、不大段复述前章。以人物具体目标、阻力、行动和有代价的变化推进本章，遵守作者指定视角与语气；对白体现人物差异，情绪尽量落在动作和细节。按本章目标推进，但不能把未来大纲、伏笔候选或疑问点当作已发生事实。摘录是不完整材料，缺失的信息保持克制。作者意图与正式前文冲突时保持事实并在审校时提问。author_preserved_drafts 是事务冲突后保留的作者草稿，仅作作者意图参考，不能擅自将其视为正式事实或改写该章。",
                 },
                 {
                     "role": "user",
@@ -1820,6 +1898,7 @@ class AIStudioService:
                             "blueprint": record.blueprint.model_dump(mode="json"),
                             "public_characters": public_characters,
                             "selected_choice": selected.model_dump(mode="json"),
+                            **context,
                         },
                         ensure_ascii=False,
                     ),
@@ -1844,8 +1923,9 @@ class AIStudioService:
             "blueprint": record.blueprint.model_dump(mode="json"),
             "selected_choice": selected.model_dump(mode="json"),
             "body": content,
+            **self._professional_writing_context(record, run),
         }
-        review_call_id = self._slug(f"director:{run.run_id}:review:{selected.choice_id}")
+        review_call_id = self._director_call_id(run, f"review:{selected.choice_id}")
         review, review_result, review_cached = await self._call_model(
             record,
             call_id=review_call_id,
@@ -1853,7 +1933,7 @@ class AIStudioService:
             messages=[
                 {
                     "role": "system",
-                    "content": "你是叙脉专业审校角色。只返回严格 JSON，按当前章节来源输出简洁审校摘要和公开人物状态变化；不得输出私密记忆、内部提示或正文改写。",
+                    "content": "你是叙脉专业审校角色。只返回严格 JSON，按当前章节来源输出简洁审校摘要和公开人物状态变化；不得输出私密记忆、内部提示或正文改写。对照正式前文、本章目标、视角与语气检查因果、人物动机、信息可知范围、场景承接和是否重复前章。revision_questions 最多六条具体可回看疑问，指出正文中的依据和可调整方向；材料不足就说不确定，不给文学分数、不把疑问当作事实或一律判错。没有明确疑问时返回空数组。",
                 },
                 {"role": "user", "content": json.dumps(base_payload, ensure_ascii=False)},
             ],
@@ -1883,7 +1963,7 @@ class AIStudioService:
         transaction.calls.append(review_pending)
         self._append_stage(run, "updating_archive", "更新档案")
 
-        archive_call_id = self._slug(f"director:{run.run_id}:archive:{selected.choice_id}")
+        archive_call_id = self._director_call_id(run, f"archive:{selected.choice_id}")
         archive, archive_result, archive_cached = await self._call_model(
             record,
             call_id=archive_call_id,
@@ -1972,6 +2052,61 @@ class AIStudioService:
             default=0,
         ) + 1
 
+    def _director_call_id(self, run: DirectorRun, phase: str) -> str:
+        # Preserve legacy IDs at epoch 0; retry after a source/blueprint change
+        # must not reuse text or choices produced for the old facts.
+        suffix = f":epoch:{run.generation_epoch}" if run.generation_epoch else ""
+        return self._slug(f"director:{run.run_id}:{phase}{suffix}")
+
+    def _refresh_author_configuration(self, record: AIProjectRecord) -> None:
+        """Preserve author configuration edited during an awaited provider call."""
+        latest = self.store.load(record.project_id)
+        if latest is None:
+            return
+        record.blueprint = latest.blueprint.model_copy(deep=True)
+        record.blueprint_revision = latest.blueprint_revision
+        record.confirmed_blueprint_revision = latest.confirmed_blueprint_revision
+        record.settings = latest.settings.model_copy(deep=True)
+        record.blueprint_suggestions = deepcopy(latest.blueprint_suggestions)
+        by_id = {item.message_id: item for item in [*latest.messages, *record.messages]}
+        record.messages = sorted(by_id.values(), key=lambda item: item.created_at)
+
+    def _professional_writing_context(self, record: AIProjectRecord, run: DirectorRun) -> dict[str, Any]:
+        self._refresh_author_configuration(record)
+        if record.blueprint_revision != run.blueprint_revision:
+            raise AIServiceError("writing_context_changed", "蓝图已经修改，本轮已停止。请确认最新蓝图后重试。", status_code=409)
+        workspace = self.manuscript.workspace(record.project_id, record.account_id)
+        if workspace.get("pending_changes"):
+            raise AIServiceError("manuscript_change_pending", "请先在编辑器确认旧章修改，再继续生成。", status_code=409)
+        version = workspace.get("active_version")
+        unfinished = [chapter for chapter in version.chapters if chapter.chapter_number < run.chapter_number
+                      and chapter.content.strip() and not chapter.formal_content.strip()] if version else []
+        recovery = next((item for item in record.runs if item.run_id == run.recovery_from_run_id
+                         and item.error_message == "author_revision_conflict"), None)
+        if unfinished and recovery is None:
+            raise AIServiceError("unfinished_chapter", "前面还有未完成的章节。请先完成本章，让后续创作承接正式正文。", status_code=409)
+        token = source_token(version)
+        if run.context_token and run.context_token != token:
+            raise AIServiceError("writing_context_changed", "前文已经修改，本轮已停止。请完成修改确认后重试，重新承接最新正文。", status_code=409)
+        run.context_token = token
+        context = {
+            "chapter_number": run.chapter_number,
+            "chapter_goal": run.chapter_goal,
+            "writing_preferences": run.writing_preferences.model_dump(mode="json"),
+            "story_context": build_story_context(version, run.chapter_number,
+                                                 f"{run.chapter_goal} {record.blueprint.protagonist} {record.blueprint.core_conflict}"),
+        }
+        if unfinished:
+            # The existing author-conflict recovery contract can continue with
+            # the retained author chapter still a draft. Keep it separate from
+            # formal facts, rather than blocking recovery or declaring it canon.
+            context["author_preserved_drafts"] = [
+                {"chapter_number": chapter.chapter_number, "status": "author_draft_unconfirmed",
+                 "excerpt": chapter.content[:600]}
+                for chapter in unfinished[-2:]
+            ]
+        return context
+
     async def start_director(
         self,
         project_id: str,
@@ -1980,10 +2115,13 @@ class AIStudioService:
         strategy: DirectorStrategy,
         idempotency_key: str | None,
         defer: bool = False,
+        chapter_goal: str = "",
     ) -> dict[str, Any]:
         record = self.ensure_project(project_id, account_id)
         if record.confirmed_blueprint_revision != record.blueprint_revision:
             raise AIServiceError("blueprint_not_confirmed", "请先确认当前蓝图，导演台才会开始创作。", status_code=409)
+        if self.manuscript.workspace(project_id, account_id).get("pending_changes"):
+            raise AIServiceError("manuscript_change_pending", "请先在编辑器确认旧章修改，再继续生成。", status_code=409)
         record.settings.strategy = strategy
         record.updated_at = self._now()
         self.store.save(record)
@@ -2025,6 +2163,8 @@ class AIStudioService:
             estimated_credits=DEMO_CREDIT_ESTIMATE,
             created_at=now,
             updated_at=now,
+            chapter_goal=chapter_goal.strip(),
+            writing_preferences=record.settings.writing_preferences.model_copy(deep=True),
         )
         record.runs.append(run)
         record.active_run_id = run.run_id
@@ -2049,6 +2189,7 @@ class AIStudioService:
         if run.status in {"completed", "failed"}:
             return
         try:
+            self._professional_writing_context(record, run)
             if not (run.status == "character_simulation" and run.stage_history and run.stage_history[-1] == "角色推演"):
                 self._append_stage(run, "character_simulation", "角色推演")
             self._set_role_running(record)
@@ -2346,6 +2487,7 @@ class AIStudioService:
         # 先持久化唯一候选集合，服务重启后可以从安全状态恢复；正式选择仍要
         # 等正文、审校、档案和稿本全部成功后才写入 selected_choice_id。
         run.choices = list(available_choices)
+        context = self._professional_writing_context(record, run)
         stage_transaction = transaction or _DirectorStageTransaction()
         self._append_stage(run, "writing", "正文生成")
         review_summary = run.review_summary
@@ -2404,6 +2546,12 @@ class AIStudioService:
         # 构造，随后与正文、快照在独立稿本的一次保存中提交。
         if live_review is not None and live_archive_update is not None:
             live_archive = self._apply_live_archive(record, run, live_review, live_archive_update)
+        # Recheck after awaited provider calls and immediately before staging.
+        self._professional_writing_context(record, run)
+        run.writing_checks = writing_checks(content, context["story_context"]["previous_scene"])
+        if live_review is not None:
+            run.writing_checks.extend(WritingCheck(kind="editor_question", message=question.strip()[:600])
+                                      for question in live_review.revision_questions if question.strip())
         # 先构造稿本/档案/分析任务的 staging projection；此处不写正式稿本。
         try:
             manuscript_projection = self.manuscript.prepare_system_generated_chapter(
@@ -2639,6 +2787,9 @@ class AIStudioService:
                 estimated_credits=DEMO_CREDIT_ESTIMATE,
                 created_at=now,
                 updated_at=now,
+                chapter_goal=run.chapter_goal,
+                writing_preferences=record.settings.writing_preferences.model_copy(deep=True),
+                recovery_from_run_id=run.run_id,
             )
             record.runs.append(retry_run)
             record.active_run_id = retry_run.run_id
@@ -2654,6 +2805,24 @@ class AIStudioService:
             return self.workspace(project_id, account_id)
         # 失败任务可能是在旧蓝图上产生的；重试前把它重新绑定到作者刚确认的版本，
         # 这样修正蓝图后的单一当前任务仍能被工作台恢复和展示。
+        workspace = self.manuscript.workspace(project_id, account_id)
+        current_token = source_token(workspace.get("active_version"))
+        recovered = self.manuscript.recover_system_generated_chapter(
+            project_id, account_id, chapter_number=run.chapter_number,
+            idempotency_key=f"ai-director-{run.run_id}",
+        )
+        if recovered is not None and run.blueprint_revision == record.blueprint_revision:
+            # A proven already-committed chapter changes the source itself.
+            # Recovery must keep its successful call IDs and unique manuscript.
+            run.context_token = current_token
+        elif run.blueprint_revision != record.blueprint_revision or (run.context_token and current_token != run.context_token):
+            run.generation_epoch += 1
+            run.context_token = ""
+            run.generated_content = ""
+            run.preview_content = ""
+            run.review_summary = ""
+            run.archive_candidates = {}
+            run.writing_checks = []
         run.blueprint_revision = record.blueprint_revision
         run.status = "queued"
         run.current_stage = "排队"

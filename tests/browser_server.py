@@ -17,6 +17,7 @@ def run() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8032)
     parser.add_argument("--data-dir", type=Path)
+    parser.add_argument("--fake-model", action="store_true", help="Use the deterministic writing-test runtime; never contact a provider")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if (root / ".env").exists():
@@ -63,9 +64,30 @@ def run() -> None:
     independent = IndependentWorkspaceService(
         projects=projects, store=IndependentStore(data / "independent")
     )
+    runtime = NoPaidRuntime()
+    if args.fake_model:
+        from schemas.ai import BlueprintAssistantResponse
+        from tests.test_stage33_writing_loop import LoopRuntime
+
+        class BrowserWritingRuntime(LoopRuntime):
+            def __init__(self):
+                super().__init__()
+                self.turns = 0
+
+            async def structured(self, **kwargs):
+                if kwargs["response_model"] is BlueprintAssistantResponse:
+                    import json
+                    payload = json.loads(kwargs["messages"][-1]["content"])
+                    self.turns = 1 + sum(item["role"] == "author" for item in payload.get("recent_conversation", []))
+                    self.blueprint_override = None
+                    if self.turns > 1:
+                        self.blueprint_override = {"world_rules": f"潮汐道路每轮有可追踪的变化：第{self.turns}轮设定。"}
+                return await super().structured(**kwargs)
+
+        runtime = BrowserWritingRuntime()
     ai = AIStudioService(
         projects=projects, manuscript=independent, store=AIStore(data / "ai"),
-        runtime=NoPaidRuntime(),
+        runtime=runtime,
     )
     entry = EntryService(accounts=accounts, projects=projects, independent=independent.store, ai=ai.store)
     entry.transaction_coordinator = ai.transactions
