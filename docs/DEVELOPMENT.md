@@ -17,6 +17,8 @@ Windows PowerShell 的等价步骤见 [`docs/WINDOWS_MIGRATION.md`](WINDOWS_MIGR
 
 配置加载器只读取变量名，不在日志或响应中输出密钥值。支持 `OPENAI_API_KEY`、`DASHSCOPE_API_KEY`，以及 `OPENAI_BASE_URL`、`DASHSCOPE_BASE_URL`、`LLM_BASE_URL`、`LLM_MODEL`、`OPENAI_MODEL`、`DASHSCOPE_MODEL`、`LLM_TEMPERATURE`。显式 base URL 和 model 优先；无 Key 时 runtime 为 unavailable，业务走清楚标注的演示分支并显示 0 积分。
 
+阶段 34 增加显式 `LLM_PROVIDER=mimo`、`MIMO_API_KEY`、`MIMO_BASE_URL` 和 `MIMO_MODEL`。选择 MiMo 后只读取该供应商凭据，不回退旧 OpenAI/DeepSeek 配置；默认官方按量端点和 `mimo-v2.6-pro`。用户授权的 macOS RTF 凭据可通过 `scripts/configure_mimo.py <文件路径>` 安全配置，不输出密钥并保留其他配置。
+
 有 Key 的开发测试会显示“模型已连接·开发测试，不结算创作积分”。供应商错误必须进入 failed/retryable，不得悄悄回退模板。自动化测试使用 fake runtime，不调用真实模型。
 
 ## 检查命令
@@ -24,13 +26,15 @@ Windows PowerShell 的等价步骤见 [`docs/WINDOWS_MIGRATION.md`](WINDOWS_MIGR
 在仓库根目录运行：
 
 ```bash
-.venv/bin/python -W ignore -m unittest discover -s tests -q
+.venv/bin/python -W ignore scripts/verify_offline.py
 .venv/bin/python -m compileall -q app schemas main.py
 node --check frontend/app.js
 git diff --check
 ```
 
 阶段 28 的历史基线为 107 tests，阶段 31 为 135 tests；当前阶段 32 候选为 204 tests、0 failed、0 skipped。当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
+
+有真实凭据的开发目录使用上述隔离入口，复制源码到临时目录、剥离模型环境变量并阻断网络；原始 unittest 命令仍用于干净 CI。阶段 34 当前结果以 `PROGRESS.md` 顶部为准。
 
 ## 代码和测试约定
 
@@ -76,3 +80,20 @@ git diff --check
 ## 发布边界
 
 GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 32 深度作品拆解独立审计 P0/P1/P2/P3 均为 0；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。
+
+GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified。阶段 27 功能独立审计通过；真实 DeepSeek 三章链路已验证，但文学质量阶段 23B 仍为 C。项目外离线质量门 Q2 已验证；真实生成质量增益和叙脉产品集成仍 pending，Q3 不在本阶段执行。清理本地分支、worktree、审计现场、数据或研究现场必须逐项确认；含 `.novel_*` 或未提交工作成果的 worktree 不得删除。
+
+
+## 独立拆解模型配置
+
+在本地 `.env` 配置 `DECONSTRUCTION_API_KEY`、`DECONSTRUCTION_BASE_URL`、`DECONSTRUCTION_MODEL`。密钥仅由服务端读取，勿提交或回显。默认使用 MiMo 官方按量端点与 `mimo-v2.6-pro`；显式设置仍支持其他兼容服务。专用拆解配置与通用生成配置分离，安全配置脚本会同时设置两者。
+
+官方配置和计价依据为 [MiMo 首次调用](https://mimo.mi.com/docs/zh-CN/quick-start/summary/first-api-call) 与 [按量定价](https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go)。模型价格按精确名称选取并持久化版本，不能用历史 DeepSeek 价格估算 MiMo。
+
+真实验收使用 `scripts/live_deconstruction.py`，必须显式传入 `--authorized-live`，并提供本机来源、章节数和 `.codex` 内输出目录。默认总预算 10 元，所有尝试计入账本，失败的未知用量保留预留金额；脚本不在 CI 运行。验收正文、完整报告、引文与费用现场不加入 Git。`scripts/review_server.py` 可在独立本地数据目录导入已验证结果供页面检查，不覆盖作者现有数据。
+
+API 规则在 `app/agents/deconstruction_prompt.md`，继承 v0.5 细读规则并加入真实验收发现的对话归属、借体主体、动作先后和连线方向检查。选择章节试拆后先预览，采用通过已有来源/引文校验接口。调试自动化使用 fake runtime，不读取真实配置；真实请求仅在用户授权的手工试拆或后台全文任务中运行。
+
+真实验收中结构与引文通过不等于文学质量通过。`--repair-report` 与 `--repair-issues` 使用真实模型输出修正声明，保留修正前报告供核查；不得直接补写语义冒充模型产物。本地验收入口只接收经过独立内容复核、来源和报告哈希匹配的结果。原始稿本、模型响应、失败结果和质量证据仍只在忽略目录中。
+
+当前参数依据：[MiMo 结构化输出](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/text-generation/structured-output)。DeepSeek 的 [JSON Output](https://api-docs.deepseek.com/guides/json_mode/) 与 [思考模式](https://api-docs.deepseek.com/guides/thinking_mode/) 仅为仍保留的兼容供应商资料。

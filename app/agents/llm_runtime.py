@@ -36,6 +36,7 @@ class LLMRuntimeSettings:
     provider: str = "unavailable"
     temperature: float = 0.7
     timeout_seconds: float = 45.0
+    thinking: str | None = None
 
     @property
     def key_configured(self) -> bool:
@@ -52,6 +53,10 @@ class LLMUsage:
     completion_tokens: int = 0
     total_tokens: int = 0
     known: bool = True
+    # DeepSeek may expose cache hits either as a top-level counter or inside
+    # prompt_tokens_details. Keep prompt_tokens as the provider total for
+    # backward compatibility and retain the disjoint cache count separately.
+    cache_read_tokens: int = 0
 
     @classmethod
     def from_payload(cls, payload: Any) -> "LLMUsage":
@@ -64,13 +69,19 @@ class LLMUsage:
         prompt = int(payload.get("prompt_tokens") or payload.get("input_tokens") or 0)
         completion = int(payload.get("completion_tokens") or payload.get("output_tokens") or 0)
         total = int(payload.get("total_tokens") or prompt + completion)
-        return cls(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total, known=known)
+        details = payload.get("prompt_tokens_details")
+        cache = payload.get("prompt_cache_hit_tokens")
+        if cache is None and isinstance(details, Mapping):
+            cache = details.get("cached_tokens")
+        cache_read = max(0, int(cache or 0))
+        return cls(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total, known=known, cache_read_tokens=cache_read)
 
     def as_dict(self) -> dict[str, int]:
         return {
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
         }
 
 
@@ -144,22 +155,77 @@ def load_llm_settings() -> LLMRuntimeSettings:
             model=settings.effective_model,
             provider=settings.provider,
             temperature=settings.llm_temperature,
+            thinking="disabled" if settings.provider == "mimo" else None,
+            timeout_seconds=180 if settings.provider == "mimo" else 45,
         )
     except Exception:  # noqa: BLE001 - 无配置必须可安全降级
         return LLMRuntimeSettings()
 
 
-def _default_transport(url: str, headers: Mapping[str, str], body: bytes, timeout: float) -> tuple[int, bytes]:
+def _default_transport(url: str, headers: Mapping[str, str], body: bytes, timeout: float, *, stream_progress=None) -> tuple[int, bytes]:
     # 这里不记录 URL 查询、请求头或供应商响应；认证值只存在于本次请求对象。
     request = Request(url, data=body, headers=dict(headers), method="POST")
     try:
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - base URL 来自受控配置
+            if "text/event-stream" in response.headers.get("Content-Type", ""):
+                return int(getattr(response, "status", 200)), _collect_chat_stream(response, timeout, progress=stream_progress)
             return int(getattr(response, "status", 200)), response.read()
     except HTTPError as exc:
         # 不读取错误 body，避免供应商把认证/请求片段带进异常链。
         return int(exc.code), b""
     except (TimeoutError, URLError) as exc:
         raise TimeoutError from exc
+
+
+class IncompleteModelStream(ValueError):
+    def __init__(self, *, chunks: int, characters: int, finished: bool, usage_seen: bool):
+        super().__init__("Incomplete model stream")
+        self.safe_diagnostics = dict(chunks=chunks, characters=characters, finished=finished, usage_seen=usage_seen)
+
+
+def _collect_chat_stream(response, timeout: float, *, progress=None) -> bytes:
+    """Reassemble SSE without accepting a partial answer as a completed report."""
+    started = time.monotonic()
+    pieces: list[str] = []
+    usage = None
+    finish = None
+    size = 0
+    characters = 0
+    for line in response:
+        if time.monotonic() - started > timeout:
+            raise TimeoutError
+        size += len(line)
+        if size > 16 * 1024 * 1024:
+            raise ValueError("Model response exceeds local safety limit")
+        if not line.startswith(b"data:"):
+            continue
+        data = line[5:].strip()
+        if data == b"[DONE]":
+            if finish is None:
+                raise ValueError("Model stream lacks a finish reason")
+            return json.dumps({"choices": [{"finish_reason": finish, "message": {"content": "".join(pieces)}}],
+                               "usage": usage}, ensure_ascii=False).encode("utf-8")
+        payload = json.loads(data)
+        if payload.get("error"):
+            raise ValueError("Model stream returned an error")
+        if payload.get("usage") is not None:
+            usage = payload["usage"]
+        for choice in payload.get("choices", []):
+            if choice.get("index", 0) != 0:
+                raise ValueError("Unexpected model choice")
+            content = choice.get("delta", {}).get("content")
+            if content is not None:
+                if not isinstance(content, str):
+                    raise ValueError("Invalid model text chunk")
+                pieces.append(content)
+                characters += len(content)
+            if choice.get("finish_reason") is not None:
+                finish = choice["finish_reason"]
+        if progress is not None:
+            progress(dict(chunks=len(pieces), characters=characters, finished=finish is not None,
+                          usage_seen=usage is not None))
+    raise IncompleteModelStream(chunks=len(pieces), characters=sum(map(len, pieces)),
+                                finished=finish is not None, usage_seen=usage is not None)
 
 
 class LLMRuntime:
@@ -307,10 +373,13 @@ class LLMRuntime:
         if isinstance(error, ValidationError):
             locations: list[str] = []
             for item in error.errors(include_url=False, include_context=False):
-                location = ".".join(str(part) for part in item.get("loc", ()))
+                location = ".".join(str(part) for part in item.get("loc", ()) if not isinstance(part, int))
+                kind = {"model_type": "必须是对象", "list_type": "必须是数组", "missing": "缺少必填字段",
+                        "extra_forbidden": "不得添加此字段", "literal_error": "枚举值不符合合同"}.get(item["type"], "不符合合同")
+                location = f"{location or '报告对象'}（{kind}）"
                 if location and location not in locations:
                     locations.append(location)
-            return "字段结构或类型不符合 schema" + (f"（位置：{', '.join(locations[:8])}）" if locations else "")
+            return "字段结构或类型不符合 schema" + (f"（位置：{', '.join(locations[:20])}）" if locations else "")
         return "JSON 语法或对象外壳不符合 schema"
 
     @staticmethod
@@ -320,6 +389,7 @@ class LLMRuntime:
             completion_tokens=first.completion_tokens + second.completion_tokens,
             total_tokens=first.total_tokens + second.total_tokens,
             known=first.known and second.known,
+            cache_read_tokens=first.cache_read_tokens + second.cache_read_tokens,
         )
 
     @staticmethod
@@ -359,15 +429,21 @@ class LLMRuntime:
             "max_tokens": max_tokens,
         }
         request_messages = list(messages)
+        if self.settings.base_host in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}:
+            body_payload["max_completion_tokens"] = body_payload.pop("max_tokens")
+            body_payload["stream"] = True
+            body_payload["stream_options"] = {"include_usage": True}
+        if self.settings.thinking in {"enabled", "disabled"} and self.settings.base_host in {"api.deepseek.com", "api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}:
+            body_payload["thinking"] = {"type": self.settings.thinking}
         if json_schema is not None:
             schema_text = json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
-            if not any("schema" in str(message.get("content", "")) for message in request_messages):
-                request_messages.append(
-                    {
-                        "role": "system",
-                        "content": f"只返回一个 JSON 对象，严格符合以下 schema，不要 Markdown 或解释：{schema_text}",
-                    }
-                )
+            contract = f"只返回一个 JSON 对象，严格符合以下 schema，不要 Markdown 或解释：{schema_text}"
+            # The schema is trusted runtime data. Manuscript text containing
+            # the word 'schema' must never suppress it or choose its placement.
+            if request_messages and request_messages[0].get("role") == "system":
+                request_messages[0] = {**request_messages[0], "content": request_messages[0]["content"] + "\n\n" + contract}
+            else:
+                request_messages.insert(0, {"role": "system", "content": contract})
             body_payload["response_format"] = {"type": "json_object"}
         body_payload["messages"] = request_messages
         body = json.dumps(body_payload, ensure_ascii=False).encode("utf-8")

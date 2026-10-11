@@ -28,6 +28,8 @@ data/
 .novel_memory/
 .novel_projects/
 .novel_deconstruction/
+# Legacy static case contains private/full literary analysis; not part of the application delivery.
+/public_case/
 *.log
 logs/
 playwright-report/

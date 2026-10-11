@@ -47,6 +47,9 @@ async def _deconstruction_background_worker() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    recovery = deconstruction_routes.book_analysis.recover_pending()
+    if recovery["invalid"]:
+        logger.warning("发现 %s 份无法恢复的拆解任务；原文件已保留", recovery["invalid"])
     worker = asyncio.create_task(_ai_background_worker(), name="xumai-ai-worker")
     deconstruction_worker = asyncio.create_task(
         _deconstruction_background_worker(),
@@ -61,6 +64,11 @@ async def lifespan(_: FastAPI):
             await worker
         with suppress(asyncio.CancelledError):
             await deconstruction_worker
+        book_tasks = list(deconstruction_routes.book_analysis.tasks.values())
+        for task in book_tasks:
+            task.cancel()
+        if book_tasks:
+            await asyncio.gather(*book_tasks, return_exceptions=True)
 
 
 app = FastAPI(

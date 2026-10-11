@@ -49,7 +49,11 @@ class Stage17RuntimeContractTest(unittest.TestCase):
         self.assertEqual(second.data["reply"], "整理完成")
         self.assertEqual(len(transport.requests), 2)
         self.assertEqual(transport.requests[0]["response_format"], {"type": "json_object"})
-        self.assertIn("schema", transport.requests[0]["messages"][-1]["content"])
+        trusted = transport.requests[0]["messages"][0]
+        self.assertEqual(trusted["role"], "system")
+        self.assertIn("schema", trusted["content"])
+        self.assertIn("properties", trusted["content"])
+        self.assertEqual(transport.requests[0]["messages"][-1], {"role": "user", "content": "设定"})
 
     def test_format_failure_uses_one_dedicated_repair_request_and_stable_call_id(self) -> None:
         transport = QueueTransport([
