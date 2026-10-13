@@ -79,7 +79,7 @@ git diff --check
 
 ## 阶段 35 专项验证
 
-阶段 35 浏览器回归使用 `tests/browser_server.py` 的隔离数据与 fake runtime，覆盖 `browser_stage35_workspace_ui.cjs`、`browser_stage35_reading.cjs`、`browser_stage35_density.cjs`，并保留阶段 32/34 保存、来源与历史回归。合成样本只证明界面和合同，不证明文学质量；正文预览应逐字比较，不能用 `trim()` 隐藏空白变化。浏览器截图与测试现场不提交。
+阶段 35 浏览器回归使用 `tests/browser_server.py` 的隔离数据与 fake runtime，覆盖 `browser_stage35_workspace_ui.cjs`、`browser_stage35_reading.cjs`、`browser_stage35_density.cjs`、`browser_stage35_history.cjs`、`browser_stage35_model_roles.cjs`，并保留阶段 32/34 保存、来源与历史回归。先运行reading建立原生新版夹具，再执行density；旧版升级提醒和原生新版无提醒分别验证。history脚本中的旧版元数据标签是组件验证，不能替代后端真实升级测试。合成样本只证明界面和合同，不证明文学质量；正文预览应逐字比较，不能用 `trim()` 隐藏空白变化。浏览器截图与测试现场不提交。
 
 新版规则升级必须验证旧报告和旧证据继续可读、显式新建、重复幂等、正文改变后不返回当前结果。规则和模型导入都不得按固定历史数量裁掉仍可引用的报告。保留历史会增加本地侧车体积；自动归档/清理不在本阶段实施。
 

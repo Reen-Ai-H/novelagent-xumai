@@ -1,5 +1,16 @@
 # 当前任务进度
 
+## 2026-10-13 · 阶段 35 工程候选交付，内容接入与作者验收待续
+
+- 分支 `codex/stage-35-independent-experience`，最终代码提交 `e9e89a4a54c9b22828810df7b8e13355d0af6763` 已推送，交付 [Draft PR #12](https://github.com/Reen-Ai-H/novelagent-xumai/pull/12)，叠加阶段34 PR #11。回读该代码提交的 push/PR 两组 Ubuntu、Windows CI 四项全部 SUCCESS；未合并、未部署。
+- 主任务对该代码运行 `scripts/verify_offline.py`：**355 tests / 0 failures / 0 errors / 0 skipped，21.839s**。Python compileall、app.js / deconstruction-report.js / report-browser.js / rule-report.js 的 Node 语法和 diff 检查通过。无凭据隔离副本运行，自动测试不调用模型。
+- Sol 在相同代码 SHA 的全新8051隔离服务上执行六套原浏览器脚本：stage35_reading、density、history、model_roles、stage34、workspace_ui 均 exit 0。覆盖1440/1024/390、720高首屏、全量分页与末页搜索、正文精确空白、证据定位、冲突与历史只读，无未解释控制台错误和整页横溢。旧版元数据的history脚本是组件验证；真实旧规则升级/重复幂等另由主任务在样本副本实点验证。
+- Luna 对后端最终实现独立复验：原132项专项和新增14项边界通过；历史裁剪、姓名/普通词/并列主体、来源投影合同、标点标题等六项原缺陷闭合，P0/P1/P2遗留为0。23份规则+1份模型持续保留24份报告、最早引用可读；9种来源投影篡改被拒绝。
+- 主任务在最终界面核对本篇模型结果：10人物分为4主要/6配角，别名搜索、6完整事件和原文UTF-16选区可用；390×720无横溢，含私有提示条时首人物完整摘要底部716.20px。规则版10候选/12阅读段落不冒充相同语义质量；原56人物报告仍可读。
+- 本篇MiMo试跑已停止：6次HTTP含修复，官方价格估算 **1.0175624元 / 2元上限**，无未知用量。末版10人物/6事件/130条逐字唯一引文经独立内容复核通过，仍有一处低影响分句缺少直接引用链接。只读预览仅在本机8050，原8000目录未切换；原作品、报告hash与原dirty文件均保持。
+- **仍待交付**：来源编号绑定与模型定点修复仅为私有试验，尚未接入产品章节试拆/全书增量；不能宣称一键复现、通用准确率、全书成本或作者已验收。Notion界面/导入/编辑项转待验收，人物与剧情继续处理中，作者可直接调整下一步优先级。
+- 本机证据保留于忽略目录 `test-results/stage35-e9e89a4-8051/VERIFICATION.md` 与 `.codex/stage35-live-case/`；原始正文、报告全文、费用现场、截图、凭据均不进入Git。下方“进行中”的缺陷记录保留为历史，不代表上述工程问题仍未修。
+
 ## 2026-10-13 · 阶段 35 集成复核（进行中）
 
 - 集成候选 `71407d5`：离线 `scripts/verify_offline.py` 实跑 344 tests / 0 failures / 0 errors / 0 skipped（11.906s）；Python compileall、四份前端 JS 语法与 diff 检查通过。规则候选/重要性、来源阅读段落、显式规则升级、搜索分页和720高首屏优化已集成。
