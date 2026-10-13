@@ -82,9 +82,9 @@ def recognize_heading(line: str) -> Heading | None:
         # Concatenated short titles occur in TXT novels, but grammatical
         # continuations such as 第一章里 / 第一次见面 must stay in the body.
         prose_tail = re.match(r"^(?:里|中|内|的|时|讲述|写着|提到|见面|见到|遇见)", tail)
-        prose_sentence = not markdown and (bool(re.search(r"[。；;]", tail))
-                         or (not re.match(r"^[\s:：、.．\-—]", tail) and bool(re.search(r"[，,]", tail))))
-        if number is not None and number > 0 and not prose_tail and not prose_sentence:
+        # Punctuation belongs to the title; sentence continuation is decided
+        # by grammar after the chapter marker, not by a punctuation blacklist.
+        if number is not None and number > 0 and not prose_tail:
             return Heading(cleaned, "volume" if match.group(2) == "卷" else "chapter", number)
     match = re.match(rf"^(chapter|volume|book)\s+({_NUM})(?=$|[\s:：.\-])", cleaned, re.I)
     if match:
@@ -92,10 +92,14 @@ def recognize_heading(line: str) -> Heading | None:
         if number is not None and number > 0:
             return Heading(cleaned, "chapter" if match.group(1).lower() == "chapter" else "volume", number)
     match = re.match(rf"^卷\s*({_NUM})(.*)$", cleaned)
-    if match and (number := heading_number(match.group(1))) and not re.search(r"[。；;]", cleaned):
+    if match and (number := heading_number(match.group(1))):
         return Heading(cleaned, "volume", number)
-    if re.match(r"^(序章|楔子|序幕|尾声|终章|后记)", cleaned) and not re.search(r"[。；;]", cleaned):
-        return Heading(cleaned, "special")
+    special = re.match(r"^(序章|楔子|序幕|尾声|终章|后记)(.*)$", cleaned)
+    if special:
+        tail = special.group(2)
+        continuation = re.match(r"^(?:还|已经|正在|没有|并未|尚未|不再|渐渐|传来|响起|里|中|的)", tail)
+        if not continuation:
+            return Heading(cleaned, "special")
     if re.match(r"^(prologue|epilogue)(?=$|[\s:：\-])", cleaned, re.I):
         return Heading(cleaned, "special")
     if markdown:

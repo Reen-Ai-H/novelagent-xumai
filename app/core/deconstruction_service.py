@@ -54,7 +54,7 @@ from schemas.deconstruction import (
 
 
 ANALYSIS_LABEL = "确定性结构拆解（无模型）"
-MAX_HISTORY = 20
+MAX_HISTORY = 20  # Public summary window only; never a storage retention cap.
 MAX_EXCERPT = 150
 
 
@@ -876,7 +876,7 @@ class DeconstructionService:
                 record.updated_at = self._now()
                 # Keep the active result even when re-importing an older identical package.
                 active = self._document(record, document_id)
-                record.documents = [x for x in record.documents if x.document_id != document_id][-(MAX_HISTORY - 1):] + [active]
+                record.documents = [x for x in record.documents if x.document_id != document_id] + [active]
                 self.store.save(record)
                 return self._response(source, record, focus=active)
         except IndependentServiceError as exc:

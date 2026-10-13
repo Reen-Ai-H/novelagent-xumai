@@ -492,5 +492,149 @@ class RuleRevisionMigrationTest(unittest.TestCase):
         self.assertEqual(author_path.read_bytes(), author_bytes)
 
 
+class FinalAuditRepairTest(unittest.TestCase):
+    def test_object_names_preserve_internal_verb_letters(self):
+        for declaration in ("", "人物：段天问、陈自在、张问天。"):
+            with self.subTest(declaration=declaration):
+                report = engine([declaration + "她找到段天问。她告诉陈自在。她保护张问天。"]).build()
+                self.assertEqual({p.name for p in report.characters.identity_candidates}, {"段天问", "陈自在", "张问天"})
+                self.assertEqual({p.name for p in report.characters.characters}, {"段天问", "陈自在", "张问天"})
+
+    def test_material_abstract_words_and_modal_phrases_are_not_people(self):
+        for text in ("金钱决定命运。白纸没有字。文明保护着古迹。",
+                     "他找到方法。她看见白纸。大家保护文化。",
+                     "仍然没有退路。果然不会回来。总算拿起武器。宁可走进雨里。",
+                     "银币没有流通。木板保护着石碑。制度决定流程。",
+                     "宁愿走开。总是拿起武器。"):
+            with self.subTest(text=text):
+                result = engine([text, text]).build()
+                self.assertEqual(result.characters.identity_candidates, [])
+                self.assertEqual(result.characters.characters, [])
+
+    def test_coordinated_people_share_the_predicate(self):
+        for text, names in (("温栩和贺岑走进院子。温栩与贺岑拿起灯。", {"温栩", "贺岑"}),
+                            ("欧阳问柳、陈自在及段天问走进院子。", {"欧阳问柳", "陈自在", "段天问"}),
+                            ("周砚和陆川一起拿起灯。", {"周砚", "陆川"})):
+            with self.subTest(text=text):
+                report = engine([text]).build()
+                self.assertEqual({p.name for p in report.characters.identity_candidates}, names)
+                self.assertEqual({p.name for p in report.characters.characters}, names)
+
+    def test_declaration_and_personal_use_override_soft_noun_evidence(self):
+        for text, names in (("人物：阳光、沈默、石阶明。阳光拿起灯。沈默打开门。石阶明没有离开。", {"阳光", "沈默", "石阶明"}),
+                            ("她名叫阳光。阳光拿起灯。", {"阳光"}),
+                            ("人物：银币、文明。银币问起往事。文明决定救下孩子。", {"银币", "文明"})):
+            with self.subTest(text=text):
+                report = engine([text]).build()
+                self.assertEqual({p.name for p in report.characters.characters}, names)
+        for text in ("人物：我、大道、众人、夜色、石门。欧阳明没有开门。",
+                     "人物：白纸、阳光。白纸没有字。阳光没有消失。"):
+            report = engine([text]).build()
+            self.assertFalse({"我", "大道", "众人", "夜色", "石门", "白纸", "阳光"} & {p.name for p in report.characters.identity_candidates})
+
+    def test_object_speech_boundary_does_not_extend_the_name(self):
+        for text, names in (("陆川对林舟说：“等我。”林舟答应了。", {"陆川", "林舟"}),
+                            ("她找到林舟走。她告诉周砚拿灯。", {"林舟", "周砚"})):
+            with self.subTest(text=text):
+                self.assertEqual(set(engine([text]).names), names)
+
+    def test_title_punctuation_does_not_hide_first_or_middle_chapter(self):
+        for title in ("第一章 再见。", "第一章 选择；等待", "第一章风，起", "第一章 你来了！"):
+            with self.subTest(title=title):
+                chapters = IndependentWorkspaceService._parse_text("synthetic.txt", f"{title}\n甲。\n第二章 终点\n乙。")[1]
+                self.assertEqual([c.title for c in chapters], [title, "第二章 终点"])
+                self.assertEqual([c.content for c in chapters], ["甲。\n", "乙。"])
+                middle = IndependentWorkspaceService._parse_text("synthetic.txt", f"第九章\n前文。\n{title}\n甲。\n第十章\n后文。")[1]
+                self.assertEqual(len(middle), 3)
+                self.assertEqual(middle[1].title, title)
+
+    def test_special_heading_in_a_sentence_stays_body(self):
+        body = "甲。\n尾声还没有响起\n乙。\n"
+        chapters = IndependentWorkspaceService._parse_text("synthetic.txt", "第一章 正文\n" + body + "第二章 归来\n丙。")[1]
+        self.assertEqual([c.content for c in chapters], [body, "丙。"])
+
+    def test_same_chapter_events_must_belong_to_the_referenced_segment(self):
+        good = engine(["😀周砚拿灯。\n\n第二天，陆川救下孩子。"]).build()
+        data = good.model_dump()
+        first, second = data["plot"]["reading_segments"]
+        first["event_ids"], second["event_ids"] = second["event_ids"], first["event_ids"]
+        with self.assertRaises(ValidationError):
+            DeconstructionDepthReport.model_validate(data)
+
+    def test_current_engine_projection_cannot_be_removed(self):
+        data = engine(["周砚拿灯。"]).build().model_dump()
+        data["plot"]["reading_segments"] = []
+        data["plot"]["overview"]["reading_segment_count"] = 0
+        with self.assertRaises(ValidationError):
+            DeconstructionDepthReport.model_validate(data)
+        # The revision marker is absent in actual legacy 2.0 documents.
+        data["engine_revision"] = None
+        data["plot"]["overview"] = None
+        DeconstructionDepthReport.model_validate(data)
+
+    def test_paragraph_indices_and_progress_match_source_offsets(self):
+        text = "\n\t😀周砚拿灯。\n\n第二天，陆川救下孩子。\n "
+        report = engine([text]).build()
+        validate_depth_report_source(report, source=report.source, chapters={"c1":text})
+        for mutation in (dict(paragraph_start=900, paragraph_end=999),
+                         dict(normalized_start=20, normalized_end=25),
+                         dict(paragraph_end=1, end_offset=len(text.encode("utf-16-le"))//2)):
+            with self.subTest(mutation=mutation):
+                data = report.model_dump()
+                data["plot"]["reading_segments"][0].update(mutation)
+                with self.assertRaises(ValueError):
+                    altered = DeconstructionDepthReport.model_validate(data)
+                    validate_depth_report_source(altered, source=altered.source, chapters={"c1":text})
+
+
+class FinalHistoryRetentionTest(unittest.TestCase):
+    setUp = RecognitionServiceTest.setUp
+    preview = RecognitionServiceTest.preview
+
+    def test_model_import_and_reimport_do_not_remove_rule_history(self):
+        from unittest.mock import patch
+        from app.core import deconstruction_service as service_module
+        from app.core import deconstruction_depth as depth_module
+        from schemas.analysis_report import AnalysisImport
+        service = DeconstructionService(independent=self.service,
+                                       store=DeconstructionStore(Path(self.tmp.name) / "deconstruction"))
+        self.service.deconstruction_service = service
+        preview = self.preview("第一章\n😀周砚没有开门。")
+        self.service.confirm_import("project35", "account35", preview.preview_id)
+        service.process_background_tasks()
+        first = service.store.load("project35").documents[0]
+        frozen = first.model_dump(mode="json")
+        author_path = Path(self.tmp.name) / "independent/project35.json"
+        author_bytes = author_path.read_bytes()
+        for revision in range(22):
+            with patch.object(service_module, "RULE_ENGINE_REVISION", f"audit-revision-{revision}"), patch.object(depth_module, "RULE_ENGINE_REVISION", f"audit-revision-{revision}"):
+                queued = service.enqueue_for_project("project35", "account35")
+                self.assertEqual(service.enqueue_for_project("project35", "account35").document_id, queued.document_id)
+                service.process_background_tasks()
+        prior = service.store.load("project35")
+        self.assertEqual(len(prior.documents), 23)
+        source = service._source("project35", "account35")
+        claim = dict(text="合成的不开门记录。", status="fact", evidence_ids=["Q1"])
+        payload = AnalysisImport(expected_source_version_id=source.version_id,
+                                expected_source_revision=source.source_revision, expected_source_hash=source.source_hash,
+                                report=dict(producer="offline-audit-fake", title="合成报告", scope="合成第一章", chapter_numbers=[1],
+                                            findings=[dict(id="F1", title="不开门", **claim)],
+                                            characters=[dict(id="C1", name="周砚", role="合成人物", identity=claim, motivation=claim, change=claim)],
+                                            events=[dict(id="E1", title="不开门", chapter_number=1, story_time="当下", actor_ids=["C1"], action=claim, consequence=claim)],
+                                            relations=[], story_order=["E1"], time_note="无回忆",
+                                            evidence=[dict(id="Q1", chapter_number=1, quote="周砚没有开门。")], open_questions=[]))
+        for _ in range(2):
+            service.import_report("project35", "account35", payload)
+            stored = service.store.load("project35")
+            self.assertEqual(len(stored.documents), 24)
+            self.assertTrue({d.document_id for d in prior.documents} <= {d.document_id for d in stored.documents})
+            oldest = next(d for d in stored.documents if d.document_id == first.document_id)
+            self.assertEqual(oldest.model_dump(mode="json"), frozen)
+            evidence = service.evidence("project35", "account35", first.evidence[0].evidence_id, document_id=first.document_id)
+            self.assertTrue(evidence["historical"])
+            self.assertTrue(evidence["chapter"]["read_only"])
+            self.assertEqual(author_path.read_bytes(), author_bytes)
+
+
 if __name__ == "__main__":
     unittest.main()

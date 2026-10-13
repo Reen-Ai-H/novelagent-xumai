@@ -25,6 +25,7 @@ class PersonMention:
     start: int
     origin: str  # archive / label / subject / object / weak_subject / weak_object
     spelling: str = ""
+    predicate: str = ""  # Shared predicate of a coordinated subject, if explicit.
 
 
 # Lexical categories, never a list of approved personal names or a person cap.
@@ -41,8 +42,12 @@ _NON_PERSON = {
     "两人", "二人", "三人", "一个人", "所有人", "有人", "无人", "老人", "男子",
     "女子", "少年", "少女", "姑娘", "孩子", "大道", "天道", "画像", "前世", "今生", "死婴",
     "出路", "落叶", "食物", "困难", "环境", "金吾卫", "万人", "西域", "烟花",
-    "白雪", "薄雾", "暮色", "红叶",
+    "白雪", "薄雾", "暮色", "红叶", "金钱", "白纸", "文明", "文化", "方法",
+    "制度", "命运", "古迹", "武器", "工具", "资源", "规则", "秩序",
 }
+_MATERIAL_NOUN = re.compile(r"(?:白|黄|红|黑|金|银|铜|铁|木|竹|石)(?:纸|布|钱|币|板|器|料|块|片)$")
+_HARD_NON_PERSON = {"我", "你", "他", "她", "它", "我们", "你们", "他们", "她们", "自己",
+                    "大道", "天道", "众人", "众生", "群众", "人群", "大家", "百姓", "所有人"}
 _FUNCTIONS = (
     "与此同时", "三年前", "两人一起", "因为", "然后", "接着", "随后", "终于",
     "此时", "同时", "于是", "因此", "所以", "后来", "现在", "只是", "已经",
@@ -57,7 +62,7 @@ _FUNCTIONS = (
     "都不", "不错", "全然", "总爱", "直接", "乖乖", "说完", "问题", "手上", "身子",
     "从我", "问你", "万一", "哪家", "倘若", "被抱", "很早", "快步", "头发", "可我",
     "反手", "晚上", "月末", "今天", "目前", "自然", "至于", "反正", "谁敢", "然而",
-    "早已", "恐怕", "必须", "赶紧", "连人", "听", "从",
+    "早已", "恐怕", "必须", "赶紧", "连人", "听", "从", "宁可", "宁愿", "总是", "总算", "果然", "仍然",
 )
 _ACTIONS = (
     "想", "要", "在", "把", "将", "用", "拿", "带", "给", "对", "问", "说",
@@ -109,14 +114,28 @@ def _action_after(tail: str) -> str:
     return next((action for action in _ACTIONS if tail.startswith(action)), "")
 
 
-def plausible_person(value: str, *, explicit: bool = False) -> bool:
+def _personal_use(value: str, text: str) -> bool:
+    """A declaration may override a lexical noun prior, not a hard identity ban.
+
+    In particular '石门没有消失' is not human behavior; negation itself is
+    not enough. This deliberately cannot decide every metaphor or namesake.
+    """
+    for match in re.finditer(re.escape(value), text):
+        tail = _PREDICATE_PREFIX.sub("", text[match.end():match.end() + 24].lstrip())
+        tail = re.sub(r"^(?:并没有|并未|从未|没有|不能|不会|不肯|不愿|不再|未曾|未|没|不)", "", tail)
+        if re.match(r"(?:拿|把|问|说|回答|询问|救|拒绝|答应|决定|走|离开|回家|保护|帮助|接过|握|抬|点头|摇头|转身)", tail):
+            return True
+    return False
+
+
+def plausible_person(value: str, *, explicit: bool = False, lexical_override: bool = False) -> bool:
     if not (1 if explicit else 2) <= len(value) <= (20 if explicit else 4):
         return False
-    if value in {"我", "你", "他", "她", "它", "我们", "你们", "他们", "她们", "自己"}:
+    if value in _HARD_NON_PERSON or any(value.startswith(term) for term in _HARD_NON_PERSON if len(term) > 1):
         return False
-    if value in _NON_PERSON or value.startswith(_FUNCTIONS):
+    if value.startswith(_FUNCTIONS):
         return False
-    if any(value.startswith(term) for term in _NON_PERSON):
+    if not lexical_override and (any(value.startswith(term) for term in _NON_PERSON) or _MATERIAL_NOUN.fullmatch(value)):
         return False
     if not explicit and (not re.fullmatch(r"[\u4e00-\u9fff]+", value)
                          or value[0] in "我你他她它这那其此每各两一因所"
@@ -140,10 +159,15 @@ def discover_person_mentions(chapters: Iterable[TextSource], archive_names: Iter
     archive_names = tuple(archive_names)
     mentions: dict[str, list[PersonMention]] = defaultdict(list)
     explicit_names: list[str] = []
+    lexical_names: set[str] = set()
 
-    def add(name, chapter, position, origin):
-        if plausible_person(name, explicit=origin in {"label", "archive"}):
-            mentions[name].append(PersonMention(name, chapter.chapter_id, position, origin))
+    def add(name, chapter, position, origin, predicate=""):
+        explicit = origin in {"label", "archive"}
+        override = name in lexical_names or (explicit and _personal_use(name, chapter.content))
+        if plausible_person(name, explicit=explicit or name in explicit_names, lexical_override=override):
+            if override:
+                lexical_names.add(name)
+            mentions[name].append(PersonMention(name, chapter.chapter_id, position, origin, predicate=predicate))
             if origin in {"label", "archive"} and name not in explicit_names:
                 explicit_names.append(name)
 
@@ -174,6 +198,31 @@ def discover_person_mentions(chapters: Iterable[TextSource], archive_names: Iter
                 if match.group().startswith(adverb):
                     start += len(adverb)
                     break
+            # Resolve a whole coordinated subject before its shared verb. Each
+            # component must pass identity checks; no fixed maximum person count.
+            coordinated = []
+            cursor = start
+            while True:
+                part = re.match(r"([\u4e00-\u9fff]{2,4}?)([和与及、])", text[cursor:cursor + 5])
+                if not part or not plausible_person(part.group(1), explicit=part.group(1) in defined_names,
+                                                     lexical_override=part.group(1) in lexical_names):
+                    break
+                coordinated.append((part.group(1), cursor))
+                cursor += part.end()
+            if coordinated:
+                endings = []
+                for length in (2, 3, 4):
+                    name = text[cursor:cursor + length]
+                    tail = text[cursor + length:cursor + length + 24]
+                    predicate_tail = re.sub(r"^(?:一起|一同|共同)", "", tail)
+                    action = _action_after(predicate_tail)
+                    if action and plausible_person(name, explicit=name in defined_names, lexical_override=name in lexical_names):
+                        endings.append((name, action))
+                if endings:
+                    name, action = (max(endings, key=lambda c: len(c[0])) if endings[0][1] in {"问", "在", "笑"} else endings[0])
+                    for component, position in coordinated + [(name, cursor)]:
+                        add(component, chapter, position, "weak_subject" if action in _WEAK_ACTIONS else "subject", action)
+                    continue
             known_full_names = [name for name in defined_names if text.startswith(name, start)]
             if known_full_names:
                 complete_name = max(known_full_names, key=len)
@@ -189,6 +238,8 @@ def discover_person_mentions(chapters: Iterable[TextSource], archive_names: Iter
                 if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", name):
                     continue
                 action = _action_after(text[start + length:start + length + 16])
+                if action == "对" and re.match(r"对[\u4e00-\u9fff]{2,4}(?:说|问|喊)", text[start + length:]):
+                    action = "说"
                 if action and plausible_person(name):
                     choices.append((name, action))
             if choices:
@@ -211,6 +262,7 @@ def discover_person_mentions(chapters: Iterable[TextSource], archive_names: Iter
             if any(left <= match.start() < right for left, right in protected_spans):
                 continue
             start = match.end()
+            choices = []
             for length in (2, 3, 4):
                 name = text[start:start + length]
                 if length == 2 and name in _COMPOUND_SURNAMES:
@@ -218,9 +270,24 @@ def discover_person_mentions(chapters: Iterable[TextSource], archive_names: Iter
                 if not re.fullmatch(r"[\u4e00-\u9fff]{2,4}", name):
                     continue
                 after = text[start + length: start + length + 16]
-                if not after or after[0] in _BOUNDARY or _action_after(after):
-                    add(name, chapter, start, "weak_object" if match.group().strip() in {"替", "给", "对"} else "object")
-                    break
+                terminal = not after or after[0] in _BOUNDARY
+                if (terminal or _action_after(after)) and plausible_person(name, explicit=name in defined_names,
+                                                                           lexical_override=name in lexical_names):
+                    # Speech verbs belong to the predicate, not the addressee.
+                    if name.endswith(("说", "喊", "答应")) and match.group().strip() in {"对", "给", "问", "告诉"}:
+                        continue
+                    choices.append((name, terminal))
+            if choices:
+                declared = [c for c in choices if c[0] in defined_names]
+                terminal = [c for c in choices if c[1]]
+                shortest = choices[0][0]
+                # A terminal span is stronger than a possible given-name verb
+                # (段天问 / 陈自在), but not permission to absorb an action
+                # such as 林舟走 / 林舟说 into a new three-character name.
+                ambiguous = _action_after(text[start + len(shortest):start + len(shortest) + 16]) in {"问", "在", "笑"}
+                preferred = declared or (terminal if ambiguous else [])
+                name = max(preferred, key=lambda c: len(c[0]))[0] if preferred else shortest
+                add(name, chapter, start, "weak_object" if match.group().strip() in {"替", "给", "对"} else "object")
 
     # Source order breaks ties and does not impose a maximum number of people.
     source_order = {chapter.chapter_id: i for i, chapter in enumerate(chapters)}
@@ -289,7 +356,7 @@ their named sides; shared pronouns, surnames or actions do not merge identities.
                 definition_spans[name].append((chapter.chapter_id, match.start(), match.end()))
         for match in _SINGLE_NAME.finditer(chapter.content):
             name = match.group(1)
-            if plausible_person(name, explicit=True):
+            if plausible_person(name, explicit=True, lexical_override=_personal_use(name, chapter.content)):
                 names.append(name)
                 definitions[name].append(PersonMention(name, chapter.chapter_id, match.start(1), "definition"))
                 definition_spans[name].append((chapter.chapter_id, match.start(), match.end()))
@@ -303,6 +370,8 @@ their named sides; shared pronouns, surnames or actions do not merge identities.
     paragraphs: dict[str, set[tuple[str, int]]] = defaultdict(set)
     actions: dict[str, set[tuple[str, int]]] = defaultdict(set)
     contributions: dict[str, set[tuple[str, int]]] = defaultdict(set)
+    shared_predicates = {(aliases.get(m.name, m.name), m.chapter_id, m.start): m.predicate
+                         for m in mentions if m.predicate}
     pattern = re.compile("|".join(map(re.escape, sorted(spelling_to_name, key=len, reverse=True))))
     for chapter in chapters:
         for paragraph_index, paragraph in enumerate(re.finditer(r"[^\n]+", chapter.content)):
@@ -318,6 +387,11 @@ their named sides; shared pronouns, surnames or actions do not merge identities.
                 occurrences[name].append(occurrence)
                 paragraphs[name].add((chapter.chapter_id, paragraph_index))
                 action = _action_after(tail)
+                shared = shared_predicates.get((name, chapter.chapter_id, position), "")
+                if shared:
+                    action = shared
+                if action == "对" and re.match(r"对[\u4e00-\u9fff]{2,4}(?:说|问|喊)", tail):
+                    action = "说"
                 if action and action not in _WEAK_ACTIONS:
                     actions[name].add((chapter.chapter_id, position))
                     if _CONTRIBUTION.match(_PREDICATE_PREFIX.sub("", tail)):
@@ -334,7 +408,8 @@ their named sides; shared pronouns, surnames or actions do not merge identities.
         significant = (contribution_count > 0
                        or (count >= recurrence_gate and paragraph_count >= recurrence_gate and action_count >= 2)
                        or (count >= main_gate and action_count >= 2)
-                       or (total_length <= 1500 and (action_count > 0 or declared)))
+                       or (total_length <= 1500 and (action_count > 0 or declared
+                           or any(m.name == name and m.origin == "object" for m in mentions))))
         importance = "main" if significant and count >= main_gate and action_count >= 2 else "supporting" if significant else "incidental"
         confidence = .95 if definitions[name] else .88 if declared else .8 if action_count else .65
         reason = (f"当前来源{paragraph_count}个段落中出现{count}次，有{action_count}处个人行动及{contribution_count}处作用线索。"

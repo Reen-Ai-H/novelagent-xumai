@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
@@ -549,6 +550,15 @@ class DeconstructionDepthReport(DepthModel):
         unique([i.item_id for i in items], "analysis id")
         index = {i.item_id: i for i in items}
 
+        if self.engine_revision and (not self.plot.reading_segments or self.plot.overview is None):
+            raise ValueError("versioned rule report requires a complete reading projection")
+        total_utf16 = sum(c.utf16_length for c in self.chapters)
+        chapter_offsets = {}
+        consumed = 0
+        for chapter in self.chapters:
+            chapter_offsets[chapter.chapter_id] = consumed
+            consumed += chapter.utf16_length
+
         unique([s.segment_id for s in self.plot.reading_segments], "reading segment id")
         covered_events: list[str] = []
         previous_segment = None
@@ -558,6 +568,10 @@ class DeconstructionDepthReport(DepthModel):
                 raise ValueError("reading segment source range is invalid")
             if not chapter.normalized_start <= segment.normalized_start <= segment.normalized_end <= chapter.normalized_end:
                 raise ValueError("reading segment progress is outside chapter")
+            expected_start = round((chapter_offsets[segment.chapter_id] + segment.start_offset) / total_utf16 * 100, 6) if total_utf16 else 0
+            expected_end = round((chapter_offsets[segment.chapter_id] + segment.end_offset) / total_utf16 * 100, 6) if total_utf16 else 0
+            if segment.normalized_start != expected_start or segment.normalized_end != expected_end:
+                raise ValueError("reading progress does not match source offsets")
             if previous_segment and (segment.chapter_number < previous_segment.chapter_number
                                     or (segment.chapter_id == previous_segment.chapter_id and segment.start_offset < previous_segment.end_offset)):
                 raise ValueError("reading segments overlap or reverse source order")
@@ -566,6 +580,21 @@ class DeconstructionDepthReport(DepthModel):
                 unique(ids, "reading segment reference")
                 if any(key not in index or index[key].kind != kind or segment.chapter_id not in index[key].chapter_ids for key in ids):
                     raise ValueError("reading segment has invalid typed reference")
+            event_people = set()
+            for key in segment.event_ids:
+                event = index[key]
+                if event.chapter_ids != [segment.chapter_id] or not event.evidence_ids:
+                    raise ValueError("reading event requires local source evidence")
+                for evidence_id in event.evidence_ids:
+                    ref = evidence.get(evidence_id)
+                    if (ref is None or ref.chapter_id != segment.chapter_id or ref.start_offset is None
+                            or not segment.start_offset <= ref.start_offset < ref.end_offset <= segment.end_offset):
+                        raise ValueError("reading event evidence belongs to another segment")
+                if not segment.normalized_start <= event.normalized_start <= event.normalized_end <= segment.normalized_end:
+                    raise ValueError("reading event progress belongs to another segment")
+                event_people.update(event.character_ids)
+            if set(segment.character_ids) != event_people:
+                raise ValueError("reading participants do not match referenced events")
             for key in segment.evidence_ids:
                 ref = evidence.get(key)
                 if ref is None or ref.chapter_id != segment.chapter_id or ref.start_offset is None or not segment.start_offset <= ref.start_offset < ref.end_offset <= segment.end_offset:
@@ -696,7 +725,22 @@ def validate_depth_report_source(
     for chapter in report.chapters:
         if len(encoded[chapter.chapter_id]) // 2 != chapter.utf16_length:
             raise ValueError("chapter UTF-16 length mismatch")
+    source_paragraphs = {key: [m for m in re.finditer(r"[^\n]+", text) if m.group().strip()]
+                         for key, text in chapters.items()}
+    represented_paragraphs: dict[str, list[int]] = {key: [] for key in chapters}
     for segment in report.plot.reading_segments:
+        paragraphs = source_paragraphs[segment.chapter_id]
+        if not 1 <= segment.paragraph_start <= segment.paragraph_end <= len(paragraphs):
+            raise ValueError("reading paragraph indices do not match source")
+        text = chapters[segment.chapter_id]
+        first = segment.paragraph_start - 1
+        last = segment.paragraph_end
+        expected_start = 0 if first == 0 else paragraphs[first].start()
+        expected_end = paragraphs[last].start() if last < len(paragraphs) else len(text)
+        if (segment.start_offset != len(text[:expected_start].encode("utf-16-le")) // 2
+                or segment.end_offset != len(text[:expected_end].encode("utf-16-le")) // 2):
+            raise ValueError("reading offsets do not match paragraph range")
+        represented_paragraphs[segment.chapter_id].extend(range(first, last))
         raw = encoded[segment.chapter_id]
         start, end = segment.start_offset * 2, segment.end_offset * 2
         try:
@@ -707,6 +751,9 @@ def validate_depth_report_source(
             raise ValueError("reading segment splits a UTF-16 surrogate pair") from None
         if segment.summary not in segment_text or segment.title not in segment_text:
             raise ValueError("reading summary/title is not a source extract")
+    if report.plot.reading_segments or report.engine_revision:
+        if any(represented_paragraphs[key] != list(range(len(paragraphs))) for key, paragraphs in source_paragraphs.items()):
+            raise ValueError("reading projection does not cover all source paragraphs")
     for ref in report.evidence:
         if ref.granularity == "chapter":
             continue
