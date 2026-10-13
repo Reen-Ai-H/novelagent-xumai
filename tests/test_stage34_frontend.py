@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Stage34FrontendBehaviorTest(unittest.TestCase):
+    app_source_path = ROOT / "frontend" / "app.js"
+
     def run_js(self, checks: str) -> subprocess.CompletedProcess[str]:
         harness = r'''
 const assert = require('node:assert/strict');
@@ -40,6 +43,9 @@ const window = {location, setTimeout, clearTimeout, scrollTo() {}, matchMedia: (
 const sandbox = {document, window, location, URL, URLSearchParams, setTimeout, clearTimeout,
   fetch: (...args) => fetchHandler(...args), CSS: {escape: String}};
 let source = fs.readFileSync(APP_PATH, 'utf8');
+// Git's Windows checkout may use CRLF. Only normalize line terminators in
+// this test copy; preserve the exact hook and every behavior assertion below.
+source = source.replace(/\r\n/g, '\n');
 assert.ok(source.includes('  start();\n})();'));
 source = source.replace('  start();\n})();', `  globalThis.api = {
   state, elements, normalizeResult, normalizeDeconstructionResponse, hasDeconstructionResults,
@@ -63,7 +69,7 @@ const modelPayload = () => ({project_id: 'p', title: '合同样本', effective_s
     scope_start: 1, scope_end: 2, scope_hash: 'c'.repeat(64), evidence: [evidence],
     report: {schema_version: '1', chapter_numbers: [1,2], characters: [], events: [], evidence: []}},
 });
-'''.replace("APP_PATH", json.dumps(str(ROOT / "frontend" / "app.js")))
+'''.replace("APP_PATH", json.dumps(str(self.app_source_path)))
         result = subprocess.run(
             ["node", "-"], input=harness + "\n(async () => {\n" + checks +
             "\n})().catch(error => { console.error(error); process.exitCode = 1; });\n",
@@ -71,6 +77,35 @@ const modelPayload = () => ({project_id: 'p', title: '合同样本', effective_s
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
+
+    def test_lf_and_crlf_real_app_execute_identical_behavior_assertions(self):
+        source = self.app_source_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        regression_name = "test_lf_and_crlf_real_app_execute_identical_behavior_assertions"
+        behavior_names = [name for name in unittest.defaultTestLoader.getTestCaseNames(type(self))
+                          if name != regression_name]
+        self.assertTrue(behavior_names)
+        with tempfile.TemporaryDirectory(prefix="xumai-frontend-line-endings-") as directory:
+            for ending in ("LF", "CRLF"):
+                with self.subTest(line_ending=ending):
+                    raw_source = source if ending == "LF" else source.replace("\n", "\r\n")
+                    fixture = Path(directory) / f"app-{ending}.js"
+                    # newline="" prevents Windows from translating CRLF into
+                    # CRCRLF. Node reads these real fixture bytes unchanged.
+                    fixture.write_text(raw_source, encoding="utf-8", newline="")
+                    self.assertEqual(fixture.read_bytes(), raw_source.encode("utf-8"))
+                    self.assertIn(b"  start();\n})();" if ending == "LF" else b"  start();\r\n})();",
+                                  fixture.read_bytes())
+                    cases = []
+                    for name in behavior_names:
+                        case = type(self)(name)
+                        case.app_source_path = fixture
+                        cases.append(case)
+                    result = unittest.TestResult()
+                    unittest.TestSuite(cases).run(result)
+                    self.assertEqual(result.testsRun, len(behavior_names))
+                    self.assertEqual(result.skipped, [])
+                    self.assertEqual(result.errors, [], str(result.errors))
+                    self.assertEqual(result.failures, [], str(result.failures))
 
     def test_utf8_pipes_ignore_cp1252_default(self):
         # Exercise the same Chinese stdin harness used by every behavior test.
