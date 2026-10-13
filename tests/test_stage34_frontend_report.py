@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import patch
 
 
 class FrontendReportTest(unittest.TestCase):
@@ -35,10 +36,15 @@ assert.ok(view.innerHTML.includes('&lt;未绑定引文&gt;'));
 assert.ok(view.innerHTML.includes('这条旧结果没有绑定当前正文回链'));
 assert.ok(!view.innerHTML.includes('<未绑定引文>'));
 assert.equal(typeof sandbox.window.XumaiAnalysis.closeModal, 'function');
+console.log('报告中文输出🧭');
+console.error('报告中文诊断🧭');
 '''.replace("SOURCE", json.dumps(str(source)))
-        result = subprocess.run(["node", "-"], input=script, text=True,
-                                capture_output=True, cwd=root, timeout=15)
+        with patch("subprocess._text_encoding", return_value="cp1252"):
+            result = subprocess.run(["node", "-"], input=script, text=True,
+                                    encoding="utf-8", capture_output=True, cwd=root, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "报告中文输出🧭\n")
+        self.assertEqual(result.stderr, "报告中文诊断🧭\n")
 
 
 if __name__ == "__main__":

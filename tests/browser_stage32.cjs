@@ -212,7 +212,7 @@ async function oneViewport(browser, width) {
     const results = [];
     for (const width of [1440, 1024]) results.push(await oneViewport(browser, width));
     const report = {browser: `${process.env.XUMAI_BROWSER_CHANNEL || 'chromium'} ${browser.version()}`, platform: process.platform, results};
-    await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
+    await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
     console.log(JSON.stringify(report));
   } finally {
     await browser.close();

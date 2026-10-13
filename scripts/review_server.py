@@ -57,15 +57,15 @@ def seed_reports(app, independent, deconstruction, data: Path, outputs: Path):
     from scripts.live_deconstruction import private_json
     marker = data / "review.json"
     if marker.exists():
-        return json.loads(marker.read_text())
-    chapters = json.loads((outputs / "chapters.json").read_text())
+        return json.loads(marker.read_text(encoding="utf-8"))
+    chapters = json.loads((outputs / "chapters.json").read_text(encoding="utf-8"))
     reports = sorted(path for path in outputs.glob("report-*.json") if not path.name.endswith(".receipt.json"))
     if not reports:
         raise ValueError("No verified reports are available")
     # All verification must pass before creating an acceptance project.
     for path in reports:
-        receipt = json.loads(path.with_name(path.stem + ".receipt.json").read_text())
-        report = json.loads(path.read_text())
+        receipt = json.loads(path.with_name(path.stem + ".receipt.json").read_text(encoding="utf-8"))
+        report = json.loads(path.read_text(encoding="utf-8"))
         batch = [c for c in chapters if c["chapter_number"] in report["chapter_numbers"]]
         source_hash = hashlib.sha256(json.dumps(batch, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         if (receipt["invalid_evidence_ids"] or not receipt["scope_correct"]
@@ -93,7 +93,7 @@ def seed_reports(app, independent, deconstruction, data: Path, outputs: Path):
            for actual, expected in zip(source.chapters, chapters)):
         raise ValueError("Imported narrative differs from the evaluated source")
     for path in reports:
-        require(client.post(f"/api/independent/projects/{project}/deconstruction/import", json={"report": json.loads(path.read_text())}))
+        require(client.post(f"/api/independent/projects/{project}/deconstruction/import", json={"report": json.loads(path.read_text(encoding="utf-8"))}))
     info = dict(email=email, project_id=project, path=f"/independent/{project}?view=deconstruction", reports=len(reports))
     private_json(marker, info)
     return info

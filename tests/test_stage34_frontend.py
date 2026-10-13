@@ -3,13 +3,14 @@ from pathlib import Path
 import json
 import subprocess
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class Stage34FrontendBehaviorTest(unittest.TestCase):
-    def run_js(self, checks: str) -> None:
+    def run_js(self, checks: str) -> subprocess.CompletedProcess[str]:
         harness = r'''
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -66,9 +67,18 @@ const modelPayload = () => ({project_id: 'p', title: '合同样本', effective_s
         result = subprocess.run(
             ["node", "-"], input=harness + "\n(async () => {\n" + checks +
             "\n})().catch(error => { console.error(error); process.exitCode = 1; });\n",
-            text=True, capture_output=True, cwd=ROOT, timeout=15,
+            text=True, encoding="utf-8", capture_output=True, cwd=ROOT, timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
+
+    def test_utf8_pipes_ignore_cp1252_default(self):
+        # Exercise the same Chinese stdin harness used by every behavior test.
+        # If explicit pipe encoding regresses, cp1252 cannot encode this input.
+        with patch("subprocess._text_encoding", return_value="cp1252"):
+            result = self.run_js("console.log('正文输入与输出🧭'); console.error('错误诊断中文🧭');")
+        self.assertEqual(result.stdout, "正文输入与输出🧭\n")
+        self.assertEqual(result.stderr, "错误诊断中文🧭\n")
 
     def test_model_contract_accepts_both_versions_and_scoped_revision(self):
         self.run_js(r'''

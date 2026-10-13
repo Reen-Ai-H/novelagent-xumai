@@ -22,6 +22,6 @@ class SourceSelectionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.txt"
             for material in ("第1章\n甲\n第3章\n丙", "第1章\n甲\n第1章\n乙\n第2章\n丙"):
-                path.write_text(material)
+                path.write_text(material, encoding="utf-8")
                 with self.assertRaises(ValueError):
                     chapters_from_file(path, 2)
