@@ -10,7 +10,7 @@ import hashlib
 import re
 from collections.abc import Mapping
 
-from app.core.chapter_parser import recognize_heading, utf16_length
+from app.core.chapter_parser import recognize_heading, scan_code_fence, utf16_length
 
 
 # Grammatical utterances and free-standing scenery are weak heading evidence.
@@ -25,6 +25,14 @@ _UTTERANCE = re.compile(
 )
 _SCENERY = re.compile(r"^(?:夜色|天色|月色|阳光|月光|灯光|风声|雨声|树林|森林|石门|木门|山风|寒风|落叶|天空|大雨|白雪|薄雾|暮色)$"
                       r"|^(?:夜色|天色|月色|山风|寒风|雨声|风声|阳光|月光)(?:渐|已|更|正|在|很|微|吹|落|照)")
+_ACTION_CLAUSE = re.compile(
+    # Body movement plus a following action, manner + movement, and ordinary
+    # directional/result complements are prose even without punctuation.
+    r"^(?:(?:抬|低|回|转|偏|侧)头|(?:转|侧|起|躬)身|(?:伸|抬|挥|收)手|弯腰|迈步|举步|蹲下|站起|坐下|推门|拉门|握紧|拿起|放下|睁眼|闭眼)"
+    r"|^(?:大|小|快|慢|碎|疾|缓)步(?:向|朝|往|走|奔|跑|退|前|后)"
+    r"|^(?:轻轻|慢慢|缓缓|悄悄|默默|急忙|连忙|迅速|立刻|猛然)(?:看|望|走|去|跑|退|伸|抬|低|转|推|拉|拿|放|说|问)"
+    r"|^(?:望|看|走|跑|奔|退|冲|跳|爬|挪|移)(?:向|往|过|进|出|回|开|上|下|远|近)"
+)
 
 
 def content_digest(content: str) -> str:
@@ -49,16 +57,9 @@ def chapter_sections(chapter_id: str, content: str, *, heading_levels: Mapping[i
     quote_pairs = {"“": "”", "「": "」", "『": "』", "‘": "’"}
     for line in lines:
         value = line.strip()
-        marker = re.match(r"^(`{3,}|~{3,})", value)
-        inside = fenced is not None
-        if marker:
-            fence = marker.group()
-            if fenced is None:
-                fenced = (fence[0], len(fence))
-            elif fence[0] == fenced[0] and len(fence) >= fenced[1]:
-                fenced = None
+        fenced, in_code = scan_code_fence(line, fenced)
         quoted = bool(quote_stack)
-        if not inside and marker is None:
+        if not in_code:
             for index, char in enumerate(line):
                 if quote_stack and char == quote_stack[-1]:
                     quote_stack.pop()
@@ -66,7 +67,7 @@ def chapter_sections(chapter_id: str, content: str, *, heading_levels: Mapping[i
                     quote_stack.append(quote_pairs[char])
                 elif char == '"' and (index == 0 or line[index - 1] != "\\"):
                     quote_stack.append(char)
-        rows.append((position, offset, value, inside or marker is not None or quoted))
+        rows.append((position, offset, value, in_code or quoted))
         position += len(line)
         offset += utf16_length(line)
     total_utf16 = offset
@@ -85,7 +86,8 @@ def chapter_sections(chapter_id: str, content: str, *, heading_levels: Mapping[i
         if heading_levels and offset in heading_levels:
             explicit.append((position, offset, value, "explicit"))
             continue
-        if not re.fullmatch(r"[\u4e00-\u9fff]{2,8}", value) or _UTTERANCE.search(value) or _SCENERY.search(value):
+        if (not re.fullmatch(r"[\u4e00-\u9fff]{2,8}", value) or _UTTERANCE.search(value)
+                or _SCENERY.search(value) or _ACTION_CLAUSE.search(value)):
             continue
         before, after = neighbors[i]
         # A title followed by another short line is usually a list, verse, or

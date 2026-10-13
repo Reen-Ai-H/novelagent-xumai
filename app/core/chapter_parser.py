@@ -21,6 +21,22 @@ def utf16_length(text: str) -> int:
     return sum(2 if ord(char) > 0xffff else 1 for char in text)
 
 
+def scan_code_fence(line: str, active: tuple[str, int] | None) -> tuple[tuple[str, int] | None, bool]:
+    """Shared fence state for imports and navigation; bool includes delimiters.
+
+    Opening info strings are allowed. Only a same-character marker at least
+    as long as the opener, followed entirely by whitespace, closes the block.
+    """
+    marker = re.match(r"^\s*(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
+    if active is not None:
+        if marker and marker[1][0] == active[0] and len(marker[1]) >= active[1] and not marker[2].strip():
+            return None, True
+        return active, True
+    if marker and not (marker[1][0] == "`" and "`" in marker[2]):
+        return (marker[1][0], len(marker[1])), True
+    return None, False
+
+
 def heading_number(value: str) -> int | None:
     """Parse decimal or Chinese integers without accepting malformed unit order."""
     value = value.strip().translate(str.maketrans("０１２３４５６７８９", "0123456789"))
@@ -129,15 +145,8 @@ def parse_document(filename: str, text: str, *, heading_levels: Mapping[int, int
     fence = None
     for i, line in enumerate(lines):
         positions.append(offset)
-        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
-        in_code = fence is not None
-        if marker:
-            value = marker.group(1)
-            if fence is None:
-                fence = (value[0], len(value))
-            elif value[0] == fence[0] and len(value) >= fence[1]:
-                fence = None
-        if in_code or marker:
+        fence, in_code = scan_code_fence(line, fence)
+        if in_code:
             headings[i] = None
         if heading_levels and offset in heading_levels and line.strip():
             heading = headings[i]
@@ -191,18 +200,27 @@ def parse_document(filename: str, text: str, *, heading_levels: Mapping[int, int
 
     first_chapter = next((i for i, h in enumerate(headings)
                           if h and h.kind in {"chapter", "section", "special", "markdown"} and i not in toc_lines), len(lines))
-    structured = any(h and h.kind in {"chapter", "special"} and i not in toc_lines
-                     for i, h in enumerate(headings))
-    markdown_level = min((h.level for i, h in enumerate(headings)
-                          if h and h.kind == "markdown" and i not in toc_lines), default=0)
-    chapter_level = min((h.level for i, h in enumerate(headings)
-                         if h and h.kind in {"chapter", "special"} and i not in toc_lines), default=0)
+    narrative = [h for i, h in enumerate(headings)
+                 if h and h.kind in {"chapter", "special", "section", "markdown"} and i not in toc_lines]
+    numbered = [h for h in narrative if h.kind in {"chapter", "special"}]
+    # Numbered chapters identify the chapter layer (e.g. H2 under a book H1).
+    # At that layer, unnumbered peers are chapters too. Without such anchors,
+    # use the outer declared layer across *all* heading kinds, including 节.
+    root_level = min((h.level for h in numbered), default=min((h.level for h in narrative if h.level), default=0))
+
+    def chapter_boundary(heading: Heading) -> bool:
+        if heading.kind not in {"chapter", "special", "section", "markdown"}:
+            return True
+        if root_level:
+            return heading.level == root_level
+        if numbered:
+            return heading.kind in {"chapter", "special"}
+        return heading.level == 0
+
     boundaries = [(i, h) for i, h in enumerate(headings)
                   if h and (i not in toc_lines or h.kind == "toc")
                   and (h.kind != "body" or i < first_chapter or i in toc_body_markers)
-                  and (h.kind != "section" or not structured)
-                  and (h.kind not in {"chapter", "special"} or not chapter_level or not h.level or h.level <= chapter_level)
-                  and (h.kind != "markdown" or (not structured and h.level == markdown_level))]
+                  and chapter_boundary(h)]
     fragments: list[str] = []
     parsed: list[tuple[Heading, str, int]] = []
     if not boundaries:

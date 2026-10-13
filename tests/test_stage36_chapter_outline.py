@@ -128,6 +128,38 @@ class ChapterOutlineTest(unittest.TestCase):
         self.assertEqual(len(parsed.chapters), 2)
         self.assertEqual(parsed.chapters[0].content, body)
 
+    def test_fence_closer_requires_whitespace_only_after_long_enough_marker(self):
+        for opener, invalid, closer in (("```text", "```仍是代码", "```"),
+                                       ("~~~~python", "~~~~~仍是代码", "~~~~"),
+                                       ("````json", "```", "`````  \t"),
+                                       ("~~~text", "```", "~~~~")):
+            with self.subTest(opener=opener, invalid=invalid):
+                body = f"开篇。\r\n{opener}\r\n{invalid}\r\n## 第九章 代码\r\n代码正文。\r\n{closer}\r\n"
+                parsed = parse_document("fence.md", "# 第一章 外部\r\n" + body + "# 第二章 真实\r\n尾段。")
+                self.assertEqual([c.title for c in parsed.chapters], ["第一章 外部", "第二章 真实"])
+                self.assertEqual(parsed.chapters[0].content, body)
+                sections = chapter_sections("c1", body + "## 真正的小节\r\n正文。")
+                self.assertEqual([s["title"] for s in sections], ["本章开篇", "真正的小节"])
+                self.assertEqual(sections[1]["start"], utf16_length(body))
+
+    def test_unclosed_fence_with_suffix_keeps_all_remaining_text_as_code(self):
+        text = "开篇。\n~~~python\n~~~~不算关闭\n## 仍在代码里\n末行。"
+        self.assertEqual([s["kind"] for s in chapter_sections("c1", text)], ["opening"])
+        parsed = parse_document("fence.md", "# 第一章\n" + text)
+        self.assertEqual(len(parsed.chapters), 1)
+        self.assertEqual(parsed.chapters[0].content, text)
+
+    def test_unmarked_action_clauses_do_not_become_sections(self):
+        paragraph = "林舟在渡口整理旧信，把每封信的来处和日期逐一记在册子里，等顾遥回来核对以后再决定下一程。"
+        for actions in (("抬头望去", "转身离开", "大步向前"),
+                        ("低头看信", "伸手接过", "小步后退"),
+                        ("缓缓推门", "悄悄走远", "快步走开")):
+            with self.subTest(actions=actions):
+                text = "\n".join([paragraph, actions[0], paragraph*2, actions[1], paragraph*2, actions[2], paragraph])
+                self.assertEqual([s["kind"] for s in chapter_sections("c1", text)], ["opening"])
+        explicit = "开篇。\n## 抬头望去\n正文。\n## 转身离开\n后文。"
+        self.assertEqual([s["title"] for s in chapter_sections("c1", explicit)], ["本章开篇", "抬头望去", "转身离开"])
+
 
 class OutlineApiTest(unittest.TestCase):
     setUp = api_fixture.IndependentApiTest.setUp
@@ -248,6 +280,40 @@ class OutlineApiTest(unittest.TestCase):
         self.assertEqual(body.count("外文。"), 1)
         self.assertTrue(body.endswith("  末行。  "))
         self.assertNotIn("#", body)
+
+    def test_unnumbered_parent_keeps_numbered_child_section_in_md_and_docx(self):
+        for suffix in ("md", "docx"):
+            with self.subTest(suffix=suffix):
+                source = ("# 远行\n开篇。\n## 第一节 密约\n甲。\n# 归来\n终段。\n" if suffix == "md" else
+                          docx(p("远行", '<w:pStyle w:val="Heading1"/>') + p("开篇。")
+                               + p("第一节 密约", '<w:pStyle w:val="Heading2"/>') + p("甲。")
+                               + p("归来", '<w:pStyle w:val="Heading1"/>') + p("终段。")))
+                project = self._project()
+                preview = self.preview(project, source, f"hierarchy.{suffix}")
+                self.assertEqual([c["title"] for c in preview["chapters"]], ["远行", "归来"])
+                expected = "开篇。\n" + ("## " if suffix == "md" else "") + "第一节 密约\n甲。\n"
+                self.assertEqual(preview["chapters"][0]["content"], expected)
+                self.assertEqual(preview["unrecognized_fragments"], [])
+                workspace = self.confirm(project, preview)
+                first = workspace["active_version"]["chapters"][0]
+                self.assertEqual(first["content"], expected)
+                self.assertEqual([s["title"] for s in workspace["chapter_sections"][first["chapter_id"]]], ["本章开篇", "第一节 密约"])
+
+    def test_mixed_numbering_at_same_level_keeps_both_chapters(self):
+        for suffix in ("md", "docx"):
+            for labels in (("远行", "第二章 归来"), ("第一章 远行", "归来")):
+                with self.subTest(suffix=suffix, labels=labels):
+                    source = (f"# {labels[0]}\n甲。\n# {labels[1]}\n乙。\n" if suffix == "md" else
+                              docx(p(labels[0], '<w:pStyle w:val="Heading1"/>') + p("甲。")
+                                   + p(labels[1], '<w:pStyle w:val="Heading1"/>') + p("乙。")))
+                    project = self._project()
+                    preview = self.preview(project, source, f"mixed.{suffix}")
+                    self.assertEqual([c["title"] for c in preview["chapters"]], list(labels))
+                    self.assertEqual([c["chapter_number"] for c in preview["chapters"]], [1, 2])
+                    self.assertEqual(preview["unrecognized_fragments"], [])
+                    workspace = self.confirm(project, preview)
+                    self.assertEqual([c["content"] for c in workspace["active_version"]["chapters"]],
+                                     ["甲。\n", "乙。\n" if suffix == "md" else "乙。"])
 
 
 if __name__ == "__main__":
