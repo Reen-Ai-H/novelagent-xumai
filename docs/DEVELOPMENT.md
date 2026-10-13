@@ -32,9 +32,9 @@ node --check frontend/app.js
 git diff --check
 ```
 
-阶段 28 的历史基线为 107 tests，阶段 31 为 135 tests；当前阶段 32 候选为 204 tests、0 failed、0 skipped。当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
+历史基线：阶段 28 为 107 tests，阶段 31 为 135 tests，阶段 32 候选为 204 tests。当前测试数量和结果以 `PROGRESS.md` 顶部的实际命令为准，不能把旧数字作为新阶段通过依据。任何测试减少、跳过或路由减少都应先停止交付并记录证据。
 
-有真实凭据的开发目录使用上述隔离入口，复制源码到临时目录、剥离模型环境变量并阻断网络；原始 unittest 命令仍用于干净 CI。阶段 34 当前结果以 `PROGRESS.md` 顶部为准。
+有真实凭据的开发目录使用上述隔离入口，复制源码到临时目录、剥离模型环境变量并阻断网络；原始 unittest 命令仍用于干净 CI。阶段 35 新增前端脚本也需分别执行 `node --check`：`deconstruction-report.js`、`report-browser.js`、`rule-report.js`。
 
 ## 代码和测试约定
 
@@ -76,6 +76,12 @@ git diff --check
 阶段 31E 的前端集成顺序固定为 `8028865` → `341bad8`，在阶段 31B 后分别落为 `d614118`、`be6fde2`；若需要回溯，保留这两个提交的父子关系，不使用并行草稿提交。
 
 阶段 32 的完成态响应必须同时满足 `analysis_contract_version="2.0"` 和 `report.report_version="2.0"`。验证时覆盖总览、六视角、roving tabs、筛选、当前证据精确定位、历史证据只读、修改后重建与刷新/重登；浏览器脚本使用隔离临时数据和禁止付费调用的 runtime。后端专项必须保留否定/拒绝/阻止/模态否定、双重与三重否定、稳定 ID、跨进程锁和 CAS 竞态回归。
+
+## 阶段 35 专项验证
+
+阶段 35 浏览器回归使用 `tests/browser_server.py` 的隔离数据与 fake runtime，覆盖 `browser_stage35_workspace_ui.cjs`、`browser_stage35_reading.cjs`、`browser_stage35_density.cjs`，并保留阶段 32/34 保存、来源与历史回归。合成样本只证明界面和合同，不证明文学质量；正文预览应逐字比较，不能用 `trim()` 隐藏空白变化。浏览器截图与测试现场不提交。
+
+新版规则升级必须验证旧报告和旧证据继续可读、显式新建、重复幂等、正文改变后不返回当前结果。规则和模型导入都不得按固定历史数量裁掉仍可引用的报告。保留历史会增加本地侧车体积；自动归档/清理不在本阶段实施。
 
 ## 发布边界
 
