@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import io
 import json
 from pathlib import Path
@@ -9,16 +10,17 @@ import tempfile
 import unittest
 import zipfile
 
-from app.core.deconstruction_depth import ChapterInput, DepthAnalysisEngine, DepthSnapshot
+from app.core.deconstruction_depth import ChapterInput, DepthAnalysisEngine, DepthSnapshot, RULE_ENGINE_REVISION
 from app.core.independent_service import IndependentWorkspaceService
 from app.core.independent_store import IndependentStore
 from app.core.project_store import JsonProjectStore
 from app.core.deconstruction_service import DeconstructionService
 from app.core.deconstruction_store import DeconstructionStore
-from app.core.person_recognition import discover_person_mentions
+from app.core.person_recognition import discover_person_mentions, assess_person_identities
 from app.agents.deconstruction_model import analysis_messages
 from schemas.independent import StoryArchive
-from schemas.deconstruction import DeconstructionResponse
+from schemas.deconstruction import DeconstructionResponse, DeconstructionDepthReport, validate_depth_report_source
+from pydantic import ValidationError
 
 
 MANY_NAMES = [surname + given for surname in "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨"
@@ -280,6 +282,214 @@ class RecognitionServiceTest(unittest.TestCase):
         preview = self.service.preview_import("project35", "account35", filename="synthetic.docx",
                                              content_base64=base64.b64encode(buffer.getvalue()).decode("ascii"))
         self.assertEqual(preview.chapters[0].content, "\n  欧阳明\t没有开门。\n次行。  ")
+
+
+class AuditRecognitionTest(unittest.TestCase):
+    def test_punctuation_in_first_and_middle_chapter_titles(self):
+        for marker in ("", "# "):
+            source = f"{marker}第一章 风，起\n甲。\n{marker}第二章 谁来了？\n乙。\n{marker}第三章 回声\n丙。"
+            chapters = IndependentWorkspaceService._parse_text("audit.md", source)[1]
+            self.assertEqual([c.title for c in chapters], ["第一章 风，起", "第二章 谁来了？", "第三章 回声"])
+            self.assertEqual([c.content for c in chapters], ["甲。\n", "乙。\n", "丙。"])
+
+    def test_toc_does_not_swallow_unlisted_prologue(self):
+        toc = "目录\n第一章 起点\n第二章 终点\n\n"
+        chapters, fragments = IndependentWorkspaceService._parse_text("audit.md", toc + "序章\n合成序。\n第一章 起点\n合成甲。\n第二章 终点\n合成乙。")[1:]
+        self.assertEqual([c.content for c in chapters], ["合成序。\n", "合成甲。\n", "合成乙。"])
+        self.assertEqual("".join(fragments), toc)
+
+    def test_special_titles_without_space(self):
+        chapters = IndependentWorkspaceService._parse_text("audit.md", "序章夜雨\n序。\n第一章 起点\n甲。\n尾声归途\n尾。")[1]
+        self.assertEqual([c.title for c in chapters], ["序章夜雨", "第一章 起点", "尾声归途"])
+        self.assertEqual([c.content for c in chapters], ["序。\n", "甲。\n", "尾。"])
+
+    def test_volume_toc_repeated_numbers_and_body_keyword(self):
+        source = "目录\n卷一 初见\n第一章 初见 ... 1\n第二章 告别 ... 9\n\n第一章 初见\n甲。\n正文\n中段。\n第二章 告别\n乙。"
+        chapters, fragments = IndependentWorkspaceService._parse_text("audit.md", source)[1:]
+        self.assertEqual([c.content for c in chapters], ["甲。\n正文\n中段。\n", "乙。"])
+        self.assertIn("卷一 初见", "".join(fragments))
+
+    def test_nested_docx_paragraphs_are_read_once(self):
+        xml = ('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+               '<w:p><w:r><w:t>第一章 起点</w:t></w:r></w:p><w:p><w:r><w:t>普通唯一。</w:t></w:r>'
+               '<w:r><w:pict><w:txbxContent><w:p><w:r><w:t>文本框唯一。</w:t></w:r></w:p></w:txbxContent>'
+               '</w:pict></w:r></w:p></w:body></w:document>')
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("word/document.xml", xml)
+        decoded = IndependentWorkspaceService._decode_docx(buffer.getvalue())
+        self.assertEqual(decoded, "第一章 起点\n普通唯一。\n文本框唯一。")
+
+    def test_objects_adverbs_pronouns_and_concepts_are_not_people(self):
+        texts = ["他找到出路。她看见落叶。我们寻找食物。众人遇见困难。大家保护环境。",
+                 "早已没有退路。恐怕不会回来。必须拿起武器。赶紧打开窗户。",
+                 "人物：我、大道、应当、本来我、仔细、画像。大道没有消失。"]
+        for text in texts:
+            with self.subTest(text=text):
+                candidate = engine([text])
+                self.assertEqual(candidate.names, [])
+                self.assertEqual(candidate.build().characters.characters, [])
+
+    def test_full_names_with_internal_predicate_characters(self):
+        for prefix in ("", "人物：段天问、陈自在、王不凡、张问天、李笑川、陈在山。"):
+            candidate = engine([prefix + "段天问拿起灯。陈自在打开门。王不凡拿灯。张问天没有开门。李笑川走远。陈在山拒绝离开。"])
+            self.assertEqual(set(candidate.names), {"段天问", "陈自在", "王不凡", "张问天", "李笑川", "陈在山"})
+            self.assertEqual({c.name for c in candidate.build().characters.characters}, set(candidate.names))
+
+    def test_aliases_require_direct_identity_evidence(self):
+        candidate = engine(["周砚字子安。他名叫舒。子安拿灯。舒救下孩子。"])
+        report = candidate.build()
+        characters = {c.name: c for c in report.characters.characters}
+        self.assertEqual(set(characters), {"周砚", "舒"})
+        self.assertEqual(characters["周砚"].aliases, ["子安"])
+        references = {e.evidence_id:e.excerpt for e in report.evidence}
+        self.assertTrue(any("周砚字子安" in references[key] for key in characters["周砚"].evidence_ids))
+        self.assertEqual(engine(["周砚说我叫子安。陆川说我也叫子安。"] ).names, ["周砚", "陆川"])
+
+    def test_shared_alias_does_not_merge_two_people(self):
+        candidate = engine(["周砚字子安。陆川字子安。周砚拿灯。陆川没有开门。"])
+        characters = candidate.build().characters.characters
+        self.assertEqual({c.name for c in characters}, {"周砚", "陆川"})
+        self.assertTrue(all(not c.aliases for c in characters))
+
+    def test_main_supporting_and_incidental_are_separate(self):
+        text = "\n".join(["周砚拿起灯，继续巡视。" for _ in range(160)] +
+                         ["赵路拿起纸。", "程陌救下孩子。", "父亲保护孩子。", "母亲拒绝交出钥匙。"])
+        profiles = {p.name:p for p in assess_person_identities(engine([text]).chapters)}
+        self.assertEqual(profiles["周砚"].importance, "main")
+        self.assertEqual(profiles["赵路"].importance, "incidental")
+        for name in ("程陌", "父亲", "母亲"):
+            self.assertEqual(profiles[name].importance, "supporting")
+        characters = engine([text]).build().characters.characters
+        self.assertEqual({c.name for c in characters}, {"周砚", "程陌", "父亲", "母亲"})
+
+    def test_short_source_keeps_ordinary_single_action_but_long_source_does_not(self):
+        self.assertEqual(engine(["周砚拿灯。"]).build().characters.characters[0].importance, "supporting")
+        long = "雨落在空庭。\n" * 500 + "周砚拿灯。"
+        result = engine([long]).build()
+        self.assertEqual(result.characters.characters, [])
+        self.assertEqual(result.characters.identity_candidates[0].name, "周砚")
+
+    def test_reading_units_group_continuation_and_split_explicit_transition(self):
+        text = "😀周砚拿起灯。\n周砚站在旧站。\n“等我。”周砚说。\n第二天，周砚没有开门。\n周砚拿起钥匙。"
+        candidate = engine([text])
+        report = candidate.build()
+        reading = report.plot.reading_segments
+        self.assertEqual(len(reading), 2)
+        self.assertEqual(reading[1].grouping_basis, "transition")
+        self.assertEqual(reading[0].paragraph_end, 3)
+        self.assertEqual(report.plot.overview.detail_event_count, len(report.plot.events))
+        assigned = [key for unit in reading for key in unit.event_ids]
+        self.assertEqual(len(assigned), len(set(assigned)))
+        self.assertEqual(set(assigned), {e.item_id for e in report.plot.events})
+        validate_depth_report_source(report, source=report.source, chapters={"c1":text})
+        for unit in reading:
+            raw = text.encode("utf-16-le")[unit.start_offset*2:unit.end_offset*2].decode("utf-16-le")
+            self.assertIn(unit.title, raw)
+            self.assertIn(unit.summary, raw)
+
+    def test_reading_projection_does_not_use_a_fixed_sentence_count(self):
+        for count in (2, 7, 25):
+            text = "周砚拿起灯。\n" * count
+            report = engine([text]).build()
+            self.assertEqual(len(report.plot.reading_segments), 1)
+            self.assertEqual(report.plot.reading_segments[0].paragraph_end, count)
+
+    def test_projection_rejects_missing_event_and_fabricated_summary(self):
+        text = "😀周砚没有开门。"
+        report = engine([text]).build()
+        data = report.model_dump()
+        data["plot"]["reading_segments"][0]["event_ids"] = []
+        with self.assertRaises(ValidationError):
+            DeconstructionDepthReport.model_validate(data)
+        altered = report.model_copy(deep=True)
+        altered.plot.reading_segments[0].summary = "凭空获胜。"
+        with self.assertRaises(ValueError):
+            validate_depth_report_source(altered, source=altered.source, chapters={"c1":text})
+
+    def test_arc_summary_uses_chapter_number_not_uuid(self):
+        candidate = engine(["周砚拿灯。", "周砚没有开门。"])
+        candidate.chapters = tuple(ChapterInput(f"opaque-{c.chapter_number}", c.chapter_number, c.title, c.content) for c in candidate.chapters)
+        # Construct the actual snapshot again so evidence uses the same opaque IDs.
+        report = DepthAnalysisEngine(DepthSnapshot("p", "d", "v", 1, "a"*64, candidate.chapters)).build()
+        self.assertIn("第1章到第2章", report.characters.characters[0].arc_summary)
+        self.assertNotIn("opaque-", report.characters.characters[0].arc_summary)
+
+    def test_model_prompt_has_coverage_and_semantic_evidence_checks(self):
+        prompt = analysis_messages([])[0]["content"]
+        for text in ("不设固定人数目标", "关键前因", "不同段落可能切换第一人称", "称名矛盾", "事前已经知情", "引文逐字存在不保证"):
+            self.assertIn(text, prompt)
+        self.assertNotIn("2–5 位", prompt)
+
+
+class RuleRevisionMigrationTest(unittest.TestCase):
+    setUp = RecognitionServiceTest.setUp
+    preview = RecognitionServiceTest.preview
+    def test_explicit_upgrade_preserves_old_result_and_is_idempotent(self):
+        deconstruction = DeconstructionService(independent=self.service,
+                                               store=DeconstructionStore(Path(self.tmp.name) / "deconstruction"))
+        self.service.deconstruction_service = deconstruction
+        preview = self.preview("第一章\n😀周砚没有开门。")
+        self.service.confirm_import("project35", "account35", preview.preview_id)
+        deconstruction.process_background_tasks()
+        source = deconstruction._source("project35", "account35")
+        record = deconstruction.store.load("project35")
+        current = record.documents[0]
+        legacy = current.model_copy(deep=True, update={"document_id":"legacy35", "report":None,
+                                                      "evidence":[], "engine_revision":None})
+        deconstruction._build_document(source, legacy)
+        legacy.engine_revision = None
+        legacy.report.engine_revision = None
+        legacy.report.plot.reading_segments = []
+        legacy.report.plot.overview = None
+        record.documents = [legacy]
+        record.active_document_id = legacy.document_id
+        deconstruction.store.save(record)
+        frozen = legacy.model_dump(mode="json")
+        author_path = Path(self.tmp.name) / "independent/project35.json"
+        author_bytes = author_path.read_bytes()
+        before = DeconstructionResponse.model_validate(deconstruction.read("project35", "account35"))
+        self.assertTrue(before.update_available)
+        self.assertTrue(before.actions.rebuild)
+        self.assertEqual(before.effective_status, "rebuild_required")
+        self.assertEqual(before.error.code, "engine_update_available")
+        self.assertEqual(before.required_engine_revision, RULE_ENGINE_REVISION)
+        self.assertIsNotNone(before.result)
+        self.assertTrue(before.result.read_only)
+        self.assertEqual(before.result.document_id, legacy.document_id)
+        self.assertIsNone(before.document)
+        pending = DeconstructionResponse.model_validate(deconstruction._response(replace(source, pending_changes=True), record))
+        self.assertIsNone(pending.result)
+        stale = DeconstructionResponse.model_validate(deconstruction._response(replace(source, source_hash="b"*64), record))
+        self.assertEqual(stale.effective_status, "stale")
+        self.assertIsNone(stale.result)
+        unknown_revision = before.model_copy(deep=True)
+        unknown_revision.required_engine_revision = None
+        unknown_revision.deconstruction.required_engine_revision = None
+        with self.assertRaises(ValidationError):
+            DeconstructionResponse.model_validate(unknown_revision.model_dump())
+        self.assertEqual(before.source.hash, source.source_hash)
+        self.assertEqual(deconstruction.store.load("project35").documents[0].model_dump(mode="json"), frozen)
+        first = deconstruction.enqueue_for_project("project35", "account35", idempotency_key="refresh-one")
+        duplicate = deconstruction.enqueue_for_project("project35", "account35", idempotency_key="refresh-two")
+        self.assertNotEqual(first.document_id, legacy.document_id)
+        self.assertEqual(first.document_id, duplicate.document_id)
+        deconstruction.process_background_tasks()
+        completed = DeconstructionResponse.model_validate(deconstruction.read("project35", "account35"))
+        self.assertEqual(completed.effective_status, "completed")
+        self.assertFalse(completed.update_available)
+        self.assertEqual(completed.result.engine_revision, RULE_ENGINE_REVISION)
+        self.assertEqual(deconstruction.enqueue_for_project("project35", "account35").document_id, first.document_id)
+        stored = deconstruction.store.load("project35")
+        self.assertEqual(len(stored.documents), 2)
+        self.assertEqual(stored.documents[0].model_dump(mode="json"), frozen)
+        old_ref = legacy.evidence[0]
+        evidence = deconstruction.evidence("project35", "account35", old_ref.evidence_id, document_id=legacy.document_id)
+        self.assertTrue(evidence["historical"])
+        self.assertTrue(evidence["chapter"]["read_only"])
+        self.assertFalse(evidence["source_matches_current"])
+        self.assertEqual(evidence["evidence"]["excerpt"], old_ref.excerpt)
+        self.assertEqual(author_path.read_bytes(), author_bytes)
 
 
 if __name__ == "__main__":

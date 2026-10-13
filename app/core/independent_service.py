@@ -442,12 +442,24 @@ class IndependentWorkspaceService:
 
         namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
         paragraphs: list[str] = []
-        for paragraph in root.iter(f"{namespace}p"):
-            parts = [node.text or "" if node.tag == f"{namespace}t" else
-                     "\t" if node.tag == f"{namespace}tab" else "\n"
-                     for node in paragraph.iter()
-                     if node.tag in {f"{namespace}t", f"{namespace}tab", f"{namespace}br", f"{namespace}cr"}]
-            paragraphs.append("".join(parts))
+
+        def visit(node: ElementTree.Element, parts: list[str] | None = None) -> None:
+            if node.tag == f"{namespace}p":
+                own_parts: list[str] = []
+                # Reserve reading order before visiting nested textbox paragraphs.
+                slot = len(paragraphs)
+                paragraphs.append("")
+                for child in node:
+                    visit(child, own_parts)
+                paragraphs[slot] = "".join(own_parts)
+            elif parts is not None and node.tag in {f"{namespace}t", f"{namespace}tab", f"{namespace}br", f"{namespace}cr"}:
+                parts.append((node.text or "") if node.tag == f"{namespace}t" else
+                             "\t" if node.tag == f"{namespace}tab" else "\n")
+            else:
+                for child in node:
+                    visit(child, parts)
+
+        visit(root)
         return "\n".join(paragraphs)
 
     @staticmethod

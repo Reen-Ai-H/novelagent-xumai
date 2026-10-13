@@ -73,7 +73,7 @@ def recognize_heading(line: str) -> Heading | None:
     if re.fullmatch(r"目录|目次|contents|table of contents|正文", cleaned, re.I):
         return Heading(cleaned, "body" if cleaned == "正文" else "toc")
     # A prose sentence mentioning 第X章/回 must not consume the whole line.
-    if len(cleaned) > 80 or re.search(r"[。；;，,！？!?“”「」]", cleaned):
+    if len(cleaned) > 80:
         return None
     match = re.match(rf"^第\s*({_NUM})\s*([章节回卷])(.*)$", cleaned)
     if match:
@@ -82,14 +82,21 @@ def recognize_heading(line: str) -> Heading | None:
         # Concatenated short titles occur in TXT novels, but grammatical
         # continuations such as 第一章里 / 第一次见面 must stay in the body.
         prose_tail = re.match(r"^(?:里|中|内|的|时|讲述|写着|提到|见面|见到|遇见)", tail)
-        if number is not None and number > 0 and not prose_tail:
+        prose_sentence = not markdown and (bool(re.search(r"[。；;]", tail))
+                         or (not re.match(r"^[\s:：、.．\-—]", tail) and bool(re.search(r"[，,]", tail))))
+        if number is not None and number > 0 and not prose_tail and not prose_sentence:
             return Heading(cleaned, "volume" if match.group(2) == "卷" else "chapter", number)
     match = re.match(rf"^(chapter|volume|book)\s+({_NUM})(?=$|[\s:：.\-])", cleaned, re.I)
     if match:
         number = heading_number(match.group(2))
         if number is not None and number > 0:
             return Heading(cleaned, "chapter" if match.group(1).lower() == "chapter" else "volume", number)
-    if re.match(r"^(序章|楔子|序幕|尾声|终章|后记|prologue|epilogue)(?=$|[\s:：\-])", cleaned, re.I):
+    match = re.match(rf"^卷\s*({_NUM})(.*)$", cleaned)
+    if match and (number := heading_number(match.group(1))) and not re.search(r"[。；;]", cleaned):
+        return Heading(cleaned, "volume", number)
+    if re.match(r"^(序章|楔子|序幕|尾声|终章|后记)", cleaned) and not re.search(r"[。；;]", cleaned):
+        return Heading(cleaned, "special")
+    if re.match(r"^(prologue|epilogue)(?=$|[\s:：\-])", cleaned, re.I):
         return Heading(cleaned, "special")
     if markdown:
         match = re.match(rf"^({_NUM})[、.．:：]?\s+", cleaned)
@@ -103,8 +110,15 @@ def parse_document(filename: str, text: str) -> ParsedDocument:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.splitlines(keepends=True)
     headings = [recognize_heading(line) for line in lines]
+    next_nonblank_lines: list[int | None] = [None] * len(lines)
+    following = None
+    for i in range(len(lines) - 1, -1, -1):
+        next_nonblank_lines[i] = following
+        if lines[i].strip():
+            following = i
     toc_lines: set[int] = set()
     in_toc, seen = False, set()
+    toc_body_markers: set[int] = set()
 
     def entry_key(heading: Heading):
         # Page leaders and page numbers are TOC formatting, not identity.
@@ -118,7 +132,13 @@ def parse_document(filename: str, text: str) -> ParsedDocument:
             continue
         if not in_toc:
             continue
-        if heading and (heading.kind == "body" or entry_key(heading) in seen):
+        next_nonblank = next_nonblank_lines[index]
+        followed_by_body = (heading and next_nonblank is not None and not headings[next_nonblank]
+                            and not re.match(r"^[-*]\s*\[", lines[next_nonblank].strip()))
+        if heading and (heading.kind == "body" or followed_by_body
+                        or (heading.kind == "volume" and entry_key(heading) in seen)):
+            if heading.kind == "body":
+                toc_body_markers.add(index)
             in_toc = False
             continue
         # Page leaders / Markdown TOC links are not narrative headings.
@@ -135,12 +155,15 @@ def parse_document(filename: str, text: str) -> ParsedDocument:
         else:
             in_toc = False
 
+    first_chapter = next((i for i, h in enumerate(headings)
+                          if h and h.kind in {"chapter", "special", "markdown"} and i not in toc_lines), len(lines))
     structured = any(h and h.kind in {"chapter", "special"} and i not in toc_lines
                      for i, h in enumerate(headings))
     markdown_level = min((h.level for i, h in enumerate(headings)
                           if h and h.kind == "markdown" and i not in toc_lines), default=0)
     boundaries = [(i, h) for i, h in enumerate(headings)
                   if h and (i not in toc_lines or h.kind == "toc")
+                  and (h.kind != "body" or i < first_chapter or i in toc_body_markers)
                   and (h.kind != "markdown" or (not structured and h.level == markdown_level))]
     fragments: list[str] = []
     parsed: list[tuple[Heading, str]] = []
@@ -151,7 +174,7 @@ def parse_document(filename: str, text: str) -> ParsedDocument:
             parsed.append((Heading(Path(filename).stem or "第一章", "chapter", 1), normalized))
     else:
         preamble = "".join(lines[:boundaries[0][0]])
-        if preamble.strip():
+        if preamble:
             fragments.append(preamble)
         for position, (start, heading) in enumerate(boundaries):
             end = boundaries[position + 1][0] if position + 1 < len(boundaries) else len(lines)

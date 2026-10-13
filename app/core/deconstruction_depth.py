@@ -14,7 +14,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 import re
 from typing import Iterable
-from app.core.person_recognition import discover_person_names
+from app.core.person_recognition import assess_person_identities
+from app.core.reading_projection import reading_segments
 
 from schemas.deconstruction import (
     DeconstructionDepthReport,
@@ -38,6 +39,7 @@ from schemas.deconstruction import (
 
 
 MAX_EVIDENCE_EXCERPT = 180
+RULE_ENGINE_REVISION = "stage35.relevance.1"
 
 
 @dataclass(frozen=True)
@@ -242,7 +244,9 @@ class DepthAnalysisEngine:
         self.foreshadow_candidates: list[tuple[str, _EventMeta, _EventMeta, str]] = []
 
     def _discover_names(self) -> list[str]:
-        return discover_person_names(self.chapters, self.snapshot.character_names)
+        self.identities = assess_person_identities(self.chapters, self.snapshot.character_names)
+        self.selected_names = [p.name for p in self.identities if p.importance != "incidental"]
+        return [p.name for p in self.identities]
 
     _negation_markers = (
         "并没有", "没有", "未曾", "未能", "并未", "从未", "不曾", "并不", "并非",
@@ -587,7 +591,8 @@ class DepthAnalysisEngine:
                         f"{chapter.chapter_id}:{start}:{end}",
                     )
                     evidence_id = self.evidence.span(chapter, start, end, "事件片段")
-                    names = [name for name in self.names if name in raw]
+                    names = [p.name for p in self.identities if p.name in self.selected_names
+                             and any(spelling in raw for spelling in (p.name, *p.aliases))]
                     terms = self._extract_terms(raw)
                     negative = self._event_is_negative(raw)
                     if temporal_mode == "linear":
@@ -731,7 +736,7 @@ class DepthAnalysisEngine:
         characters: list[DepthCharacter] = []
         states: list[DepthCharacterState] = []
         relations: list[DepthRelation] = []
-        if not self.names:
+        if not self.selected_names:
             return (
                 characters,
                 states,
@@ -742,9 +747,10 @@ class DepthAnalysisEngine:
 
         character_ids = {
             name: depth_stable_id(self.source, "character", f"name:{name}")
-            for name in self.names
+            for name in self.selected_names
         }
-        for name in self.names:
+        for name in self.selected_names:
+            identity = next(p for p in self.identities if p.name == name)
             related_events = [event for event in self.events if name in event.names]
             chapter_ids = _unique([event.chapter.chapter_id for event in related_events])
             if not chapter_ids:
@@ -752,11 +758,17 @@ class DepthAnalysisEngine:
             evidence_ids: list[str] = []
             for chapter_id in chapter_ids:
                 chapter = next(item for item in self.chapters if item.chapter_id == chapter_id)
-                position = chapter.content.find(name)
-                if position >= 0:
+                mention = next((m for m in identity.mentions if m.chapter_id == chapter_id), None)
+                if mention is not None:
                     evidence_ids.append(
-                        self.evidence.span(chapter, position, position + len(name), "人物称谓")
+                        self.evidence.span(chapter, mention.start, mention.start + len(mention.spelling or name), "人物称谓")
                     )
+            for chapter_id, start, end in identity.definition_spans:
+                chapter = next(c for c in self.chapters if c.chapter_id == chapter_id)
+                if chapter_id not in chapter_ids:
+                    chapter_ids.append(chapter_id)
+                evidence_ids.append(self.evidence.span(chapter, start, end, "明确姓名与别名声明"))
+            chapter_ids.sort(key=lambda key: next(c.chapter_number for c in self.chapters if c.chapter_id == key))
             first_action = related_events[0].action if related_events else ""
             motivation = (
                 f"正文显示{name}在行动上关注{_clip(first_action, 80)}。"
@@ -796,12 +808,16 @@ class DepthAnalysisEngine:
                 DepthCharacter.model_validate({
                     **common,
                     "name": name,
-                    "aliases": [],
+                    "aliases": list(identity.aliases),
+                    "importance": identity.importance,
+                    "importance_reason": identity.importance_reason,
+                    "mention_count": identity.mention_count,
+                    "identity_confidence": identity.identity_confidence,
                     "role": role,
                     "motivation": motivation,
                     "inner_conflict": inner_conflict,
                     "arc_summary": (
-                        f"从第{chapter_ids[0]}相关片段到末次出现，"
+                        f"从第{related_events[0].chapter.chapter_number}章到第{related_events[-1].chapter.chapter_number}章，"
                         f"可观察到{name}持续参与正文推进；完整人物弧尚未完全展开。"
                     ),
                 })
@@ -819,11 +835,15 @@ class DepthAnalysisEngine:
                     event.evidence_id for event in chapter_events[:4] if event.evidence_id
                 ]
                 if not chapter_evidence:
-                    position = chapter.content.find(name)
-                    if position >= 0:
+                    mention = next((m for m in identity.mentions if m.chapter_id == chapter_id), None)
+                    if mention is not None:
                         chapter_evidence = [
-                            self.evidence.span(chapter, position, position + len(name), "人物状态")
+                            self.evidence.span(chapter, mention.start, mention.start + len(mention.spelling or name), "人物状态")
                         ]
+                    elif identity.definition_spans:
+                        declaration = next((span for span in identity.definition_spans if span[0] == chapter_id), None)
+                        if declaration:
+                            chapter_evidence = [self.evidence.span(chapter, declaration[1], declaration[2], "人物身份声明")]
                 state_id = depth_stable_id(
                     self.source, "character-state", f"{name}:{chapter_id}",
                 )
@@ -1617,6 +1637,7 @@ class DepthAnalysisEngine:
         rhythm_items, rhythm_summary = self._rhythm_view()
         reader_items, reader_summary = self._reader_view()
         technique_items, technique_summary = self._technique_view()
+        reading = reading_segments(self.source, self.chapters, self.events, self.identities, self.evidence)
 
         chapters = [
             DepthChapter(
@@ -1635,6 +1656,7 @@ class DepthAnalysisEngine:
             raise ValueError("depth report requires source evidence")
         report = DeconstructionDepthReport.model_validate({
             "report_version": "2.0",
+            "engine_revision": RULE_ENGINE_REVISION,
             "source": self.source,
             "chapters": chapters,
             "evidence": list(self.evidence.items.values()),
@@ -1644,6 +1666,10 @@ class DepthAnalysisEngine:
                 "characters": characters,
                 "states": character_states,
                 "relations": character_relations,
+                "identity_candidates": [{"name": p.name, "aliases": list(p.aliases), "mention_count": p.mention_count,
+                                         "paragraph_count": p.paragraph_count, "identity_confidence": p.identity_confidence,
+                                         "importance": p.importance, "importance_reason": p.importance_reason}
+                                        for p in self.identities],
             },
             "plot": {
                 "summary": plot_summary,
@@ -1651,6 +1677,10 @@ class DepthAnalysisEngine:
                 "plotlines": plotlines,
                 "events": event_models,
                 "relations": plot_relations,
+                "overview": {"summary": f"当前{len(self.chapters)}章按来源组织为{len(reading)}个阅读段落，保留{len(event_models)}个细节事件供核对。",
+                             "reading_segment_count": len(reading), "detail_event_count": len(event_models),
+                             "uncertainty": ["规则投影不等同于经过语义审阅的主剧情。"]},
+                "reading_segments": reading,
             },
             "foreshadowing": {
                 "summary": foreshadowing_summary,

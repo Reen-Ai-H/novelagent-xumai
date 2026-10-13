@@ -16,14 +16,14 @@ from datetime import datetime, timezone
 from threading import RLock
 from typing import Any
 
-from app.core.deconstruction_depth import ChapterInput, DepthAnalysisEngine, DepthSnapshot
+from app.core.deconstruction_depth import ChapterInput, DepthAnalysisEngine, DepthSnapshot, RULE_ENGINE_REVISION
 from app.core.deconstruction_store import (
     DeconstructionStore,
     DeconstructionStoreConflict,
     DeconstructionStoreError,
 )
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
-from app.core.person_recognition import discover_person_names
+from app.core.person_recognition import assess_person_identities
 from app.core.project_lock import ProjectLockError
 from app.core.character_aggregation import CharacterReportSlice, aggregate_character_slices
 from schemas.analysis_report import AnalysisImport, AnalysisRequest, AnalysisReport
@@ -244,7 +244,14 @@ class DeconstructionService:
             return "rebuild_required"
         if not self._doc_matches(source, doc):
             return "stale"
+        if self._engine_update_available(doc):
+            return "rebuild_required"
         return doc.status
+
+    @staticmethod
+    def _engine_update_available(doc: DeconstructionDocument | None) -> bool:
+        return bool(doc and doc.analysis_contract_version == "2.0" and doc.status == "completed"
+                    and doc.engine_revision != RULE_ENGINE_REVISION)
 
     @staticmethod
     def _pick_focus_document(record: DeconstructionProjectRecord | None) -> DeconstructionDocument | None:
@@ -404,6 +411,7 @@ class DeconstructionService:
                 "source_revision",
                 "source_hash",
                 "analysis_contract_version",
+                "engine_revision",
                 "retry_count",
                 "analysis_label",
                 "created_at",
@@ -484,6 +492,7 @@ class DeconstructionService:
     ) -> dict[str, object]:
         active = focus if focus is not None else self._pick_focus_document(record)
         source_match = bool(active is not None and self._doc_matches(source, active))
+        update_available = self._engine_update_available(active)
         status: DeconstructionStatus
         if force_status is not None:
             status = force_status
@@ -497,7 +506,7 @@ class DeconstructionService:
             empty_reason = empty_reason or "当前还没有可展示的作品拆解，请先生成或导入一卷拆解。"
         elif not source_match:
             status = "stale"
-        elif active.analysis_contract_version == "1.0" and active.status == "completed":
+        elif (active.analysis_contract_version == "1.0" and active.status == "completed") or update_available:
             # A completed stage-31 overview is historical compatibility data,
             # not a stage-32 six-view result. Keep it active in history while
             # requiring an explicit 2.0 rebuild.
@@ -526,6 +535,10 @@ class DeconstructionService:
             )
             retryable = False
             error_code = "source_stale" if status == "stale" else "pending_changes"
+            if status == "rebuild_required" and update_available and not source.pending_changes:
+                current_stage = "有新版识别可用"
+                error_message = "新版人物与阅读段落规则已可用；显式更新会生成新报告，并保留原报告和历史证据。"
+                error_code = "engine_update_available"
         else:
             progress = active.progress_percent if active else 0
             current_stage = active.current_stage if active else "等待拆解"
@@ -543,7 +556,11 @@ class DeconstructionService:
             retry=status == "failed_retryable",
             rebuild=status in {"stale", "rebuild_required", "empty"} and source.sufficient and not source.pending_changes,
         )
-        result_model = self._result(active, source_match, effective_status=status)
+        show_legacy_upgrade = bool(status == "rebuild_required" and update_available and source_match
+                                   and not source.pending_changes and active and self._whole_matches(source, active))
+        result_model = self._result(active, source_match, effective_status="completed" if show_legacy_upgrade else status)
+        if show_legacy_upgrade and result_model is not None:
+            result_model.read_only = True
         active_run = None
         if active is not None:
             active_run = DeconstructionActiveRun(
@@ -555,6 +572,7 @@ class DeconstructionService:
                 retry_count=active.retry_count,
                 idempotency_key=active.idempotency_key,
                 analysis_contract_version=active.analysis_contract_version,
+                engine_revision=active.engine_revision,
                 analysis_label=active.analysis_label,
                 created_at=active.created_at,
                 updated_at=active.updated_at,
@@ -574,6 +592,9 @@ class DeconstructionService:
             result=result_model,
             actions=actions_model,
             error=error_model,
+            update_available=update_available,
+            engine_revision=active.engine_revision if active else None,
+            required_engine_revision=RULE_ENGINE_REVISION if active is None or active.analysis_contract_version != "model.1" else None,
         )
         public_active = (
             self._public_document(active)
@@ -587,6 +608,9 @@ class DeconstructionService:
             "title": source.title,
             "mode": "independent",
             "effective_status": status,
+            "update_available": canonical.update_available,
+            "engine_revision": canonical.engine_revision,
+            "required_engine_revision": canonical.required_engine_revision,
             "run_status": run_status,
             "source_match": source_match,
             "progress": progress_model.model_dump(mode="json"),
@@ -920,6 +944,7 @@ class DeconstructionService:
                         item
                         for item in record.documents
                         if item.analysis_contract_version == "2.0"
+                        and item.engine_revision == RULE_ENGINE_REVISION
                         and item.source_version_id == source.version_id
                         and item.source_revision == source.source_revision
                         and item.source_hash == source.source_hash
@@ -944,7 +969,7 @@ class DeconstructionService:
 
                 now = self._now()
                 document_id = self._slug(
-                    f"deconstruction:2.0:{project_id}:{source.version_id}:"
+                    f"deconstruction:2.0:{RULE_ENGINE_REVISION}:{project_id}:{source.version_id}:"
                     f"{source.source_revision}:{source.source_hash}"
                 )
                 document = DeconstructionDocument(
@@ -959,11 +984,11 @@ class DeconstructionService:
                     current_stage="等待拆解",
                     idempotency_key=idempotency_key or document_id,
                     analysis_contract_version="2.0",
+                    engine_revision=RULE_ENGINE_REVISION,
                     created_at=now,
                     updated_at=now,
                 )
                 record.documents.append(document)
-                record.documents = record.documents[-MAX_HISTORY:]
                 record.active_document_id = document.document_id
                 record.updated_at = now
                 self.store.save_if_revision(record, record.record_revision)
@@ -1123,7 +1148,8 @@ class DeconstructionService:
         return None
 
     def _character_names_for_chapter(self, source: _Source, chapter: _SourceChapter) -> list[str]:
-        return discover_person_names([chapter], source.character_names)
+        return [p.name for p in assess_person_identities(source.analysis_chapters, source.character_names)
+                if p.importance != "incidental" and any(m.chapter_id == chapter.chapter_id for m in p.mentions)]
 
     def _chapter_function(self, index: int, total: int, text: str) -> str:
         if total == 1:
@@ -1328,7 +1354,7 @@ class DeconstructionService:
         )
 
         character_candidates: list[DeconstructionCandidate] = []
-        all_names = discover_person_names(chapters, source.character_names)
+        all_names = [p.name for p in assess_person_identities(chapters, source.character_names) if p.importance != "incidental"]
         for name in all_names:
             chapter = next(
                 (item for item in chapters if name in item.content),
@@ -1413,6 +1439,7 @@ class DeconstructionService:
         document.chapter_breakdowns = chapter_breakdowns
         deduplicated: dict[str, EvidenceRef] = {item.evidence_id: item for item in evidence}
         if document.analysis_contract_version == "2.0":
+            document.engine_revision = RULE_ENGINE_REVISION
             assert source.version_id is not None and source.source_hash is not None
             snapshot = DepthSnapshot(
                 project_id=source.project_id,
@@ -1731,6 +1758,7 @@ class DeconstructionService:
             active is not None
             and active.status == "completed"
             and active.analysis_contract_version == "2.0"
+            and active.engine_revision == RULE_ENGINE_REVISION
             and self._document_matches_source(active, source)
         )
         current_scope_ids = {item["document_id"] for item in self._volumes(source, record) if item["match"]}
