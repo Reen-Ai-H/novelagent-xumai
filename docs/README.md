@@ -1,6 +1,6 @@
 # 叙脉文档索引
 
-> 当前实施更新为 [阶段 35 · 独立创作体验与识别优化](goals/STAGE_35_INDEPENDENT_EXPERIENCE.md)。用户确认的管理方式、范围与协作见 DECISIONS 顶部；阶段 34 保留为继承基线，真实内容未通过的结论仍待验证。
+> 当前实施为 [阶段 36 · 工作台减法与结构化阅读](goals/STAGE_36_VISUAL_READING.md)，落实Notion验收反馈：人物/剧情图形阅读、章内目录、隐藏历史恢复入口。阶段35是继承基线；用户认可主配区分，不代表界面和导入已验收。研究依据见[图形阅读设计](research/STAGE_36_VISUAL_READING_2026-10-13.md)。
 
 阶段 35 的外部机制参考、真实问题与受控试跑口径见 [识别与阅读组织](research/STAGE_35_RECOGNITION_AND_READING_2026-10-13.md)。
 
