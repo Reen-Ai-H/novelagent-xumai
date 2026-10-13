@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
@@ -107,6 +108,7 @@ class DeconstructionOverview(BaseModel):
     chapter_count: int = Field(default=0, ge=0)
     structure_units: list[str] = Field(default_factory=list, max_length=40)
     main_character_candidates: list[DeconstructionCandidate] = Field(default_factory=list, max_length=30)
+    recognized_character_count: int | None = Field(default=None, ge=0)
     core_conflict_candidates: list[DeconstructionCandidate] = Field(default_factory=list, max_length=20)
     opening: DeconstructionObservation = Field(default_factory=DeconstructionObservation)
     development: DeconstructionObservation = Field(default_factory=DeconstructionObservation)
@@ -130,6 +132,7 @@ class TimelineNode(BaseModel):
     event: str = Field(default="", max_length=600)
     narrative_function: str = Field(default="不确定", max_length=160)
     characters: list[str] = Field(default_factory=list, max_length=30)
+    recognized_character_count: int | None = Field(default=None, ge=0)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     uncertainty: list[str] = Field(default_factory=list, max_length=8)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=8)
@@ -285,6 +288,20 @@ class DepthCharacter(DepthAnalysisItem):
     motivation: DepthText
     inner_conflict: DepthText
     arc_summary: DepthText
+    importance: Literal["main", "supporting"] | None = None
+    importance_reason: str = ""
+    mention_count: int | None = Field(default=None, ge=0)
+    identity_confidence: DepthScore | None = None
+
+
+class DepthIdentityCandidate(DepthModel):
+    name: DepthName
+    aliases: list[str] = Field(default_factory=list)
+    mention_count: int = Field(ge=0)
+    paragraph_count: int = Field(ge=0)
+    identity_confidence: DepthScore
+    importance: Literal["main", "supporting", "incidental"]
+    importance_reason: DepthText
 
 
 class DepthCharacterState(DepthAnalysisItem):
@@ -419,12 +436,48 @@ class DepthCharactersView(DepthView):
     characters: list[DepthCharacter] = Field(default_factory=list, max_length=500)
     states: list[DepthCharacterState] = Field(default_factory=list, max_length=5000)
     relations: list[DepthRelation] = Field(default_factory=list, max_length=5000)
+    identity_candidates: list[DepthIdentityCandidate] = Field(default_factory=list)
+
+
+class DepthReadingSegment(DepthModel):
+    segment_id: DepthID
+    title: DepthTitle
+    summary: DepthText
+    chapter_id: DepthID
+    chapter_number: int = Field(ge=1)
+    start_offset: int = Field(ge=0)
+    end_offset: int = Field(ge=0)
+    offset_unit: Literal["utf16_code_unit"] = "utf16_code_unit"
+    paragraph_start: int = Field(ge=1)
+    paragraph_end: int = Field(ge=1)
+    normalized_start: DepthProgress
+    normalized_end: DepthProgress
+    character_ids: list[DepthID] = Field(default_factory=list)
+    event_ids: list[DepthID] = Field(default_factory=list)
+    evidence_ids: list[DepthID] = Field(min_length=1)
+    grouping_basis: Literal["chapter", "paragraph", "transition"]
+    uncertainty: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.start_offset >= self.end_offset or self.paragraph_start > self.paragraph_end or self.normalized_start > self.normalized_end:
+            raise ValueError("reading segment range is reversed or empty")
+        return self
+
+
+class DepthPlotOverview(DepthModel):
+    summary: DepthText
+    reading_segment_count: int = Field(ge=0)
+    detail_event_count: int = Field(ge=0)
+    uncertainty: list[str] = Field(default_factory=list)
 
 
 class DepthPlotView(DepthView):
     plotlines: list[DepthPlotline] = Field(default_factory=list, max_length=500)
     events: list[DepthEvent] = Field(default_factory=list, max_length=10000)
     relations: list[DepthRelation] = Field(default_factory=list, max_length=10000)
+    overview: DepthPlotOverview | None = None
+    reading_segments: list[DepthReadingSegment] = Field(default_factory=list)
 
 
 class DepthForeshadowingView(DepthView):
@@ -447,6 +500,7 @@ class DepthTechniqueView(DepthView):
 
 class DeconstructionDepthReport(DepthModel):
     report_version: Literal["2.0"]
+    engine_revision: str | None = Field(default=None, max_length=80)
     source: DepthSource
     chapters: list[DepthChapter] = Field(min_length=1, max_length=5000)
     evidence: list[DepthEvidence] = Field(min_length=1, max_length=20000)
@@ -495,6 +549,62 @@ class DeconstructionDepthReport(DepthModel):
         items = self.analysis_items()
         unique([i.item_id for i in items], "analysis id")
         index = {i.item_id: i for i in items}
+
+        if self.engine_revision and (not self.plot.reading_segments or self.plot.overview is None):
+            raise ValueError("versioned rule report requires a complete reading projection")
+        total_utf16 = sum(c.utf16_length for c in self.chapters)
+        chapter_offsets = {}
+        consumed = 0
+        for chapter in self.chapters:
+            chapter_offsets[chapter.chapter_id] = consumed
+            consumed += chapter.utf16_length
+
+        unique([s.segment_id for s in self.plot.reading_segments], "reading segment id")
+        covered_events: list[str] = []
+        previous_segment = None
+        for segment in self.plot.reading_segments:
+            chapter = chapters.get(segment.chapter_id)
+            if chapter is None or chapter.chapter_number != segment.chapter_number or segment.end_offset > chapter.utf16_length:
+                raise ValueError("reading segment source range is invalid")
+            if not chapter.normalized_start <= segment.normalized_start <= segment.normalized_end <= chapter.normalized_end:
+                raise ValueError("reading segment progress is outside chapter")
+            expected_start = round((chapter_offsets[segment.chapter_id] + segment.start_offset) / total_utf16 * 100, 6) if total_utf16 else 0
+            expected_end = round((chapter_offsets[segment.chapter_id] + segment.end_offset) / total_utf16 * 100, 6) if total_utf16 else 0
+            if segment.normalized_start != expected_start or segment.normalized_end != expected_end:
+                raise ValueError("reading progress does not match source offsets")
+            if previous_segment and (segment.chapter_number < previous_segment.chapter_number
+                                    or (segment.chapter_id == previous_segment.chapter_id and segment.start_offset < previous_segment.end_offset)):
+                raise ValueError("reading segments overlap or reverse source order")
+            previous_segment = segment
+            for ids, kind in ((segment.event_ids, "event"), (segment.character_ids, "character")):
+                unique(ids, "reading segment reference")
+                if any(key not in index or index[key].kind != kind or segment.chapter_id not in index[key].chapter_ids for key in ids):
+                    raise ValueError("reading segment has invalid typed reference")
+            event_people = set()
+            for key in segment.event_ids:
+                event = index[key]
+                if event.chapter_ids != [segment.chapter_id] or not event.evidence_ids:
+                    raise ValueError("reading event requires local source evidence")
+                for evidence_id in event.evidence_ids:
+                    ref = evidence.get(evidence_id)
+                    if (ref is None or ref.chapter_id != segment.chapter_id or ref.start_offset is None
+                            or not segment.start_offset <= ref.start_offset < ref.end_offset <= segment.end_offset):
+                        raise ValueError("reading event evidence belongs to another segment")
+                if not segment.normalized_start <= event.normalized_start <= event.normalized_end <= segment.normalized_end:
+                    raise ValueError("reading event progress belongs to another segment")
+                event_people.update(event.character_ids)
+            if set(segment.character_ids) != event_people:
+                raise ValueError("reading participants do not match referenced events")
+            for key in segment.evidence_ids:
+                ref = evidence.get(key)
+                if ref is None or ref.chapter_id != segment.chapter_id or ref.start_offset is None or not segment.start_offset <= ref.start_offset < ref.end_offset <= segment.end_offset:
+                    raise ValueError("reading segment evidence is outside range")
+            covered_events.extend(segment.event_ids)
+        if self.plot.reading_segments and (len(covered_events) != len(set(covered_events)) or set(covered_events) != {e.item_id for e in self.plot.events}):
+            raise ValueError("reading projection must cover every detail event exactly once")
+        if self.plot.overview and (self.plot.overview.detail_event_count != len(self.plot.events)
+                                  or self.plot.overview.reading_segment_count != len(self.plot.reading_segments)):
+            raise ValueError("reading overview counts mismatch")
 
         def references(ids, kind):
             unique(ids, "typed reference")
@@ -615,6 +725,35 @@ def validate_depth_report_source(
     for chapter in report.chapters:
         if len(encoded[chapter.chapter_id]) // 2 != chapter.utf16_length:
             raise ValueError("chapter UTF-16 length mismatch")
+    source_paragraphs = {key: [m for m in re.finditer(r"[^\n]+", text) if m.group().strip()]
+                         for key, text in chapters.items()}
+    represented_paragraphs: dict[str, list[int]] = {key: [] for key in chapters}
+    for segment in report.plot.reading_segments:
+        paragraphs = source_paragraphs[segment.chapter_id]
+        if not 1 <= segment.paragraph_start <= segment.paragraph_end <= len(paragraphs):
+            raise ValueError("reading paragraph indices do not match source")
+        text = chapters[segment.chapter_id]
+        first = segment.paragraph_start - 1
+        last = segment.paragraph_end
+        expected_start = 0 if first == 0 else paragraphs[first].start()
+        expected_end = paragraphs[last].start() if last < len(paragraphs) else len(text)
+        if (segment.start_offset != len(text[:expected_start].encode("utf-16-le")) // 2
+                or segment.end_offset != len(text[:expected_end].encode("utf-16-le")) // 2):
+            raise ValueError("reading offsets do not match paragraph range")
+        represented_paragraphs[segment.chapter_id].extend(range(first, last))
+        raw = encoded[segment.chapter_id]
+        start, end = segment.start_offset * 2, segment.end_offset * 2
+        try:
+            raw[:start].decode("utf-16-le")
+            segment_text = raw[start:end].decode("utf-16-le")
+            raw[end:].decode("utf-16-le")
+        except UnicodeDecodeError:
+            raise ValueError("reading segment splits a UTF-16 surrogate pair") from None
+        if segment.summary not in segment_text or segment.title not in segment_text:
+            raise ValueError("reading summary/title is not a source extract")
+    if report.plot.reading_segments or report.engine_revision:
+        if any(represented_paragraphs[key] != list(range(len(paragraphs))) for key, paragraphs in source_paragraphs.items()):
+            raise ValueError("reading projection does not cover all source paragraphs")
     for ref in report.evidence:
         if ref.granularity == "chapter":
             continue
@@ -658,6 +797,8 @@ def _validate_report_binding(container) -> None:
     for key, value in report.source.model_dump().items():
         if hasattr(container, key) and getattr(container, key) != value:
             raise ValueError("report does not match enclosing document source")
+    if getattr(container, "engine_revision", None) and container.engine_revision != report.engine_revision:
+        raise ValueError("report engine revision differs from enclosing document")
     if container.status != "completed":
         raise ValueError("only a completed document may publish a report")
 
@@ -708,6 +849,7 @@ class DeconstructionDocument(BaseModel):
     # report contract.  A source snapshot may have one document per version so
     # an upgrade never mutates the old history in place.
     analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    engine_revision: str | None = Field(default=None, max_length=80)
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview | None = None
     report: DeconstructionDepthReport | AnalysisReport | None = None
@@ -758,7 +900,7 @@ class DeconstructionProjectRecord(BaseModel):
         if self.active_document_id is not None and self.active_document_id not in set(document_ids):
             raise ValueError("active document does not belong to project")
         source_keys = [
-            (item.source_version_id, item.source_revision, item.source_hash, item.analysis_contract_version)
+            (item.source_version_id, item.source_revision, item.source_hash, item.analysis_contract_version, item.engine_revision)
             for item in self.documents if item.analysis_contract_version != "model.1"
         ]
         if len(source_keys) != len(set(source_keys)):
@@ -808,6 +950,7 @@ class DeconstructionActiveRun(BaseModel):
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
     analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    engine_revision: str | None = Field(default=None, max_length=80)
     retry_count: int = Field(default=0, ge=0)
     # Accepted only so the stage 31 in-memory constructor can be parsed; it is
     # excluded from every serialization and from the public JSON schema.
@@ -830,6 +973,7 @@ class DeconstructionDocumentPublic(BaseModel):
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
     analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    engine_revision: str | None = Field(default=None, max_length=80)
     status: DeconstructionStatus
     progress_percent: int = Field(default=0, ge=0, le=100)
     current_stage: str = Field(default="等待拆解", max_length=120)
@@ -893,10 +1037,12 @@ class DeconstructionResult(BaseModel):
 
     document_id: str
     status: Literal["completed"] = "completed"
+    read_only: bool = False
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
     analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    engine_revision: str | None = Field(default=None, max_length=80)
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview
     report: DeconstructionDepthReport | AnalysisReport | None = None
@@ -927,6 +1073,7 @@ class DeconstructionHistoryItem(BaseModel):
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
     analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    engine_revision: str | None = Field(default=None, max_length=80)
     retry_count: int = Field(default=0, ge=0)
     analysis_label: str = "确定性结构拆解（无模型）"
     created_at: datetime
@@ -961,6 +1108,9 @@ class DeconstructionState(BaseModel):
     result: DeconstructionResult | None = None
     actions: DeconstructionActions
     error: DeconstructionError | None = None
+    update_available: bool = False
+    engine_revision: str | None = None
+    required_engine_revision: str | None = None
 
 
 class DeconstructionResponse(BaseModel):
@@ -973,6 +1123,9 @@ class DeconstructionResponse(BaseModel):
     title: str
     mode: Literal["independent"] = "independent"
     effective_status: DeconstructionEffectiveStatus
+    update_available: bool = False
+    engine_revision: str | None = None
+    required_engine_revision: str | None = None
     run_status: DeconstructionRunStatus = "none"
     source_match: bool = False
     progress: DeconstructionProgress = Field(default_factory=DeconstructionProgress)
@@ -1028,7 +1181,17 @@ class DeconstructionResponse(BaseModel):
                 or self.active_run.source_hash != self.source.hash
             ):
                 raise ValueError("当前运行必须绑定 canonical source")
-        if self.effective_status != "completed" and self.result is not None:
+        legacy_upgrade_result = bool(
+            self.effective_status == "rebuild_required" and self.update_available
+            and self.required_engine_revision and self.source_match and self.run_status == "completed"
+            and self.result is not None and self.result.read_only
+            and self.result.analysis_contract_version == "2.0"
+            and self.result.engine_revision != self.required_engine_revision
+            and self.result.source_version_id == self.source.version_id
+            and self.result.source_revision == self.source.revision
+            and self.result.source_hash == self.source.hash
+        )
+        if self.effective_status != "completed" and self.result is not None and not legacy_upgrade_result:
             raise ValueError("非 completed 状态不得返回正式 result")
         if self.result is not None and (not self.source_match or self.run_status != "completed"):
             raise ValueError("result 必须绑定当前来源且运行已完成")
@@ -1043,6 +1206,9 @@ class DeconstructionResponse(BaseModel):
                 or self.deconstruction.current_stage != self.current_stage
                 or self.deconstruction.source != self.source
                 or self.deconstruction.result != self.result
+                or self.deconstruction.update_available != self.update_available
+                or self.deconstruction.engine_revision != self.engine_revision
+                or self.deconstruction.required_engine_revision != self.required_engine_revision
             ):
                 raise ValueError("嵌套 deconstruction 必须与顶层 canonical state 一致")
         if self.active_run is not None and self.active_run.run_status != self.run_status:

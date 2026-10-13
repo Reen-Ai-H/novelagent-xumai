@@ -6,7 +6,7 @@
   const labels = { fact: "正文可证", reported: "人物说法", inferred: "分析推断", unknown: "尚未确定" };
   const kinds = { causes: "促成", enables: "提供条件", reveals: "揭示", foreshadow_payoff: "线索回收", follows: "仅为先后" };
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  let viewerNumber = 0;
+  const compact = value => { const text = String(value || ''); return text.length > 160 ? `${text.slice(0,160)}…` : text; };
   let closeActiveModal = null;
 
   function openModal({ eyebrow, title, body }) {
@@ -34,7 +34,7 @@
       if (document.querySelector("dialog[open]")) return;
       if (event.key === "Escape") { event.preventDefault(); close(); }
       if (event.key === "Tab") {
-        const focusable = Array.from(backdrop.querySelectorAll('button:not([disabled]), a[href], [tabindex="0"]'))
+        const focusable = Array.from(backdrop.querySelectorAll('button:not([disabled]), a[href], summary, [tabindex="0"]'))
           .filter(node => node.getClientRects().length);
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -56,7 +56,7 @@
   function render(report) {
     const source = report && typeof report === "object" ? report : {};
     const questions = Array.isArray(source.open_questions) ? source.open_questions : [];
-    return `<section class="analysis-report"><div class="analysis-view"></div><section class="analysis-questions" id="analysisQuestions"><h3>矛盾与疑问</h3><div class="analysis-contradictions"></div><ul>${questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul></section></section>`;
+    return `<section class="analysis-report"><div class="analysis-view"></div><details class="analysis-questions analysis-details" id="analysisQuestions"><summary>矛盾与疑问 · ${questions.length + (source.contradictions?.length || 0)}</summary><div class="analysis-details-body" data-model-questions></div></details></section>`;
   }
   function mount(container, report, evidenceRefs, evidenceRenderer, options = {}) {
     const root = container.querySelector(".analysis-report");
@@ -123,20 +123,70 @@
       openModal({ eyebrow: `${event.title} · 小事件（${chapterLabel}）`, title: item.title, body: claim(item) });
     }
 
-    root.querySelector(".analysis-contradictions").innerHTML = (report.contradictions || []).map(c => `<h4>${esc(c.title)}</h4>${claim(c)}`).join("");
+    // A directly embedded, source-bound person profile does not need the list
+    // controller. Preserve that standalone use when only this viewer is loaded.
+    window.XumaiReportBrowser?.mount(root.querySelector('[data-model-questions]'), {label:"矛盾与疑问",pageSize:6,
+      items:[...report.contradictions.map(c=>({type:'contradiction',...c})),...report.open_questions.map(text=>({type:'question',text}))],
+      renderItem:item=>item.type==='contradiction' ? `<article><h4>${esc(item.title)}</h4>${claim(item)}</article>` : `<p>${esc(item.text)}</p>`});
     let selected = report.events[0]?.id || null;
     let tab = options.section || "characters";
     let character = options.character || null;
+    let returnPerson = character;
     let timeMode = "narrative";
     const view = root.querySelector(".analysis-view");
     const chapterLabel = e => e.chapter_end && e.chapter_end !== e.chapter_number ? `第 ${e.chapter_number}–${e.chapter_end} 章` : `第 ${e.chapter_number} 章`;
-    const subEventsBlock = event => {
-      const items = event.sub_events || [];
-      if (!items.length) return "";
-      return `<section class="analysis-subevents"><h4>本副本内小事件</h4><p class="analysis-subevents-hint">点击小事件，查看经过与原文依据。</p><div class="analysis-subevent-list">${items.map((item, index) =>
-        `<button type="button" class="analysis-subevent" data-report-subevent="${esc(event.id)}~${index}"><span class="analysis-subevent-index">${String(index + 1).padStart(2, "0")}</span><span><strong>${esc(item.title)}</strong><small>${esc(item.text)}</small></span></button>`).join("")}</div></section>`;
+    const B = window.XumaiReportBrowser;
+    const browsing = Object.fromEntries(["characters", "plot", "time"].map(key => [key, {query:"", page:1, filters:{}}]));
+    const lazyConfigs = new Map();
+    const lazyDetails = (label, key) => `<details class="analysis-details" data-browser-lazy="${esc(key)}"><summary>${esc(label)}</summary><div class="analysis-details-body" data-browser-slot></div></details>`;
+    const importance = person => {
+      // model.1 only has role, not importance. Accept an explicit leading
+      // classification (or a standalone label), never an identity substring.
+      const role = String(person.role || "").trim();
+      if (/^(?:主角|主要人物|主人公)(?:\s*[：:]|$)/u.test(role)) return "主要人物";
+      if (/^(?:配角|次要人物|实质配角)(?:\s*[：:]|$)/u.test(role)) return "配角";
+      return "未分级";
     };
-    const detail = event => `<header><span class="eyebrow">${chapterLabel(event)} · ${esc(event.story_time)}</span><h3>${esc(event.title)}</h3><p class="analysis-actors">${event.actor_ids.map(id => esc(people.get(id))).join(" / ")}</p></header><h4>事件经过</h4>${claim(event.action)}<h4>结果与后续</h4>${claim(event.consequence)}${report.relations.filter(r => r.from_id === event.id || r.to_id === event.id).map(r => `<div class="analysis-relation"><strong>${esc(byId.get(r.from_id).title)} → ${esc(byId.get(r.to_id).title)}</strong><small>${kinds[r.kind]}</small>${claim(r)}</div>`).join("")}${subEventsBlock(event)}`;
+    const personText = p => `${p.name} ${(p.aliases || []).join(' ')} ${p.identity?.text || ''} ${p.portrait?.text || ''} ${p.change?.text || ''}`;
+    const peopleForList = () => {
+      const order = {"主要人物":0,"配角":1,"未分级":2};
+      return [...report.characters].sort((a,b) => order[importance(a)] - order[importance(b)]);
+    };
+    const chapterNumbers = [...new Set(report.events.flatMap(e => Array.from({length:Math.max(1,(e.chapter_end || e.chapter_number)-e.chapter_number+1)},(_,i)=>e.chapter_number+i)).filter(Number.isFinite))].sort((a,b)=>a-b);
+    const chapterFilter = {name:"chapter",label:"章节",options:[{value:"",label:"全部章节"},...chapterNumbers.map(n=>({value:String(n),label:`第 ${n} 章`}))],
+      match:(event,value)=>Number(value)>=event.chapter_number && Number(value)<=(event.chapter_end || event.chapter_number)};
+    const eventText = event => `${event.title} ${event.action?.text || ''} ${event.consequence?.text || ''} ${(event.actor_ids || []).map(id=>people.get(id)).join(' ')} ${(event.sub_events || []).map(e=>e.title+' '+e.text).join(' ')}`;
+    const relationConfig = event => ({label:"事件关系",items:report.relations.filter(r=>r.from_id===event.id||r.to_id===event.id),pageSize:6,
+      text:r=>`${byId.get(r.from_id)?.title || r.from_id} ${byId.get(r.to_id)?.title || r.to_id} ${r.text}`,
+      renderItem:r=>`<div class="analysis-relation"><strong>${esc(byId.get(r.from_id)?.title || "未命名事件")} → ${esc(byId.get(r.to_id)?.title || "未命名事件")}</strong><small>${esc(kinds[r.kind] || "关系待核对")}</small>${claim(r)}</div>`});
+    function detail(event) {
+      if (!event) return '<p class="analysis-scope-note">没有符合条件的大事件，重置筛选后继续阅读。</p>';
+      lazyConfigs.set("event-relations",relationConfig(event));
+      const subEvents = (event.sub_events || []).map((item,index)=>({...item,index}));
+      lazyConfigs.set("event-subevents",{label:"小事件",items:subEvents,pageSize:8,renderItem:item=>`<button type="button" class="analysis-subevent" data-report-subevent="${esc(event.id)}~${item.index}"><span class="analysis-subevent-index">${item.index+1}</span><span><strong>${esc(item.title)}</strong><small>${esc(item.text)}</small></span></button>`});
+      return `<header><span class="eyebrow">${chapterLabel(event)} · ${esc(event.story_time)}</span><h3>${esc(event.title)}</h3><p class="analysis-actors">${(event.actor_ids || []).map(id=>esc(people.get(id) || "未命名人物")).join(" / ")}</p></header><h4>事件经过</h4>${claim(event.action)}<h4>结果与后续</h4>${claim(event.consequence)}${lazyDetails(`相关事件与关系 · ${relationConfig(event).items.length}`,"event-relations")}${lazyDetails(`展开小事件 · ${subEvents.length}`,"event-subevents")}`;
+    }
+    function renderSelected(event) {
+      const target = view.querySelector(".analysis-node-detail");
+      if (!target) return;
+      selected = event?.id || null;
+      target.tabIndex = -1;
+      target.setAttribute('aria-label', '当前事件详情');
+      target.innerHTML = '<button type="button" class="quiet-link report-back-to-index" data-report-index>← 返回事件列表</button>' + detail(event);
+      B.lazy(target,lazyConfigs);
+      view.querySelectorAll(".analysis-node").forEach(node=>{
+        node.setAttribute("aria-pressed",String(node.dataset.reportNode===selected));
+        node.classList.toggle("is-selected",node.dataset.reportNode===selected);
+      });
+    }
+    function personCard(p) {
+      const portrait = p.portrait || p.identity;
+      const roleLabel = importance(p) === "未分级" ? `未分级 · ${p.role || "角色待补充"}` : p.role;
+      const chips = phraseChips(p,true);
+      const together = [...new Set(report.events.filter(e=>(e.actor_ids || []).includes(p.id)).flatMap(e=>e.actor_ids || []))].filter(id=>id!==p.id && people.has(id));
+      lazyConfigs.set(`person-together-${p.id}`,{label:"同场人物",items:together,renderItem:id=>`<p><button type="button" class="quiet-link" data-report-person="${esc(id)}">${esc(people.get(id))}</button></p>`});
+      return `<article class="analysis-person"><header><span class="eyebrow">${esc(roleLabel)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><div class="analysis-card-summary"><span>性格 / 为人 · ${labels[portrait?.status] || labels.unknown}</span><p class="analysis-portrait">${esc(compact(portrait?.text || "当前报告没有性格判断。"))}</p><span>关键经历 · ${labels[p.change?.status] || labels.unknown}</span><p>${esc(compact(p.change?.text || "当前报告没有经历记录。"))}</p></div>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}${together.length ? lazyDetails(`同场人物 · ${together.length}（不代表关系定性）`,`person-together-${p.id}`) : ''}<details class="analysis-details"><summary>展开原文依据</summary><div class="analysis-details-body"><h4>性格 / 为人</h4>${evidence(portrait?.evidence_ids)}<h4>关键经历</h4>${evidence(p.change?.evidence_ids)}</div></details><button type="button" class="quiet-link analysis-read-more" data-report-person="${esc(p.id)}">完整人物解析 ↗</button></article>`;
+    }
     function draw() {
       options.onView?.(tab, character);
       root.querySelector(".analysis-questions").hidden = !!character;
@@ -145,36 +195,34 @@
         const chips = phraseChips(person, false);
         const identity = person.identity || {};
         const portrait = person.portrait || identity;
-        view.innerHTML = `<article class="analysis-person-page"><button type="button" class="quiet-link" data-report-back>← 返回人物卡</button><header><span class="eyebrow">${esc(person.role || "故事人物")}</span><h2>${esc(person.name || "未命名人物")}</h2><p class="analysis-person-lead">${esc(portrait.text || identity.text || "暂无人物概览。")} </p></header><section><h3>身份与处境</h3>${claim(identity)}</section><section><h3>想要什么，为什么行动</h3>${claim(person.motivation)}</section>${chips ? `<section><h3>形象速览</h3><p class="analysis-person-hint">每个人物形象用一句话表示；点击短语，查看正文里哪些内容支撑这个判断。</p><div class="analysis-phrase-row">${chips}</div></section>` : ""}<section><h3>关键经历与变化</h3>${claim(person.change)}</section><section><h3>为人判断的依据</h3>${evidence(portrait.evidence_ids || identity.evidence_ids)}</section></article>`;
+        view.innerHTML = `<article class="analysis-person-page"><button type="button" class="quiet-link" data-report-back>← 返回人物卡</button><header><span class="eyebrow">${esc(person.role || "故事人物")}</span><h2>${esc(person.name || "未命名人物")}</h2><p class="analysis-person-lead">${esc(portrait.text || identity.text || "暂无人物概览。")}</p></header><section><h3>身份与处境</h3>${claim(identity)}</section><section><h3>想要什么，为什么行动</h3>${claim(person.motivation)}</section>${chips ? `<section><h3>形象速览</h3><div class="analysis-phrase-row">${chips}</div></section>` : ""}<section><h3>关键经历与变化</h3>${claim(person.change)}</section><section><h3>为人判断的依据</h3>${evidence(portrait.evidence_ids || identity.evidence_ids)}</section></article>`;
         return;
       }
       character = null;
+      if (!B) {
+        view.innerHTML = '<p role="alert">报告浏览组件尚未加载。</p><button type="button" class="quiet-link" data-report-reload>重新加载报告</button>';
+        return;
+      }
       if (tab === "characters") {
-        view.innerHTML = `<div class="analysis-characters">${report.characters.map(p => {
-          const portrait = p.portrait || p.identity;
-          const chips = phraseChips(p, true);
-          return `<article class="analysis-person"><header><span class="eyebrow">${esc(p.role)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><p class="analysis-portrait">${esc(portrait.text)}</p>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}<div class="analysis-experience"><h4>关键经历</h4><p>${esc(p.change.text)}</p></div><span class="analysis-read-more" aria-hidden="true">完整人物解析 ↗</span></article>`;
-        }).join("")}</div>`;
+        view.innerHTML = '<header class="report-reading-heading"><h2>人物与经历</h2></header><div data-model-people></div>';
+        B.mount(view.querySelector('[data-model-people]'),{label:"人物",items:peopleForList(),state:browsing.characters,pageSize:8,className:"analysis-characters",
+          text:personText,
+          filters:[{name:"importance",label:"人物分组",options:[{value:"",label:"全部人物"},...["主要人物","配角","未分级"].map(value=>({value,label:`${value} · ${report.characters.filter(p=>importance(p)===value).length}`}))],match:(p,value)=>importance(p)===value}],
+          renderItem:personCard,afterRender:node=>B.lazy(node,lazyConfigs)});
       } else if (tab === "time") {
-        const events = timeMode === "story" ? report.story_order.map(id => byId.get(id)) : report.events;
-        view.innerHTML = `<div class="analysis-time-heading"><h3>同一批事件，两种阅读顺序</h3><div class="analysis-time-toggle"><button type="button" data-report-time="narrative" aria-pressed="${timeMode === "narrative"}">正文揭示顺序</button><button type="button" data-report-time="story" aria-pressed="${timeMode === "story"}">故事发生顺序</button></div><p>${esc(report.time_note)}</p></div><ol class="analysis-time-list">${events.map(e => `<li><span class="analysis-time-dot"></span><div><small>正文${chapterLabel(e)} · ${esc(e.story_time)}</small><button type="button" data-report-node="${e.id}">${esc(e.title)} ↗</button><p>${esc(e.action.text)}</p></div></li>`).join("")}</ol>`;
+        const ordered = report.story_order.map(id=>byId.get(id)).filter(Boolean);
+        const seen = new Set(ordered.map(e=>e.id));
+        const events = timeMode === "story" ? [...ordered,...report.events.filter(e=>!seen.has(e.id))] : report.events;
+        view.innerHTML = `<div class="analysis-time-heading"><h3>同一批事件，两种阅读顺序</h3><div class="analysis-time-toggle"><button type="button" data-report-time="narrative" aria-pressed="${timeMode==="narrative"}">正文揭示顺序</button><button type="button" data-report-time="story" aria-pressed="${timeMode==="story"}">故事发生顺序</button></div><p>${esc(report.time_note)}</p>${timeMode==='story' && report.events.length>seen.size ? '<p>未提供故事顺序的事件列在末尾，未替它们推断时间。</p>' : ''}</div><div data-model-time></div>`;
+        B.mount(view.querySelector('[data-model-time]'),{label:"时间线事件",items:events,state:browsing.time,pageSize:12,text:eventText,filters:[chapterFilter],className:"analysis-time-list",
+          renderItem:e=>`<article><small>${chapterLabel(e)} · ${esc(e.story_time)}</small><h3><button class="quiet-link" type="button" data-report-node="${esc(e.id)}">${esc(e.title)} ↗</button></h3><p>${esc(e.action?.text)}</p></article>`});
       } else {
-        const positions = new Map(report.events.map((e, i) => [e.id, { x: 24 + (i % 3) * 246, y: 30 + Math.floor(i / 3) * 146 }]));
-        const width = Math.min(3, report.events.length) * 246 + 12;
-        const height = Math.ceil(report.events.length / 3) * 146 + 20;
-        const paths = report.relations.map(r => {
-          const a = positions.get(r.from_id), b = positions.get(r.to_id);
-          const active = r.from_id === selected || r.to_id === selected;
-          const sameRow = a.y === b.y;
-          const x1 = sameRow ? a.x + 210 : a.x + 105, y1 = sameRow ? a.y + 48 : a.y + 96;
-          const x2 = sameRow ? b.x - 4 : b.x + 105, y2 = sameRow ? b.y + 48 : b.y - 4;
-          const d = sameRow ? `M${x1},${y1} L${x2},${y2}` : `M${x1},${y1} C${x1},${(y1+y2)/2} ${x2},${(y1+y2)/2} ${x2},${y2}`;
-          return `<path d="${d}" class="${active ? "is-active" : ""} ${r.kind === "follows" ? "is-sequence" : ""}" marker-end="url(#${arrowId})"><title>${esc(kinds[r.kind] + "：" + r.text)}</title></path>`;
-        }).join("");
-        view.innerHTML = `<div class="analysis-map-heading"><h3>按完整事件看故事推进</h3><p>每个节点是一段完整大剧情；点击查看经过与结果。虚线表示时间先后，不表示因果。</p></div><div class="analysis-map-layout"><div class="analysis-map-scroll" tabindex="0" aria-label="剧情地图，可横向滚动"><div class="analysis-map" style="height:${height}px;width:${width}px"><svg style="width:${width}px" viewBox="0 0 ${width} ${height}" aria-label="剧情关系连线"><defs><marker id="${arrowId}" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="context-stroke"/></marker></defs>${paths}</svg>${report.events.map((e, i) => { const p = positions.get(e.id); return `<button type="button" class="analysis-node ${e.id === selected ? "is-selected" : ""}" data-report-node="${e.id}" aria-pressed="${e.id === selected}" style="left:${p.x}px;top:${p.y}px"><small>${String(i+1).padStart(2,"0")} / ${chapterLabel(e)}</small><strong>${esc(e.title)}</strong><span>${labels[e.action.status]}</span></button>`; }).join("")}</div></div><article class="analysis-node-detail" aria-live="polite">${detail(byId.get(selected))}</article></div>`;
+        view.innerHTML = '<header class="report-reading-heading"><h2>大事件与故事推进</h2><p>先选一段大剧情，再读经过、后果与原文细节。</p></header><div class="report-plot-layout"><div data-model-events></div><article class="analysis-node-detail" aria-live="polite"></article></div>';
+        B.mount(view.querySelector('[data-model-events]'),{label:"大事件",items:report.events,state:browsing.plot,pageSize:8,text:eventText,filters:[chapterFilter],className:"report-event-index",
+          renderItem:(e,i)=>`<button type="button" class="analysis-node" data-report-node="${esc(e.id)}" aria-pressed="${e.id===selected}"><small>${i+1} / ${chapterLabel(e)}</small><strong>${esc(e.title)}</strong><span class="analysis-node-summary">${esc(compact(e.action?.text))}</span><span>${labels[e.action?.status] || labels.unknown} · ${(e.sub_events || []).length} 个小事件</span></button>`,
+          afterRender:(node,visible)=>renderSelected(visible.find(e=>e.id===selected)||visible[0])});
       }
     }
-    const arrowId = `analysisArrow${++viewerNumber}`;
     root.addEventListener("click", event => {
       const phrase = event.target.closest("[data-report-phrase]");
       if (phrase) { event.preventDefault(); const [pid, index] = phrase.dataset.reportPhrase.split("~"); openPhrase(pid, index); return; }
@@ -182,14 +230,42 @@
       if (sub) { event.preventDefault(); const [eid, index] = sub.dataset.reportSubevent.split("~"); openSubEvent(eid, index); return; }
       const personLink = event.target.closest("[data-report-person]");
       if (personLink && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-        event.preventDefault(); character = personLink.dataset.reportPerson; draw(); window.scrollTo(0, 0); return;
+        returnPerson = personLink.closest('.analysis-person')?.querySelector('.analysis-person-link')?.dataset.reportPerson || returnPerson || personLink.dataset.reportPerson;
+        event.preventDefault(); character = personLink.dataset.reportPerson; draw(); window.scrollTo(0, 0); view.querySelector('[data-report-back]')?.focus({preventScroll:true}); return;
       }
       const button = event.target.closest("button");
       if (!button) return;
-      if (button.hasAttribute("data-report-back")) { character = null; draw(); window.scrollTo(0, 0); }
+      if (button.hasAttribute("data-report-reload")) window.location.reload();
+      if (button.hasAttribute("data-report-back")) {
+        const target = returnPerson || character;
+        const query = browsing.characters.query.trim().toLocaleLowerCase();
+        const group = browsing.characters.filters.importance;
+        const candidates = peopleForList().filter(p => (!query || personText(p).toLocaleLowerCase().includes(query)) && (!group || importance(p) === group));
+        const index = candidates.findIndex(p => p.id === target);
+        if (index >= 0) browsing.characters.page = Math.floor(index / 8) + 1;
+        character = null; tab = 'characters'; draw();
+        const link = Array.from(view.querySelectorAll('.analysis-person-link')).find(node => node.dataset.reportPerson === target);
+        if (link) { link.focus({preventScroll:true}); link.scrollIntoView({block:'center',behavior:'instant'}); }
+      }
       if (button.dataset.reportTab) { tab = button.dataset.reportTab; draw(); }
       if (button.dataset.reportTime) { timeMode = button.dataset.reportTime; draw(); view.querySelector(`[data-report-time="${timeMode}"]`).focus(); }
-      if (button.dataset.reportNode) { selected = button.dataset.reportNode; tab = "plot"; draw(); view.querySelector(`[data-report-node="${selected}"]`).focus({ preventScroll: true }); }
+      if (button.dataset.reportNode) {
+        const id = button.dataset.reportNode;
+        if (tab === "plot") renderSelected(byId.get(id));
+        else {
+          browsing.plot.query = ""; browsing.plot.filters = {};
+          browsing.plot.page = Math.floor(report.events.findIndex(e => e.id === id) / 8) + 1;
+          selected = id; tab = "plot"; draw();
+        }
+        if (window.matchMedia('(max-width: 1100px)').matches) {
+          const target = view.querySelector('.analysis-node-detail');
+          target?.focus({preventScroll:true}); target?.scrollIntoView({block:'start',behavior:'instant'});
+        } else view.querySelector(`[data-report-node="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+      }
+      if (button.hasAttribute('data-report-index')) {
+        const node = view.querySelector(`[data-report-node="${CSS.escape(selected || '')}"]`);
+        node?.focus({preventScroll:true}); node?.scrollIntoView({block:'center',behavior:'instant'});
+      }
     });
     draw();
     return { select(section) { tab = section; character = null; draw(); } };

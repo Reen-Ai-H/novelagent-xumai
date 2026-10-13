@@ -25,6 +25,8 @@ from uuid import uuid4
 from xml.etree import ElementTree
 
 from app.core.independent_store import IndependentStore
+from app.core.chapter_parser import heading_number, parse_document, recognize_heading
+from app.core.person_recognition import discover_person_names
 from app.core.project_lock import ProjectLockStore, ProjectLockError
 from app.core.project_store import ProjectStore, project_store
 from app.core.transaction_store import TransactionCommitted
@@ -405,6 +407,7 @@ class IndependentWorkspaceService:
         input_size_bytes: int = 0,
         raw_text: str = "",
         file_format: str | None = None,
+        fragments: list[str] | None = None,
     ) -> ImportPreviewRecord:
         preview = ImportPreviewRecord(
             preview_id=uuid4().hex,
@@ -416,6 +419,7 @@ class IndependentWorkspaceService:
             input_size_bytes=input_size_bytes,
             raw_preserved=bool(raw_text),
             raw_text=raw_text,
+            unrecognized_fragments=fragments or [],
             created_at=self._now(),
         )
         record.pending_imports.append(preview)
@@ -438,91 +442,42 @@ class IndependentWorkspaceService:
 
         namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
         paragraphs: list[str] = []
-        for paragraph in root.iter(f"{namespace}p"):
-            parts = [node.text or "" for node in paragraph.iter(f"{namespace}t")]
-            text = "".join(parts).strip()
-            if text:
-                paragraphs.append(text)
+
+        def visit(node: ElementTree.Element, parts: list[str] | None = None) -> None:
+            if node.tag == f"{namespace}p":
+                own_parts: list[str] = []
+                # Reserve reading order before visiting nested textbox paragraphs.
+                slot = len(paragraphs)
+                paragraphs.append("")
+                for child in node:
+                    visit(child, own_parts)
+                paragraphs[slot] = "".join(own_parts)
+            elif parts is not None and node.tag in {f"{namespace}t", f"{namespace}tab", f"{namespace}br", f"{namespace}cr"}:
+                parts.append((node.text or "") if node.tag == f"{namespace}t" else
+                             "\t" if node.tag == f"{namespace}tab" else "\n")
+            else:
+                for child in node:
+                    visit(child, parts)
+
+        visit(root)
         return "\n".join(paragraphs)
 
     @staticmethod
     def _chinese_number(value: str) -> int | None:
-        digits = {
-            "一": 1,
-            "二": 2,
-            "三": 3,
-            "四": 4,
-            "五": 5,
-            "六": 6,
-            "七": 7,
-            "八": 8,
-            "九": 9,
-            "十": 10,
-        }
-        if value.isdigit():
-            return int(value)
-        if value in digits:
-            return digits[value]
-        if len(value) == 2 and value[0] == "十" and value[1] in digits:
-            return 10 + digits[value[1]]
-        if len(value) == 2 and value[1] == "十" and value[0] in digits:
-            return digits[value[0]] * 10
-        if len(value) == 3 and value[1] == "十" and value[0] in digits and value[2] in digits:
-            return digits[value[0]] * 10 + digits[value[2]]
-        return None
+        return heading_number(value)
 
     @classmethod
     def _heading_number(cls, line: str) -> int | None:
-        cleaned = re.sub(r"^\s*#{1,6}\s*", "", line).strip()
-        match = re.match(r"^第\s*([0-9一二三四五六七八九十百]+)\s*[章节回卷]", cleaned)
-        if match:
-            return cls._chinese_number(match.group(1))
-        match = re.match(r"^(?:chapter\s+)?(\d+)[、.．:]?\s+", cleaned, re.IGNORECASE)
-        return int(match.group(1)) if match else None
+        heading = recognize_heading(line)
+        return heading.number if heading and heading.kind == "chapter" else None
 
     @classmethod
     def _parse_text(cls, filename: str, text: str) -> tuple[str, list[ImportChapterPreview], list[str]]:
-        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-        lines = normalized.split("\n")
-        heading_indexes: list[tuple[int, int, str]] = []
-        for index, line in enumerate(lines):
-            number = cls._heading_number(line)
-            if number is not None:
-                title = re.sub(r"^\s*#{1,6}\s*", "", line).strip()
-                heading_indexes.append((index, number, title or f"第{number}章"))
-
-        fragments: list[str] = []
-        chapters: list[ImportChapterPreview] = []
-        if not heading_indexes:
-            title = Path(filename).stem or "第一章"
-            chapters.append(
-                ImportChapterPreview(
-                    chapter_number=1,
-                    title=title,
-                    content=normalized.strip(),
-                    word_count=cls._word_count(normalized),
-                )
-            )
-        else:
-            preamble = "\n".join(lines[: heading_indexes[0][0]]).strip()
-            if preamble:
-                fragments.append(preamble)
-            for position, (line_index, number, title) in enumerate(heading_indexes):
-                end = heading_indexes[position + 1][0] if position + 1 < len(heading_indexes) else len(lines)
-                content = "\n".join(lines[line_index + 1 : end]).strip()
-                chapters.append(
-                    ImportChapterPreview(
-                        chapter_number=number,
-                        title=title,
-                        content=content,
-                        word_count=cls._word_count(content),
-                    )
-                )
-
-        title = Path(filename).stem or (chapters[0].title if chapters else "未命名导入")
-        if chapters and len(chapters) == 1 and chapters[0].title != title:
-            title = chapters[0].title
-        return title, chapters, fragments
+        parsed = parse_document(filename, text)
+        chapters = [ImportChapterPreview(chapter_number=item.chapter_number, title=item.title,
+                                          content=item.content, word_count=cls._word_count(item.content))
+                    for item in parsed.chapters]
+        return parsed.title, chapters, list(parsed.fragments)
 
     @_author_write_method
     def preview_import(
@@ -569,25 +524,25 @@ class IndependentWorkspaceService:
             )
 
         try:
-            text = (self._decode_docx(content) if suffix == "docx" else raw_text).strip()
-            if not text:
+            text = self._decode_docx(content) if suffix == "docx" else raw_text
+            if not text.strip():
                 return self._set_failure(
                     record,
                     filename=filename,
                     file_format=suffix,
                     input_size_bytes=len(content),
-                    raw_text=raw_text,
+                    raw_text=text,
                     error_message="文件中没有可识别的正文或有效章节，原始输入已保留，请补充正文后重新上传。",
                 )
             title, chapters, fragments = self._parse_text(filename, text)
-            chapters = [chapter for chapter in chapters if chapter.content.strip()]
             if not chapters:
                 return self._set_failure(
                     record,
                     filename=filename,
                     file_format=suffix,
                     input_size_bytes=len(content),
-                    raw_text=raw_text,
+                    raw_text=text,
+                    fragments=fragments,
                     error_message="文件中没有可识别的正文或有效章节，原始输入已保留，请补充正文后重新上传。",
                 )
         except ValueError as exc:
@@ -1299,13 +1254,7 @@ class IndependentWorkspaceService:
             next_archive.latest_chapter_number or chapter.chapter_number,
         )
         text = chapter.formal_content or chapter.content
-        explicit_characters = re.findall(r"人物\s*[:：]\s*([^\n。；;]+)", text)
-        character_names: list[str] = []
-        for group in explicit_characters:
-            for name in re.split(r"[、，,；;和与及]\s*", group):
-                cleaned = name.strip(" ：:，,、；;")
-                if 1 < len(cleaned) <= 12 and cleaned not in character_names:
-                    character_names.append(cleaned)
+        character_names = discover_person_names([chapter.model_copy(update={"content": text})])
         for name in character_names:
             character = StoryCharacter(
                 character_id=self._slug(f"character:{name}"),

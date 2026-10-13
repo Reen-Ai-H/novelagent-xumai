@@ -14,6 +14,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 import re
 from typing import Iterable
+from app.core.person_recognition import assess_person_identities
+from app.core.reading_projection import reading_segments
 
 from schemas.deconstruction import (
     DeconstructionDepthReport,
@@ -37,7 +39,7 @@ from schemas.deconstruction import (
 
 
 MAX_EVIDENCE_EXCERPT = 180
-MAX_NAMES = 80
+RULE_ENGINE_REVISION = "stage35.relevance.1"
 
 
 @dataclass(frozen=True)
@@ -207,25 +209,6 @@ class _EvidenceBuilder:
 class DepthAnalysisEngine:
     """Build one complete, source-bound depth report from a frozen snapshot."""
 
-    _name_stopwords = {
-        "三年前", "与此同时", "因为雨水", "一条长线", "两人一起", "一个人",
-        "雨水", "天色", "石阶", "歌声", "钟声", "河岸", "街巷", "旧站",
-        "钟楼", "钥匙", "铜钥匙", "脚印", "真相", "地图", "船票", "绳索",
-        "书店", "院子", "屋内", "墙壁", "墙", "海", "花", "门后", "天空",
-        "雨落", "空庭", "缺角", "姐姐", "妹妹", "哥哥", "母亲", "父亲",
-        "信", "路标", "驿站", "然后", "接着", "随后", "终于", "此时", "同时",
-        "于是", "因此", "所以", "后来", "现在", "只是", "已经", "正在",
-        "忽然", "突然", "先前", "以前", "当时", "两人", "我们", "你们",
-        "他们", "她们", "自己",
-    }
-    _name_context = (
-        "想", "要", "在", "把", "将", "用", "拿", "带", "给", "对", "问", "说",
-        "看", "听", "站", "走", "来", "去", "找到", "寻找", "害怕", "决定",
-        "答应", "赶来", "帮助", "递", "交给", "打开", "推开", "点亮", "继续",
-        "沿", "记录", "抛", "拖", "离开", "回家", "解释", "公开", "不再",
-        "终于", "发现", "进入", "遇见", "收到", "保护", "守住", "合作",
-        "没有", "没", "未", "并未", "拒绝", "拒不", "不肯", "不愿",
-    )
     _artifact_suffixes = (
         "钥匙", "地图", "船票", "信", "门", "脚印", "真相", "秘密", "线索",
         "照片", "戒指", "印记", "名单", "日记", "礼物", "约定", "口信",
@@ -261,101 +244,9 @@ class DepthAnalysisEngine:
         self.foreshadow_candidates: list[tuple[str, _EventMeta, _EventMeta, str]] = []
 
     def _discover_names(self) -> list[str]:
-        positions: dict[str, set[tuple[str, int]]] = defaultdict(set)
-        explicit: list[str] = []
-        clear_two_character_subjects: set[str] = set()
-        subject_context = self._name_context
-        strong_subject_context = {
-            "把", "将", "用", "拿", "带", "给", "找到", "寻找", "决定",
-            "答应", "赶来", "帮助", "递", "交给", "打开", "推开", "点亮",
-            "继续", "沿", "记录", "抛", "拖", "离开", "回家", "解释",
-            "公开", "保护", "守住", "合作", "走", "来", "去", "想",
-            "没有", "没", "未", "并未", "拒绝", "拒不", "不肯", "不愿",
-        }
-        suffix_verbs = (
-            "交给", "递给", "帮助", "保护", "找到", "寻找", "遇见", "看见",
-            "提到", "等着", "跟着", "带着", "替", "给", "对",
-        )
-        boundary_after = set("，,。！？!?；;：: \t\n\"“”「」")
-        pronoun_or_function_starts = set("我你他她它这那其此每各两一三因所先后")
-
-        def record(value: str, chapter_id: str, position: int) -> None:
-            if (
-                len(value) < 2
-                or value in self._name_stopwords
-                or value[0] in pronoun_or_function_starts
-            ):
-                return
-            positions[value].add((chapter_id, position))
-
-        for chapter in self.chapters:
-            for name in self.snapshot.character_names:
-                if name and name not in self._name_stopwords:
-                    explicit.append(name)
-            for group in re.findall(r"人物\s*[:：]\s*([^\n。；;]+)", chapter.content):
-                for candidate in re.split(r"[、，,；;和与及]\s*", group):
-                    value = candidate.strip(" ：:，,、；;")
-                    if 1 < len(value) <= 20:
-                        explicit.append(value)
-            text = chapter.content
-            # Scan from a real clause boundary and choose the shortest
-            # candidate whose next characters are an action verb.  Choosing
-            # shortest-first is important for Chinese prose such as
-            # “顾遥把一把钥匙...” where a greedy 2..4 span would absorb
-            # “把一” and invent a four-character person.
-            for position in range(len(text)):
-                if position > 0 and "\u4e00" <= text[position - 1] <= "\u9fff":
-                    continue
-                for length in (2, 3, 4):
-                    value = text[position:position + length]
-                    if len(value) != length or not all("\u4e00" <= char <= "\u9fff" for char in value):
-                        continue
-                    after = text[position + length:]
-                    if any(after.startswith(context) for context in subject_context):
-                        record(value, chapter.chapter_id, position)
-                        if length == 2 and any(
-                            after.startswith(context) for context in strong_subject_context
-                        ):
-                            # A two-character candidate at a real clause
-                            # boundary followed by an action context is a
-                            # sufficiently strong local subject signal.  Keep
-                            # the recurrence gate for longer or ambiguous
-                            # spans, which is what filters phrase fragments.
-                            clear_two_character_subjects.add(value)
-                        break
-            for verb in suffix_verbs:
-                offset = 0
-                while True:
-                    found = text.find(verb, offset)
-                    if found < 0:
-                        break
-                    position = found + len(verb)
-                    for length in (2, 3, 4):
-                        value = text[position:position + length]
-                        after = text[position + length:position + length + 1]
-                        if (
-                            len(value) == length
-                            and all("\u4e00" <= char <= "\u9fff" for char in value)
-                            and (not after or after in boundary_after)
-                        ):
-                            record(value, chapter.chapter_id, position)
-                            break
-                    offset = position
-        values = _unique(explicit)
-        ranked = sorted(
-            positions.items(),
-            key=lambda item: (-len(item[1]), min(item[1])),
-        )
-        for value, occurrence_positions in ranked:
-            if value in self._name_stopwords:
-                continue
-            # Require two distinct source positions for unlabelled natural
-            # prose.  This prevents one-off pronoun/object phrases from
-            # becoming people while retaining names that recur across clauses
-            # or chapters. Explicit archive/人物 candidates bypass this gate.
-            if len(occurrence_positions) >= 2 or value in clear_two_character_subjects:
-                values.append(value)
-        return _unique(values)[:MAX_NAMES]
+        self.identities = assess_person_identities(self.chapters, self.snapshot.character_names)
+        self.selected_names = [p.name for p in self.identities if p.importance != "incidental"]
+        return [p.name for p in self.identities]
 
     _negation_markers = (
         "并没有", "没有", "未曾", "未能", "并未", "从未", "不曾", "并不", "并非",
@@ -700,7 +591,8 @@ class DepthAnalysisEngine:
                         f"{chapter.chapter_id}:{start}:{end}",
                     )
                     evidence_id = self.evidence.span(chapter, start, end, "事件片段")
-                    names = [name for name in self.names if name in raw]
+                    names = [p.name for p in self.identities if p.name in self.selected_names
+                             and any(spelling in raw for spelling in (p.name, *p.aliases))]
                     terms = self._extract_terms(raw)
                     negative = self._event_is_negative(raw)
                     if temporal_mode == "linear":
@@ -844,7 +736,7 @@ class DepthAnalysisEngine:
         characters: list[DepthCharacter] = []
         states: list[DepthCharacterState] = []
         relations: list[DepthRelation] = []
-        if not self.names:
+        if not self.selected_names:
             return (
                 characters,
                 states,
@@ -855,9 +747,10 @@ class DepthAnalysisEngine:
 
         character_ids = {
             name: depth_stable_id(self.source, "character", f"name:{name}")
-            for name in self.names
+            for name in self.selected_names
         }
-        for name in self.names:
+        for name in self.selected_names:
+            identity = next(p for p in self.identities if p.name == name)
             related_events = [event for event in self.events if name in event.names]
             chapter_ids = _unique([event.chapter.chapter_id for event in related_events])
             if not chapter_ids:
@@ -865,11 +758,17 @@ class DepthAnalysisEngine:
             evidence_ids: list[str] = []
             for chapter_id in chapter_ids:
                 chapter = next(item for item in self.chapters if item.chapter_id == chapter_id)
-                position = chapter.content.find(name)
-                if position >= 0:
+                mention = next((m for m in identity.mentions if m.chapter_id == chapter_id), None)
+                if mention is not None:
                     evidence_ids.append(
-                        self.evidence.span(chapter, position, position + len(name), "人物称谓")
+                        self.evidence.span(chapter, mention.start, mention.start + len(mention.spelling or name), "人物称谓")
                     )
+            for chapter_id, start, end in identity.definition_spans:
+                chapter = next(c for c in self.chapters if c.chapter_id == chapter_id)
+                if chapter_id not in chapter_ids:
+                    chapter_ids.append(chapter_id)
+                evidence_ids.append(self.evidence.span(chapter, start, end, "明确姓名与别名声明"))
+            chapter_ids.sort(key=lambda key: next(c.chapter_number for c in self.chapters if c.chapter_id == key))
             first_action = related_events[0].action if related_events else ""
             motivation = (
                 f"正文显示{name}在行动上关注{_clip(first_action, 80)}。"
@@ -909,12 +808,16 @@ class DepthAnalysisEngine:
                 DepthCharacter.model_validate({
                     **common,
                     "name": name,
-                    "aliases": [],
+                    "aliases": list(identity.aliases),
+                    "importance": identity.importance,
+                    "importance_reason": identity.importance_reason,
+                    "mention_count": identity.mention_count,
+                    "identity_confidence": identity.identity_confidence,
                     "role": role,
                     "motivation": motivation,
                     "inner_conflict": inner_conflict,
                     "arc_summary": (
-                        f"从第{chapter_ids[0]}相关片段到末次出现，"
+                        f"从第{related_events[0].chapter.chapter_number}章到第{related_events[-1].chapter.chapter_number}章，"
                         f"可观察到{name}持续参与正文推进；完整人物弧尚未完全展开。"
                     ),
                 })
@@ -932,11 +835,15 @@ class DepthAnalysisEngine:
                     event.evidence_id for event in chapter_events[:4] if event.evidence_id
                 ]
                 if not chapter_evidence:
-                    position = chapter.content.find(name)
-                    if position >= 0:
+                    mention = next((m for m in identity.mentions if m.chapter_id == chapter_id), None)
+                    if mention is not None:
                         chapter_evidence = [
-                            self.evidence.span(chapter, position, position + len(name), "人物状态")
+                            self.evidence.span(chapter, mention.start, mention.start + len(mention.spelling or name), "人物状态")
                         ]
+                    elif identity.definition_spans:
+                        declaration = next((span for span in identity.definition_spans if span[0] == chapter_id), None)
+                        if declaration:
+                            chapter_evidence = [self.evidence.span(chapter, declaration[1], declaration[2], "人物身份声明")]
                 state_id = depth_stable_id(
                     self.source, "character-state", f"{name}:{chapter_id}",
                 )
@@ -1730,6 +1637,7 @@ class DepthAnalysisEngine:
         rhythm_items, rhythm_summary = self._rhythm_view()
         reader_items, reader_summary = self._reader_view()
         technique_items, technique_summary = self._technique_view()
+        reading = reading_segments(self.source, self.chapters, self.events, self.identities, self.evidence)
 
         chapters = [
             DepthChapter(
@@ -1748,6 +1656,7 @@ class DepthAnalysisEngine:
             raise ValueError("depth report requires source evidence")
         report = DeconstructionDepthReport.model_validate({
             "report_version": "2.0",
+            "engine_revision": RULE_ENGINE_REVISION,
             "source": self.source,
             "chapters": chapters,
             "evidence": list(self.evidence.items.values()),
@@ -1757,6 +1666,10 @@ class DepthAnalysisEngine:
                 "characters": characters,
                 "states": character_states,
                 "relations": character_relations,
+                "identity_candidates": [{"name": p.name, "aliases": list(p.aliases), "mention_count": p.mention_count,
+                                         "paragraph_count": p.paragraph_count, "identity_confidence": p.identity_confidence,
+                                         "importance": p.importance, "importance_reason": p.importance_reason}
+                                        for p in self.identities],
             },
             "plot": {
                 "summary": plot_summary,
@@ -1764,6 +1677,10 @@ class DepthAnalysisEngine:
                 "plotlines": plotlines,
                 "events": event_models,
                 "relations": plot_relations,
+                "overview": {"summary": f"当前{len(self.chapters)}章按来源组织为{len(reading)}个阅读段落，保留{len(event_models)}个细节事件供核对。",
+                             "reading_segment_count": len(reading), "detail_event_count": len(event_models),
+                             "uncertainty": ["规则投影不等同于经过语义审阅的主剧情。"]},
+                "reading_segments": reading,
             },
             "foreshadowing": {
                 "summary": foreshadowing_summary,

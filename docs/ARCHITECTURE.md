@@ -48,6 +48,14 @@ core services (account / entry / independent / ai / transaction)
 
 MiMo 通过唯一运行时接入，官方主机使用 `max_completion_tokens` 和 SSE。只有完整结束并通过输出合同才采用结果；错误只对外提供脱敏代码。凭据不进前端、报告、Git 或测试，真实质量验收与离线 fake 测试分离。
 
+## 阶段 35 的识别与阅读组织
+
+阶段 35 将导入标题解析抽到 `chapter_parser.py`，人物候选/身份/重要性抽到 `person_recognition.py`，原文阅读段落抽到 `reading_projection.py`。保留确定性 `2.0` 合同，使用 `engine_revision=stage35.relevance.1` 区分新版规则。没有当前引擎标记的同源旧报告只读可见并提示更新；显式更新生成新 ID，重复更新幂等，不在读取时改写历史。
+
+`reading_segments` 是细节事件的来源投影，不是模型大纲。字符范围使用正文 UTF-16 偏移，原事件与证据继续保留；人物候选与正式卡片分别记录，重要性不靠固定人数截断。前端 `report-browser.js` 负责全文记录搜索/筛选/分页，`rule-report.js` 负责规则摘要和懒展开，`deconstruction-report.js` 保留模型报告渲染。规则与模型来源显式显示，模型不会因打开页面或导入默认自动付费。
+
+本轮私有 Source-ID 引文选择试验不属于生产模型合同：它由模型选择已编号原句、代码逐字绑定，用于验证引文可靠性。它尚未接入章节试拆或全书增量运行，不能把试验结果称为产品链路已通过。
+
 ## AI 状态与记忆边界
 
 ```text
