@@ -2574,7 +2574,7 @@
     const activeView = depthPerspectiveMeta[state.deconstructionView] ? state.deconstructionView : "overview";
     const progress = depthSelectedProgress(report);
     const legacy = data.updateAvailable || !Array.isArray(result.report?.plot?.reading_segments);
-    const updateNote = legacy ? `<div class="report-update-note"><p><strong>旧版规则报告</strong> · 已保留，建议更新整理方式。</p><button type="button" class="quiet-link" data-action="${data.actions.rebuild ? 'deconstruction-rebuild' : 'deconstruction-refresh'}">${data.actions.rebuild ? '更新规则报告' : '检查可用更新'}</button></div>` : "";
+    const updateNote = legacy ? `<div class="report-update-note"><p><strong>旧版规则报告</strong> · 已保留</p><button type="button" class="quiet-link" data-action="${data.actions.rebuild ? 'deconstruction-rebuild' : 'deconstruction-refresh'}">${data.actions.rebuild ? '更新规则报告' : '检查可用更新'}</button></div>` : "";
     return `<div class="deconstruction-depth-result">${renderAnalysisSource(data, "规则分析", `${report.chapters.length} 章`)}${updateNote}${renderDepthTabNavigation(activeView)}${renderDepthControls(report)}${renderDepthPerspectivePanel(report, activeView, progress)}</div>`;
   }
 
@@ -2582,7 +2582,7 @@
     const result = data.result;
     const origin = result.report?.producer || result.analysisLabel || label;
     const note = result.analysisContractVersion === "model.1" ? "仅涵盖所选章节；事实、人物说法与分析推断分别标注。" : "未调用模型 · 仅整理原文线索，不判断心理或因果。";
-    return `<header class="analysis-source-banner"><div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(range)} · ${data.sourceMatch ? "来源有效" : "历史只读"}</span><p>${note}</p></div>${renderAnalysisDetails("范围与来源", `<dl class="analysis-source-facts"><div><dt>分析来源</dt><dd>${escapeHtml(origin)}</dd></div><div><dt>报告版本</dt><dd>${escapeHtml(result.analysisContractVersion)}</dd></div><div><dt>规则版本</dt><dd>${escapeHtml(result.engineRevision || data.engineRevision || "旧版未记录")}</dd></div><div><dt>稿本</dt><dd>${escapeHtml(result.sourceVersionId)}</dd></div><div><dt>修订</dt><dd>${escapeHtml(result.sourceRevision ?? "—")}</dd></div><div><dt>内容指纹</dt><dd>${escapeHtml(result.scopeHash || result.sourceHash)}</dd></div></dl>`)}</header>`;
+    return `<header class="analysis-source-banner"><div class="analysis-source-main"><strong>${escapeHtml(label)}${result.analysisContractVersion === "2.0" ? ' · 无模型' : ''}</strong><span>${escapeHtml(range)} · ${data.sourceMatch ? "来源有效" : "历史只读"}</span></div>${renderAnalysisDetails("范围与来源", `<p>${note}</p><dl class="analysis-source-facts"><div><dt>分析来源</dt><dd>${escapeHtml(origin)}</dd></div><div><dt>报告版本</dt><dd>${escapeHtml(result.analysisContractVersion)}</dd></div><div><dt>规则版本</dt><dd>${escapeHtml(result.engineRevision || data.engineRevision || "旧版未记录")}</dd></div><div><dt>稿本</dt><dd>${escapeHtml(result.sourceVersionId)}</dd></div><div><dt>修订</dt><dd>${escapeHtml(result.sourceRevision ?? "—")}</dd></div><div><dt>内容指纹</dt><dd>${escapeHtml(result.scopeHash || result.sourceHash)}</dd></div></dl>`)}</header>`;
   }
 
   function renderDeconstructionVolumeBar(data) {

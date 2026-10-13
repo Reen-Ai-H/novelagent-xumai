@@ -91,30 +91,41 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
 .analysis-card-summary > span { margin-top: 6px; color: var(--ink-soft); font-size: .72rem; font-weight: 600; }
 .analysis-card-summary > p { margin: 0; color: var(--ink-soft); font-family: var(--serif); font-size: .9rem; line-height: 1.8; }
 .analysis-scope-note { margin: 4px 0 14px; color: var(--ink-soft); font-size: .78rem; line-height: 1.7; }
-.analysis-source-banner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .45fr); gap: 16px; padding: 16px 20px; border-left: 3px solid var(--cobalt); background: var(--paper); }
-.analysis-source-banner strong { display: inline-block; margin-right: 16px; font-size: .9rem; }
+.analysis-source-banner { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 12px; padding: 6px 12px; border-left: 3px solid var(--cobalt); background: var(--paper); }
+.analysis-source-main { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; min-width: 0; }
+.analysis-source-banner strong { font-size: .9rem; }
 .analysis-source-banner span, .analysis-source-banner p { font-size: .78rem; color: var(--ink-soft); }
-.analysis-source-banner p { margin: 8px 0 0; line-height: 1.6; }
+.analysis-source-banner p { margin: 0; line-height: 1.6; }
+.analysis-source-banner .analysis-details > summary { min-height: 32px; padding: 6px 0; }
+.analysis-source-banner .analysis-details[open] { grid-column: 1 / -1; }
 .analysis-source-facts { display: grid; gap: 10px; margin: 0; font-size: .76rem; }
 .analysis-source-facts dt { color: var(--ink-soft); }
 .analysis-source-facts dd { margin: 4px 0 0; overflow-wrap: anywhere; font-family: var(--mono); }
-.deconstruction-screen .deconstruction-main { padding: 20px 28px 40px; }
-.deconstruction-screen .deconstruction-header { padding-bottom: 12px; margin-bottom: 8px; }
+.deconstruction-screen .deconstruction-main { padding: 12px 28px 40px; }
+.deconstruction-screen .deconstruction-header { padding-bottom: 8px; margin-bottom: 4px; }
 .deconstruction-screen .deconstruction-heading h1 { font-size: 1.55rem; margin-top: 6px; }
 .deconstruction-screen .deconstruction-header .button { min-height: 40px; padding: 10px 14px; }
-.model-analysis-options { margin: 0 0 14px; border-bottom: 1px solid var(--line); }
-.model-analysis-options > summary { padding: 10px 0; color: var(--cobalt); font-size: .78rem; cursor: pointer; }
+.model-analysis-options { margin: 0 0 6px; border-bottom: 1px solid var(--line); }
+.model-analysis-options > summary { min-height: 32px; padding: 6px 0; color: var(--cobalt); font-size: .78rem; cursor: pointer; }
 .model-analysis-options > summary span { color: var(--ink-soft); font-size: .7rem; }
-.deconstruction-screen .depth-tab { padding: 10px 6px; font-size: .75rem; }
+.deconstruction-screen .depth-tab { min-height: 40px; padding: 8px 6px; font-size: .75rem; }
 .deconstruction-screen .depth-tablist { margin: 0; }
 .deconstruction-screen .depth-review-controls { padding: 8px 12px; gap: 8px 18px; margin: 0; }
 .deconstruction-screen .depth-review-controls > p { display: none; }
 .deconstruction-screen .depth-review-controls select { min-height: 36px; padding: 6px 8px; }
 .deconstruction-screen .depth-review-controls label { gap: 4px; }
-.deconstruction-screen .report-reading-heading { margin: 12px 0 8px; }
-.deconstruction-screen .report-reading-heading h2 { font-size: 1.25rem; }
-.deconstruction-screen .deconstruction-page-content { gap: 14px; margin-top: 14px; }
-.deconstruction-screen .deconstruction-depth-result { gap: 10px; }
+.deconstruction-screen .report-reading-heading { margin: 0 0 6px; }
+/* The active navigation already names this view; keep its repeated heading
+   available to heading navigation without spending another visual row. */
+.deconstruction-screen .report-reading-heading h2 { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.deconstruction-screen .report-reading-heading:not(:has(p)) { margin: 0; }
+.deconstruction-screen .deconstruction-page-content { gap: 8px; margin-top: 6px; }
+.deconstruction-screen .deconstruction-depth-result, .deconstruction-screen .deconstruction-result { gap: 6px; }
+.deconstruction-screen .report-update-note { padding: 4px 10px; gap: 4px 8px; }
+.deconstruction-screen .report-update-note button { min-height: 36px; }
+.deconstruction-screen .report-browser-tools { padding: 10px; gap: 8px; }
+.deconstruction-screen .report-browser-count { margin: 4px 0; }
+.deconstruction-screen .report-browser-items { margin-top: 0; }
 .deconstruction-screen .depth-tabpanel { gap: 8px; }
 .depth-range-options > summary { padding: 8px 12px; background: var(--paper); border: 1px solid var(--line); color: var(--ink-soft); cursor: pointer; font-size: .75rem; }
 .depth-range-options[open] > summary { border-bottom: 0; }
@@ -138,7 +149,7 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
 .deconstruction-volume .deconstruction-volume-name { color: var(--ink); }
 .deconstruction-volume:hover, .deconstruction-volume.is-current { border-color: var(--cobalt); background: var(--cobalt-pale); box-shadow: none; }
 .deconstruction-volume.is-warn small { color: var(--red); }
-.analysis-report { --analysis-ink: var(--ink); --analysis-accent: var(--cobalt); margin-top: 20px; overflow-wrap: anywhere; }
+.analysis-report { --analysis-ink: var(--ink); --analysis-accent: var(--cobalt); margin-top: 0; overflow-wrap: anywhere; }
 .analysis-characters { gap: 16px; align-items: start; }
 .analysis-person, .analysis-person-page, .analysis-node-detail, .analysis-modal { background: var(--paper); border-color: var(--line); color: var(--ink); }
 .analysis-person { padding: 20px; border-top: 2px solid var(--cobalt); }
@@ -202,6 +213,7 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
 @media (max-width: 640px) {
   .independent-screen .editor-spine, .deconstruction-screen .deconstruction-spine { flex-basis: 60px; }
   .independent-screen .editor-main, .deconstruction-screen .deconstruction-main { padding: 20px 12px 32px; }
+  .deconstruction-screen .deconstruction-main { padding-top: 12px; }
   .independent-screen .editor-heading h1, .deconstruction-screen .deconstruction-heading h1 { font-size: 1.65rem; }
   .independent-screen .editor-header { gap: 14px; }
   .independent-screen .editor-top-actions { justify-content: start; width: 100%; gap: 10px; }
@@ -221,10 +233,8 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
   .import-chapter-preview summary .mono { grid-column: 1 / -1; }
   .import-chapter-preview summary::after { grid-column: 1 / -1; }
   .import-confirm-actions .button { width: 100%; }
-  .analysis-source-banner { grid-template-columns: minmax(0, 1fr); padding: 14px; gap: 4px; }
-  .analysis-source-banner strong, .analysis-source-banner span { display: inline; margin: 0 8px 0 0; }
-  .analysis-source-banner .analysis-details > summary { min-height: 28px; padding: 4px 0; }
-  .report-update-note { padding: 10px 12px; gap: 4px; }
+  .analysis-source-banner { padding: 6px 10px; gap: 0 8px; }
+  .analysis-source-banner .analysis-details > summary { white-space: nowrap; }
   .deconstruction-screen .deconstruction-header { gap: 10px; }
   .deconstruction-screen .deconstruction-header { display: grid; grid-template-columns: minmax(0, 1fr) 90px; align-items: center; }
   .deconstruction-screen .deconstruction-header-actions { display: grid; grid-template-columns: 1fr; width: auto; }
@@ -233,7 +243,7 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
   .deconstruction-screen .deconstruction-header-actions { gap: 8px; }
   .deconstruction-screen .deconstruction-header .button { font-size: .75rem; min-height: 36px; padding: 8px 10px; }
   .deconstruction-screen .deconstruction-heading h1 { font-size: 1.4rem; }
-  .deconstruction-screen .report-reading-heading { gap: 0; margin-top: 4px; }
+  .deconstruction-screen .report-reading-heading { gap: 0; }
   .deconstruction-screen .report-reading-heading h2 { margin: 0; }
   .deconstruction-screen .report-reading-heading p { font-size: .68rem; }
   .model-analysis-options > summary { padding: 6px 0; }
