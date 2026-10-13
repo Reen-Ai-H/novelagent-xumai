@@ -8,6 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
     <link rel="stylesheet" href="/static/styles.css?v=stage34-20261011" />
     <link rel="stylesheet" href="/static/deconstruction-report.css?v=guide-cards-v6" />
+    <link rel="stylesheet" href="/static/workspace-ui.css?v=stage35" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -228,9 +229,10 @@
           <header class="editor-header">
             <div class="editor-heading"><p class="kicker"><span class="kicker-line"></span><span id="editorModeLabel">独立创作</span> / <span id="editorProjectTitle">—</span></p><h1 id="editorChapterHeading">开始你的第一章</h1></div>
             <div class="editor-top-actions" aria-label="章节状态">
-              <span id="editorSaveState" class="editor-save-state">尚未开始</span>
+              <span id="editorSaveState" class="editor-save-state" role="status" aria-live="polite">尚未开始</span>
               <span id="editorAnalysisState" class="editor-analysis-state" role="status" aria-live="polite">尚未开始</span>
               <span id="editorWordCount" class="editor-word-count mono">0 字</span>
+              <button class="button button-outline" type="button" data-action="save-editor" aria-label="保存正文（Ctrl 或 Command 加 S）" disabled>保存</button>
               <button id="completeChapterButton" class="button button-primary" type="button" disabled>完成本章 <span aria-hidden="true">→</span></button>
             </div>
           </header>
@@ -247,11 +249,11 @@
                 <div class="writing-toolbar"><label for="chapterTitleInput">章节标题</label><span id="writingModeNote">独立创作 · 正式正文</span></div>
                 <input id="chapterTitleInput" class="chapter-title-input" type="text" maxlength="200" aria-label="章节标题" />
                 <textarea id="chapterEditor" class="chapter-editor" spellcheck="false" aria-label="中文正文" placeholder="从这里开始写下你的故事……"></textarea>
-                <div class="writing-footer"><span>正文会先留在本地短暂缓冲，再自动保存到服务端。</span><span id="editorRevisionLabel" class="mono">REV / 0</span></div>
+                <div class="writing-footer"><span>自动保存 · Ctrl / ⌘ S 立即保存</span><span id="editorRevisionLabel" class="mono">REV / 0</span></div>
               </section>
               <aside id="archiveDrawer" class="archive-drawer" aria-label="故事档案摘要">
-                <div class="archive-drawer-head"><div><span class="eyebrow">故事档案</span><strong id="archiveDrawerTitle">最新状态</strong></div><button id="toggleArchiveButton" class="drawer-toggle" type="button" data-action="toggle-archive" aria-expanded="true">收起</button></div>
-                <div class="archive-drawer-body">
+                <div class="archive-drawer-head"><div><span class="eyebrow">故事档案</span><strong id="archiveDrawerTitle">最新状态</strong></div><button id="toggleArchiveButton" class="drawer-toggle" type="button" data-action="toggle-archive" aria-expanded="true" aria-controls="archiveDrawerBody">收起</button></div>
+                <div id="archiveDrawerBody" class="archive-drawer-body">
                   <label class="archive-select-label" for="archiveSnapshotSelect">查看章节快照</label>
                   <select id="archiveSnapshotSelect" class="archive-snapshot-select"><option value="">最新状态</option></select>
                   <div id="archiveSummary" class="archive-summary"></div>
@@ -463,7 +465,7 @@
       </div>
     </dialog>
 
-    <script src="/static/deconstruction-report.js?v=stage34-20261011" defer></script>
-    <script src="/static/app.js?v=stage34-20261011" defer></script>
+    <script src="/static/deconstruction-report.js?v=stage35" defer></script>
+    <script src="/static/app.js?v=stage35" defer></script>
   </body>
 </html>

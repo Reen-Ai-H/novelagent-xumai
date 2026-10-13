@@ -34,7 +34,7 @@
       if (document.querySelector("dialog[open]")) return;
       if (event.key === "Escape") { event.preventDefault(); close(); }
       if (event.key === "Tab") {
-        const focusable = Array.from(backdrop.querySelectorAll('button:not([disabled]), a[href], [tabindex="0"]'))
+        const focusable = Array.from(backdrop.querySelectorAll('button:not([disabled]), a[href], summary, [tabindex="0"]'))
           .filter(node => node.getClientRects().length);
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -153,12 +153,16 @@
         view.innerHTML = `<div class="analysis-characters">${report.characters.map(p => {
           const portrait = p.portrait || p.identity;
           const chips = phraseChips(p, true);
-          return `<article class="analysis-person"><header><span class="eyebrow">${esc(p.role)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><p class="analysis-portrait">${esc(portrait.text)}</p>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}<div class="analysis-experience"><h4>关键经历</h4><p>${esc(p.change.text)}</p></div><span class="analysis-read-more" aria-hidden="true">完整人物解析 ↗</span></article>`;
-        }).join("")}</div>`;
+          return `<article class="analysis-person"><header><span class="eyebrow">${esc(p.role)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><div class="analysis-card-summary"><span>性格 / 为人</span><p class="analysis-portrait">${esc(portrait?.text || "当前报告没有性格判断。")}</p><span>关键经历</span><p>${esc(p.change?.text || "当前报告没有经历记录。")}</p></div>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}<details class="analysis-details"><summary>展开原文依据</summary><div class="analysis-details-body"><h4>性格 / 为人</h4>${evidence(portrait?.evidence_ids)}<h4>关键经历</h4>${evidence(p.change?.evidence_ids)}</div></details><button type="button" class="quiet-link analysis-read-more" data-report-person="${esc(p.id)}">完整人物解析 ↗</button></article>`;
+        }).join("") || '<p class="analysis-scope-note">当前报告没有人物记录，可切换剧情或回到正文查看。</p>'}</div>`;
       } else if (tab === "time") {
         const events = timeMode === "story" ? report.story_order.map(id => byId.get(id)) : report.events;
         view.innerHTML = `<div class="analysis-time-heading"><h3>同一批事件，两种阅读顺序</h3><div class="analysis-time-toggle"><button type="button" data-report-time="narrative" aria-pressed="${timeMode === "narrative"}">正文揭示顺序</button><button type="button" data-report-time="story" aria-pressed="${timeMode === "story"}">故事发生顺序</button></div><p>${esc(report.time_note)}</p></div><ol class="analysis-time-list">${events.map(e => `<li><span class="analysis-time-dot"></span><div><small>正文${chapterLabel(e)} · ${esc(e.story_time)}</small><button type="button" data-report-node="${e.id}">${esc(e.title)} ↗</button><p>${esc(e.action.text)}</p></div></li>`).join("")}</ol>`;
       } else {
+        if (!report.events.length) {
+          view.innerHTML = '<p class="analysis-scope-note">当前报告没有大剧情记录，可切换人物卡或回到正文查看。</p>';
+          return;
+        }
         const positions = new Map(report.events.map((e, i) => [e.id, { x: 24 + (i % 3) * 246, y: 30 + Math.floor(i / 3) * 146 }]));
         const width = Math.min(3, report.events.length) * 246 + 12;
         const height = Math.ceil(report.events.length / 3) * 146 + 20;
@@ -182,11 +186,11 @@
       if (sub) { event.preventDefault(); const [eid, index] = sub.dataset.reportSubevent.split("~"); openSubEvent(eid, index); return; }
       const personLink = event.target.closest("[data-report-person]");
       if (personLink && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-        event.preventDefault(); character = personLink.dataset.reportPerson; draw(); window.scrollTo(0, 0); return;
+        event.preventDefault(); character = personLink.dataset.reportPerson; draw(); window.scrollTo(0, 0); view.querySelector('[data-report-back]')?.focus({preventScroll:true}); return;
       }
       const button = event.target.closest("button");
       if (!button) return;
-      if (button.hasAttribute("data-report-back")) { character = null; draw(); window.scrollTo(0, 0); }
+      if (button.hasAttribute("data-report-back")) { const previous = character; character = null; draw(); window.scrollTo(0, 0); Array.from(view.querySelectorAll('.analysis-person-link')).find(link => link.dataset.reportPerson === previous)?.focus({preventScroll:true}); }
       if (button.dataset.reportTab) { tab = button.dataset.reportTab; draw(); }
       if (button.dataset.reportTime) { timeMode = button.dataset.reportTime; draw(); view.querySelector(`[data-report-time="${timeMode}"]`).focus(); }
       if (button.dataset.reportNode) { selected = button.dataset.reportNode; tab = "plot"; draw(); view.querySelector(`[data-report-node="${selected}"]`).focus({ preventScroll: true }); }
