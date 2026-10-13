@@ -1,0 +1,74 @@
+/* A-version paper and real story threads, shared by both report contracts. */
+.visual-view-toggle { display:flex; gap:4px; margin:0 0 8px; }
+.visual-view-toggle button,.visual-person-picks button,.visual-neighbor-pages button { min-height:36px; padding:7px 12px; background:var(--paper); color:var(--ink-soft); border:1px solid var(--line); border-radius:3px; }
+.visual-view-toggle [aria-pressed=true],.visual-person-picks [aria-pressed=true] { color:var(--cobalt); border-color:var(--cobalt); background:var(--cobalt-pale); }
+.visual-map-items { min-width:0; border:1px solid var(--line); background:var(--paper); padding:10px 0; }
+.visual-caption,.visual-empty { margin:4px 12px 10px; color:var(--ink-soft); font-size:.75rem; line-height:1.7; }
+.visual-canvas { position:relative; width:100%; min-width:0; overflow:hidden; }
+.visual-lines { position:absolute; inset:0; pointer-events:none; }
+.visual-edge path { fill:none; stroke:var(--cobalt); stroke-width:1.5; }
+.visual-lines marker path { fill:var(--cobalt); }
+.visual-edge text { fill:var(--ink-soft); font:10px var(--sans); text-anchor:middle; paint-order:stroke; stroke:var(--paper); stroke-width:4; }
+.visual-edge.is-order path { stroke:var(--archive); stroke-dasharray:3 5; }
+.visual-edge.is-follows path { stroke:var(--archive); stroke-dasharray:6 3; }
+.visual-edge.is-causes path,.visual-edge.is-foreshadow_payoff path { stroke:var(--red); stroke-width:2; }
+.visual-node { position:absolute; display:flex; flex-direction:column; justify-content:center; height:62px; gap:4px; padding:6px 10px; border:1px solid var(--line-dark); border-left:3px solid var(--archive); background:var(--paper); color:var(--ink); text-align:left; border-radius:3px; }
+.visual-node strong { font:600 .95rem/1.4 var(--serif); overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.visual-node small { font: .65rem/1.2 var(--sans); color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.visual-node.is-selected { border-color:var(--cobalt); background:var(--cobalt-pale); }
+.visual-node.is-neighbor { border-left-color:var(--cobalt); }
+.visual-node:hover { border-color:var(--cobalt); }
+.visual-person-picks { display:flex; gap:6px; flex-wrap:wrap; padding:0 12px 8px; }
+.visual-person-picks button { font-size:.8rem; }
+.visual-neighbor-pages { display:flex; align-items:center; justify-content:center; gap:10px; font-size:.75rem; }
+.visual-neighbor-pages[hidden] { display:none; }
+.visual-selected { padding:16px 20px; background:var(--paper); border-left:3px solid var(--cobalt); margin-top:12px; }
+.visual-selected h3 { margin:0 0 6px; font:600 1.2rem/1.5 var(--serif); }
+.visual-selected > article > p { margin:6px 0; font: .95rem/1.8 var(--serif); color:var(--ink-soft); }
+.visual-selected .analysis-details { margin-top:10px; }
+.visual-selected .analysis-details > summary { color:var(--cobalt); min-height:36px; padding-block:8px; cursor:pointer; font-size:.8rem; }
+.visual-selected .analysis-person { border:0; padding:0; }
+.visual-edge-reference { display:grid; gap:6px; font-size:.85rem; }
+.visual-edge-reference button { justify-self:start; color:var(--cobalt); background:transparent; min-height:36px; }
+.visual-selected .analysis-node-detail { border:0; box-shadow:none; max-height:none; padding:0; }
+.visual-coactors { position:absolute; display:flex; flex-wrap:wrap; gap:3px; }
+.visual-coactors button,.visual-roster button { font-size:.75rem; min-height:24px; padding:3px 5px; border:1px solid var(--line); border-radius:3px; background:var(--frost); color:var(--cobalt); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.visual-roster { display:flex; flex-wrap:wrap; gap:10px; }
+.visual-roster button { min-height:40px; font-size:1rem; padding:8px 14px; }
+.visual-order { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+.visual-time-note { color:var(--ink-soft); font-size:.8rem; }
+.visual-reader { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(220px,1fr); gap:0 16px; align-items:start; }
+.visual-reader > .report-browser-tools,.visual-reader > .report-browser-count { grid-column:1/-1; }
+.visual-reader > .visual-map-items { grid-column:1; grid-row:3; }
+.visual-reader > .visual-selected { grid-column:2; grid-row:3/5; margin:0; }
+.visual-reader > .report-browser-pages { grid-column:1; grid-row:4; }
+.chapter-section-list { margin:0 10px 8px 20px; border-left:1px solid var(--line); padding-left:10px; }
+.chapter-section-list > summary { cursor:pointer; color:var(--ink-soft); font-size:.75rem; padding:6px 0; }
+.chapter-section-list ol { list-style:none; padding:0; margin:0; }
+.chapter-section-list button { display:flex; flex-direction:column; text-align:left; padding:7px 4px; width:100%; min-height:38px; color:var(--ink); background:none; }
+.chapter-section-list button:hover { color:var(--cobalt); background:var(--cobalt-pale); }
+.chapter-section-list button span { font: .9rem/1.5 var(--serif); overflow-wrap:anywhere; }
+.chapter-section-list small { color:var(--ink-soft); font-size:.65rem; }
+.chapter-section-status { font-size:.75rem; color:var(--ink-soft); padding:8px 12px; line-height:1.7; }
+.import-section-outline { border-top:1px solid var(--line); padding:12px 16px; font-size:.8rem; }
+.import-section-outline ol { margin:8px 0 0; padding-left:18px; }
+.import-section-outline li { padding:3px; }
+.import-section-outline small { margin-left:12px; color:var(--ink-soft); }
+.independent-screen[data-editor-mode=independent] .editor-layout { grid-template-columns:184px minmax(0,1fr); }
+.independent-screen[data-editor-mode=independent] #archiveDrawer { display:none; }
+@media(max-width:1100px) {
+  .visual-reader { display:flex; flex-direction:column; gap:0; }
+  .visual-reader > * { width:100%; }
+  .visual-reader > .visual-selected { order:0; margin:0 0 10px; }
+  .visual-reader > .visual-map-items { order:1; }
+  .visual-reader > .report-browser-pages { order:2; }
+}
+@media(max-width:640px) {
+  .visual-node { padding-inline:5px; }
+  .visual-node strong { font-size:.9rem; }
+  .visual-selected { padding:12px; }
+  .visual-person-picks { gap:4px; }
+  .independent-screen .chapter-list { display:block; max-height:260px; }
+  .independent-screen .chapter-list-item { width:100%; }
+}
+@media(prefers-reduced-motion:reduce) { .visual-node,.visual-lines { animation:none; transition:none; } }

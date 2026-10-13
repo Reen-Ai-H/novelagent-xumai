@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/static/styles.css?v=stage34-20261011" />
     <link rel="stylesheet" href="/static/deconstruction-report.css?v=guide-cards-v6" />
     <link rel="stylesheet" href="/static/workspace-ui.css?v=stage35-contract" />
+    <link rel="stylesheet" href="/static/visual-reading.css?v=stage36" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -299,7 +300,7 @@
               <button type="button" data-action="deconstruction-section" data-section="time">双时间线</button>
               <button type="button" data-action="deconstruction-section" data-section="guide">全书导读</button>
             </div>
-            <button class="spine-link" type="button" data-action="deconstruction-open-versions"><span class="spine-icon">◫</span><strong>版本记录</strong></button>
+            <button class="spine-link is-hidden" type="button" data-action="deconstruction-open-versions"><span class="spine-icon">◫</span><strong>版本记录</strong></button>
           </nav>
           <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">XRAY / 04</span><button id="deconstructionLogoutButton" class="spine-logout" type="button">退出</button></div>
         </aside>
@@ -467,6 +468,8 @@
     </dialog>
 
     <script src="/static/report-browser.js?v=stage35-reading" defer></script>
+    <script src="/static/visual-reading.js?v=stage36" defer></script>
+    <script src="/static/chapter-sections.js?v=stage36" defer></script>
     <script src="/static/rule-report.js?v=stage35-reading" defer></script>
     <script src="/static/deconstruction-report.js?v=stage35-contract" defer></script>
     <script src="/static/app.js?v=stage35-contract" defer></script>

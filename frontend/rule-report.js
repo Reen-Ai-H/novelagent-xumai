@@ -23,6 +23,9 @@
     const evidence = item => options.evidence(item, report);
     const itemLabel = id => { const item = index.get(id); return item?.name || item?.action || item?.title || (item?.characterId ? `${index.get(item.characterId)?.name || '人物'}的状态` : "未命名记录"); };
     const configs = new Map();
+    const G = window.XumaiVisualReading;
+    const graph = G?.preference() === 'map';
+    const toggle = () => G?.switcher(root,()=>mount(root,report,raw,options));
     const bind = node => B.lazy(node, configs);
     const mountList = (selector, config) => B.mount(root.querySelector(selector), {...config, afterRender:bind});
     const relationConfig = (items, label = "关系") => ({label, items, pageSize:8,
@@ -49,13 +52,25 @@
       configs.set('identity-candidates',{label:'识别候选',items:candidates,renderItem:c=>`<article class="depth-track-item"><strong>${esc(c.name)}</strong><p>${esc(c.importance_reason)}</p><small>${c.mention_count} 次提及 · ${c.paragraph_count} 段；候选不等于正式人物</small></article>`});
       root.innerHTML = `<header class="report-reading-heading"><h2>人物与关系</h2></header><div data-rule-people></div>${lazyDetail(`全部人物关系 · ${report.characters.relations.filter(visible).length}`, 'all-people-relations')}`;
       configs.set('all-people-relations', relationConfig(report.characters.relations.filter(visible), '人物关系'));
-      mountList('[data-rule-people]', {label:"人物", items:characters, pageSize:8, className:"depth-view-grid depth-entity-grid", text:c => `${c.name} ${c.aliases.join(' ')} ${c.conclusion} ${c.role}`, filters:[{name:"importance",label:"人物分组", options:[{value:"",label:"全部记录"},...Object.entries(importanceLabels).map(([value,label]) => ({value,label:`${label} · ${counts[value]}`}))],match:(item,value) => (rawCharacters.get(item.id)?.importance || 'unknown') === value}], renderItem:personCard});
+      const config={label:"人物", items:characters, pageSize:8, className:"depth-view-grid depth-entity-grid", text:c => `${c.name} ${c.aliases.join(' ')} ${c.conclusion} ${c.role}`, filters:[{name:"importance",label:"人物分组", options:[{value:"",label:"全部记录"},...Object.entries(importanceLabels).map(([value,label]) => ({value,label:`${label} · ${counts[value]}`}))],match:(item,value) => (rawCharacters.get(item.id)?.importance || 'unknown') === value}], renderItem:personCard};
+      if (graph) {
+        let controller;
+        controller=G.mount(root.querySelector('[data-rule-people]'),{...config,type:'people',title:p=>p.name,meta:p=>importanceLabels[rawCharacters.get(p.id)?.importance] || '待确认',bind,
+          note:'原文关系线索，尚未作人物心理或关系定性。只显示选中人物的一跳。',
+          neighbors:p=>report.characters.relations.filter(r=>visible(r) && (r.start.id===p.id || r.end.id===p.id)).map(r=>{
+            const id=r.start.id===p.id?r.end.id:r.start.id;
+            return {id:r.id,personId:id,title:itemLabel(id),label:options.relationLabel(r.relationType),edgeLabel:options.relationLabel(r.relationType),kind:'clue'};
+          }),
+          onNeighbor:n=>controller.reveal(n.personId),
+          detail:p=>`<article><span class="eyebrow">原文线索 · ${esc(chapters(p))}</span><h3>${esc(p.name)}</h3><p>${esc(short(readable(rawCharacters.get(p.id)?.summary || p.conclusion),140))}</p>${detail('人物记录与依据',personCard(p))}</article>`});
+      } else mountList('[data-rule-people]',config);
       bind(root);
       if (candidates.length) {
         const auxiliary = document.createElement('section');
         auxiliary.innerHTML = lazyDetail(`识别候选与分组依据 · ${candidates.length}`, 'identity-candidates');
         root.appendChild(auxiliary); bind(auxiliary);
       }
+      toggle();
       return;
     }
     // Legacy fallback is explicitly mechanical grouping. Every event appears
@@ -87,14 +102,22 @@
     root.innerHTML = `<header class="report-reading-heading"><h2>沿着正文看故事</h2><p>${readingSegments.length} 个段落 · ${events.length} 条原文记录</p></header><p class="analysis-scope-note">${overview?.summary ? esc(short(overview.summary, 160)) : list(raw.plot?.reading_segments).length ? '按正文段落整理；分段与先后顺序不代表语义因果。' : '旧报告按章节与正文顺序，每 12 条记录归为一组；这不是模型提炼的大事件。'}</p><div data-rule-segments></div>${detail(`章节事件片段 · ${events.length}`, '<div data-rule-events></div>', 'depth-subsection depth-events-section')}${lazyDetail(`事件关系 · ${relations.length}`, 'all-event-relations')}${lazyDetail(`原报告剧情线 · ${report.plot.plotlines.length}`, 'plotlines')}`;
     configs.set('all-event-relations',relationConfig(relations,'事件关系'));
     configs.set('plotlines',{label:'剧情线',items:report.plot.plotlines.filter(visible),renderItem:line => `<article class="depth-entity-card"><h3>${esc(line.title)}</h3><p>${esc(line.conclusion)}</p>${detail('旧报告字段与原文依据', `<p>${esc(line.centralQuestion)}</p><p>${esc(line.stakes)}</p><p>${esc(line.resolution)}</p>${evidence(line)}`)}</article>`});
-    mountList('[data-rule-segments]',{label:'阅读段落',items:readingSegments,pageSize:6, className:'reading-segments',
+    const segmentConfig={label:'阅读段落',items:readingSegments,pageSize:6, className:'reading-segments',
       text:s => `${s.title} ${s.summary} ${s.events.map(e => `${e.action} ${e.conclusion}`).join(' ')}`,
       renderItem:(s,i) => {
         configs.set(`segment-${s.id}`, eventConfig(s.events.filter(visible), '段落内记录'));
         return `<article class="reading-segment" data-reading-segment="${esc(s.id)}"><div class="reading-segment-number" aria-hidden="true">${String(i+1).padStart(2,'0')}</div><div><span class="eyebrow">${esc(chapters(s))} · ${s.paragraphStart ? `第 ${esc(s.paragraphStart)}–${esc(s.paragraphEnd)} 段 · ` : ''}${s.events.length} 条记录</span><h3>${esc(s.title)}</h3><p>${esc(short(s.summary,180))}</p>${lazyDetail(`展开原文细节 · ${s.events.length}`, `segment-${s.id}`, `<p>${esc(s.summary)}</p>${s.characterIds.length ? `<p>出场人物：${esc(s.characterIds.map(itemLabel).join('、'))}</p>` : ''}${s.uncertainty.length ? `<p class="analysis-scope-note">${esc(s.uncertainty.join('；'))}</p>` : ''}`)}${s.evidenceIds.length ? detail('段落依据', evidence(s)) : ''}</div></article>`;
-      }});
+      }};
+    if (graph) {
+      const segmentByEvent=new Map(readingSegments.flatMap(s=>s.events.map(e=>[e.id,s.id])));
+      const edges=relations.map(r=>({from:segmentByEvent.get(r.start.id),to:segmentByEvent.get(r.end.id),kind:'clue',label:options.relationLabel(r.relationType)})).filter(r=>r.from && r.to && r.from!==r.to);
+      G.mount(root.querySelector('[data-rule-segments]'),{...segmentConfig,title:s=>s.title,meta:chapters,bind,edges,
+        note:'按正文段落阅读；连线仅为已有规则线索，不推断语义因果。',
+        detail:s=>segmentConfig.renderItem(s,readingSegments.indexOf(s))});
+    } else mountList('[data-rule-segments]',segmentConfig);
     mountList('[data-rule-events]', eventConfig(events));
     bind(root);
+    toggle();
   }
   window.XumaiRuleReport = Object.freeze({mount});
 })();
