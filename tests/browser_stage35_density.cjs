@@ -1,4 +1,5 @@
-/* Short-viewport report density regression against the real isolated server.
+/* Current-native rule and model density on the real isolated server.
+ * Legacy upgrade/history is a separate browser_stage35_history.cjs scenario.
  * First run browser_stage35_reading.cjs --setup-only; no request interception,
  * manuscript mutation, real data, or model calls are used here. */
 const assert = require('node:assert/strict');
@@ -17,7 +18,7 @@ const views = [
 ];
 (async () => {
   await fs.mkdir(out, {recursive:true});
-  const fixture = JSON.parse(await fs.readFile(path.join(root, 'test-results/stage35-reading/fixture.json'), 'utf8'));
+  const fixture = JSON.parse(await fs.readFile(process.env.XUMAI_BROWSER_FIXTURE || path.join(root, 'test-results/stage35-reading/fixture.json'), 'utf8'));
   const browser = await chromium.launch({headless:true, channel:process.env.XUMAI_BROWSER_CHANNEL || 'chrome'});
   const metrics = [], errors = [];
   try {
@@ -32,6 +33,19 @@ const views = [
     await page.locator('#emailInput').fill(fixture.email);
     await page.locator('#emailSubmitButton').click();
     await page.waitForURL('**/library');
+    assert.equal(new URL(fixture.ruleUrl).origin, origin);
+    const projectId = new URL(fixture.ruleUrl).pathname.split('/').pop();
+    const response = await context.request.get(`${origin}/api/independent/projects/${projectId}/deconstruction`);
+    assert.equal(response.status(), 200);
+    const native = await response.json();
+    assert.equal(native.effective_status, 'completed');
+    assert.equal(native.update_available, false);
+    assert.equal(typeof native.engine_revision, 'string');
+    assert.ok(native.engine_revision.length > 0);
+    assert.equal(native.engine_revision, native.required_engine_revision);
+    assert.equal(native.result.engine_revision, native.engine_revision);
+    assert.equal(native.result.report.engine_revision, native.engine_revision);
+    assert.ok(native.result.report.plot.reading_segments.length > 0);
     for (const width of [1280, 390]) {
       await page.setViewportSize({width, height:720});
       for (const [key, label, card, summary, fontFloor] of views) {
@@ -61,7 +75,7 @@ const views = [
         await page.keyboard.press('Enter');
         assert.equal(await sourceDetails.getAttribute('open'), null);
         if (label.startsWith('rule')) {
-          assert.ok(await page.locator('.report-update-note button').isVisible());
+          assert.equal(await page.locator('.report-update-note').count(), 0, 'Current native rules must not show an upgrade notice');
           const selected = page.locator('[role=tab][aria-selected=true]');
           const original = await selected.getAttribute('id');
           await selected.focus(); await page.keyboard.press('ArrowRight');
@@ -70,8 +84,8 @@ const views = [
         }
       }
     }
-    await fs.writeFile(path.join(out, 'report.json'), JSON.stringify({browser:browser.version(), metrics, errors}, null, 2));
-    console.log(JSON.stringify({metrics, errors}));
+    await fs.writeFile(path.join(out, 'report.json'), JSON.stringify({browser:browser.version(), engineRevision:native.engine_revision, updateAvailable:native.update_available, metrics, errors}, null, 2));
+    console.log(JSON.stringify({engineRevision:native.engine_revision, updateAvailable:native.update_available, metrics, errors}));
     assert.deepEqual(errors, []);
     for (const m of metrics) {
       assert.ok(m.scroll <= m.width && m.body <= m.width, `${m.label} ${m.width}: horizontal overflow`);

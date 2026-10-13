@@ -87,8 +87,8 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
   .reading-segment { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 16px 8px; }
   .report-plot-layout .analysis-node-detail { padding: 16px; }
 }
-.analysis-card-summary { display: grid; gap: 6px; }
-.analysis-card-summary > span { margin-top: 6px; color: var(--ink-soft); font-size: .72rem; font-weight: 600; }
+.analysis-card-summary { display: grid; gap: 4px; }
+.analysis-card-summary > span { color: var(--ink-soft); font-size: .72rem; font-weight: 600; }
 .analysis-card-summary > p { margin: 0; color: var(--ink-soft); font-family: var(--serif); font-size: .9rem; line-height: 1.8; }
 .analysis-scope-note { margin: 4px 0 14px; color: var(--ink-soft); font-size: .78rem; line-height: 1.7; }
 .analysis-source-banner { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 12px; padding: 6px 12px; border-left: 3px solid var(--cobalt); background: var(--paper); }
@@ -143,7 +143,18 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
 .deconstruction-screen .depth-track-item { padding: 16px; }
 .deconstruction-screen .depth-track-item p { font-size: .85rem; }
 .deconstruction-screen .deconstruction-history-panel { padding: 12px 20px; }
+.report-history-item { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: .82rem; }
+.report-history-item header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; }
+.report-history-item p { margin: 0; color: var(--ink-soft); font-size: .75rem; line-height: 1.7; }
+.report-history-current { color: var(--cobalt); font-size: .75rem; }
+.report-history-item .quiet-link { justify-self: start; min-height: 36px; }
 .deconstruction-screen .deconstruction-volume-bar { border-color: var(--line); background: var(--paper); border-radius: 4px; }
+.deconstruction-screen .deconstruction-volume-bar.is-single-volume { margin: 0; padding: 0 10px; }
+.is-single-volume .deconstruction-volume { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-height: 36px; padding: 6px 8px; }
+.single-volume-nav { min-width: 0; color: var(--ink-soft); font-size: .75rem; }
+.single-volume-nav > summary { min-height: 36px; padding: 8px 0; cursor: pointer; }
+.single-volume-nav > summary > span { margin-left: 12px; color: var(--cobalt); }
+.single-volume-nav[open] .deconstruction-volume-note { display: block; }
 .deconstruction-volume-bar .eyebrow, .deconstruction-volume small, .deconstruction-volume-note { color: var(--ink-soft); }
 .deconstruction-volume { border-color: var(--line); border-radius: 3px; background: var(--paper); }
 .deconstruction-volume .deconstruction-volume-name { color: var(--ink); }
@@ -152,9 +163,9 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
 .analysis-report { --analysis-ink: var(--ink); --analysis-accent: var(--cobalt); margin-top: 0; overflow-wrap: anywhere; }
 .analysis-characters { gap: 16px; align-items: start; }
 .analysis-person, .analysis-person-page, .analysis-node-detail, .analysis-modal { background: var(--paper); border-color: var(--line); color: var(--ink); }
-.analysis-person { padding: 20px; border-top: 2px solid var(--cobalt); }
-.analysis-person h3 { font-family: var(--serif); }
-.analysis-person-link { display: inline-block; padding: 6px 0; }
+.analysis-person { padding: 16px; border-top: 2px solid var(--cobalt); }
+.analysis-person h3 { font-family: var(--serif); margin-top: 4px; }
+.analysis-person-link { display: inline-block; padding: 0; }
 .analysis-person-link::after { display: none; }
 .analysis-person .analysis-portrait { margin: 0; }
 .analysis-person:hover { border-color: var(--line-dark); }
@@ -257,7 +268,8 @@ body:has(:is(#independentScreen, #deconstructionScreen):not(.is-hidden)) .toast-
   .deconstruction-screen .depth-view-heading { padding: 16px; }
   .deconstruction-screen .depth-subsection { padding: 14px; }
   .analysis-characters { grid-template-columns: minmax(0, 1fr); }
-  .analysis-person, .analysis-person-page { padding: 18px; }
+  .analysis-person { padding: 12px; }
+  .analysis-person-page { padding: 18px; }
   .analysis-map-heading h3 { font-size: 1.2rem; }
   .deconstruction-guide-grid { grid-template-columns: minmax(0, 1fr); }
 }

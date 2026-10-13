@@ -139,11 +139,17 @@
     const browsing = Object.fromEntries(["characters", "plot", "time"].map(key => [key, {query:"", page:1, filters:{}}]));
     const lazyConfigs = new Map();
     const lazyDetails = (label, key) => `<details class="analysis-details" data-browser-lazy="${esc(key)}"><summary>${esc(label)}</summary><div class="analysis-details-body" data-browser-slot></div></details>`;
-    const importance = person => ({main:"主要人物", supporting:"配角", incidental:"偶现人物"})[person.importance]
-      || (["主角", "主要人物", "主人公"].includes(person.role) ? "主要人物" : ["配角", "次要人物"].includes(person.role) ? "配角" : "未分级");
+    const importance = person => {
+      // model.1 only has role, not importance. Accept an explicit leading
+      // classification (or a standalone label), never an identity substring.
+      const role = String(person.role || "").trim();
+      if (/^(?:主角|主要人物|主人公)(?:\s*[：:]|$)/u.test(role)) return "主要人物";
+      if (/^(?:配角|次要人物|实质配角)(?:\s*[：:]|$)/u.test(role)) return "配角";
+      return "未分级";
+    };
     const personText = p => `${p.name} ${(p.aliases || []).join(' ')} ${p.identity?.text || ''} ${p.portrait?.text || ''} ${p.change?.text || ''}`;
     const peopleForList = () => {
-      const order = {"主要人物":0,"配角":1,"偶现人物":2,"未分级":3};
+      const order = {"主要人物":0,"配角":1,"未分级":2};
       return [...report.characters].sort((a,b) => order[importance(a)] - order[importance(b)]);
     };
     const chapterNumbers = [...new Set(report.events.flatMap(e => Array.from({length:Math.max(1,(e.chapter_end || e.chapter_number)-e.chapter_number+1)},(_,i)=>e.chapter_number+i)).filter(Number.isFinite))].sort((a,b)=>a-b);
@@ -175,10 +181,11 @@
     }
     function personCard(p) {
       const portrait = p.portrait || p.identity;
+      const roleLabel = importance(p) === "未分级" ? `未分级 · ${p.role || "角色待补充"}` : p.role;
       const chips = phraseChips(p,true);
       const together = [...new Set(report.events.filter(e=>(e.actor_ids || []).includes(p.id)).flatMap(e=>e.actor_ids || []))].filter(id=>id!==p.id && people.has(id));
       lazyConfigs.set(`person-together-${p.id}`,{label:"同场人物",items:together,renderItem:id=>`<p><button type="button" class="quiet-link" data-report-person="${esc(id)}">${esc(people.get(id))}</button></p>`});
-      return `<article class="analysis-person"><header><span class="eyebrow">${importance(p)} · ${esc(p.role || "角色待补充")}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><div class="analysis-card-summary"><span>性格 / 为人 · ${labels[portrait?.status] || labels.unknown}</span><p class="analysis-portrait">${esc(compact(portrait?.text || "当前报告没有性格判断。"))}</p><span>关键经历 · ${labels[p.change?.status] || labels.unknown}</span><p>${esc(compact(p.change?.text || "当前报告没有经历记录。"))}</p></div>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}${together.length ? lazyDetails(`同场人物 · ${together.length}（不代表关系定性）`,`person-together-${p.id}`) : ''}<details class="analysis-details"><summary>展开原文依据</summary><div class="analysis-details-body"><h4>性格 / 为人</h4>${evidence(portrait?.evidence_ids)}<h4>关键经历</h4>${evidence(p.change?.evidence_ids)}</div></details><button type="button" class="quiet-link analysis-read-more" data-report-person="${esc(p.id)}">完整人物解析 ↗</button></article>`;
+      return `<article class="analysis-person"><header><span class="eyebrow">${esc(roleLabel)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><div class="analysis-card-summary"><span>性格 / 为人 · ${labels[portrait?.status] || labels.unknown}</span><p class="analysis-portrait">${esc(compact(portrait?.text || "当前报告没有性格判断。"))}</p><span>关键经历 · ${labels[p.change?.status] || labels.unknown}</span><p>${esc(compact(p.change?.text || "当前报告没有经历记录。"))}</p></div>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}${together.length ? lazyDetails(`同场人物 · ${together.length}（不代表关系定性）`,`person-together-${p.id}`) : ''}<details class="analysis-details"><summary>展开原文依据</summary><div class="analysis-details-body"><h4>性格 / 为人</h4>${evidence(portrait?.evidence_ids)}<h4>关键经历</h4>${evidence(p.change?.evidence_ids)}</div></details><button type="button" class="quiet-link analysis-read-more" data-report-person="${esc(p.id)}">完整人物解析 ↗</button></article>`;
     }
     function draw() {
       options.onView?.(tab, character);
@@ -197,10 +204,10 @@
         return;
       }
       if (tab === "characters") {
-        view.innerHTML = '<header class="report-reading-heading"><h2>人物与经历</h2><p>判断与推断均可展开核对原文。</p></header><div data-model-people></div>';
+        view.innerHTML = '<header class="report-reading-heading"><h2>人物与经历</h2></header><div data-model-people></div>';
         B.mount(view.querySelector('[data-model-people]'),{label:"人物",items:peopleForList(),state:browsing.characters,pageSize:8,className:"analysis-characters",
           text:personText,
-          filters:[{name:"importance",label:"人物分组",options:[{value:"",label:"全部人物"},...["主要人物","配角","偶现人物","未分级"].map(value=>({value,label:`${value} · ${report.characters.filter(p=>importance(p)===value).length}`}))],match:(p,value)=>importance(p)===value}],
+          filters:[{name:"importance",label:"人物分组",options:[{value:"",label:"全部人物"},...["主要人物","配角","未分级"].map(value=>({value,label:`${value} · ${report.characters.filter(p=>importance(p)===value).length}`}))],match:(p,value)=>importance(p)===value}],
           renderItem:personCard,afterRender:node=>B.lazy(node,lazyConfigs)});
       } else if (tab === "time") {
         const ordered = report.story_order.map(id=>byId.get(id)).filter(Boolean);

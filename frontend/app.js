@@ -2102,6 +2102,7 @@
       sourceRevision: deconstructionNumber(value.source_revision),
       sourceHash: String(value.source_hash || ""),
       analysisContractVersion,
+      engineRevision: typeof value.engine_revision === "string" ? value.engine_revision : null,
       retryCount: deconstructionNumber(value.retry_count) || 0,
       analysisLabel: deconstructionText(value.analysis_label, "服务端结构拆解"),
       createdAt: value.created_at || null,
@@ -2520,13 +2521,25 @@
     const root = elements.deconstructionPageContent.querySelector('[data-report-history]');
     if (!root || !window.XumaiReportBrowser) return;
     window.XumaiReportBrowser.mount(root, {label:"拆解记录", items:data.history.slice().reverse(), pageSize:6,
-      renderItem(item) {
-        const versionLabel = item.analysisContractVersion === "2.0" ? "深度 2.0"
-          : item.analysisContractVersion === "model.1" ? "模型报告" : item.analysisContractVersion === "1.0" ? "基础 1.0" : "版本未知";
-        const sameSource = item.sourceVersionId === data.source.versionId && item.sourceRevision === data.source.revision && item.sourceHash === data.source.contentHash;
-        const canRead = item.status === "completed" && (sameSource || data.volumes.some(v => v.documentId === item.documentId && v.match));
-        return `<article class="report-history-item"><strong>${escapeHtml(item.analysisContractVersion === "2.0" ? '规则线索（旧称 ' + versionLabel + '）' : versionLabel)}</strong><p>${escapeHtml(deconstructionStatusText[item.status] || item.status)} · 修订 ${escapeHtml(item.sourceRevision ?? "—")}</p>${canRead ? `<button type="button" class="quiet-link" data-action="deconstruction-volume" data-document-id="${escapeHtml(item.documentId)}">查看这份报告</button>` : '<small>旧稿来源 · 历史证据保留只读</small>'}</article>`;
-      }});
+      renderItem:item => renderDeconstructionHistoryItem(data, item)});
+  }
+
+  function renderDeconstructionHistoryItem(data, item) {
+    const rule = item.analysisContractVersion === "2.0";
+    const versionLabel = rule ? "深度 2.0"
+      : item.analysisContractVersion === "model.1" ? "模型报告" : item.analysisContractVersion === "1.0" ? "基础 1.0" : "版本未知";
+    const ruleLabel = !rule ? "" : data.requiredEngineRevision
+      ? item.engineRevision === data.requiredEngineRevision ? "现行规则" : "旧版规则"
+      : item.engineRevision ? "规则版本待核对" : "规则版本未记录";
+    const sameSource = item.sourceVersionId === data.source.versionId && item.sourceRevision === data.source.revision && item.sourceHash === data.source.contentHash;
+    const canRead = item.status === "completed" && (sameSource || data.volumes.some(v => v.documentId === item.documentId && v.match));
+    const current = canRead && item.documentId === data.result?.documentId;
+    const validDate = value => value && !Number.isNaN(new Date(value).getTime());
+    const timestamp = validDate(item.completedAt) ? item.completedAt : validDate(item.createdAt) ? item.createdAt : null;
+    const timeLabel = timestamp ? `${timestamp === item.completedAt ? '生成于' : '创建于'} ${new Intl.DateTimeFormat("zh-CN", {
+      year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false,
+    }).format(new Date(timestamp)).replaceAll("/", "-")}` : "时间未记录";
+    return `<article class="report-history-item" ${current ? 'aria-current="true"' : ''}><header><strong ${rule ? `title="合同旧称：${escapeHtml(versionLabel)}"` : ''}>${escapeHtml(rule ? '规则线索' : versionLabel)}${ruleLabel ? ` · ${ruleLabel}` : ''}</strong>${current ? '<span class="report-history-current">当前查看</span>' : ''}</header><p class="report-history-time">${timestamp ? `<time datetime="${escapeHtml(timestamp)}">${escapeHtml(timeLabel)}</time>` : timeLabel}</p><p>${escapeHtml(deconstructionStatusText[item.status] || item.status)} · 正文修订 ${escapeHtml(item.sourceRevision ?? "—")}</p>${canRead ? `<button type="button" class="quiet-link" data-action="deconstruction-volume" data-document-id="${escapeHtml(item.documentId)}">查看这份报告</button>` : '<small>旧稿来源 · 历史证据保留只读</small>'}</article>`;
   }
 
   function renderDeconstructionOverview(data) {
@@ -2605,7 +2618,12 @@
     }).join("");
     const hasCurrent = volumes.some((item) => item.match && item.status === "completed");
     const guideButton = hasCurrent ? `<button type="button" class="deconstruction-volume is-guide" data-action="deconstruction-section" data-section="guide">全书导读</button>` : "";
-    return `<nav class="deconstruction-volume-bar" aria-label="按卷查看拆解"><span class="eyebrow">拆解卷（按章节范围）</span><div class="deconstruction-volume-list">${guideButton}${items}</div><p class="deconstruction-volume-note">只重跑正文变化的那一卷，已拆卷不会因新增正文而失效。</p></nav>`;
+    const controls = `<div class="deconstruction-volume-list">${guideButton}${items}</div><p class="deconstruction-volume-note">只重跑正文变化的那一卷，已拆卷不会因新增正文而失效。</p>`;
+    if (volumes.length === 1) {
+      const volume = volumes[0];
+      return `<nav class="deconstruction-volume-bar is-single-volume" aria-label="按卷查看拆解"><details class="single-volume-nav"><summary><strong>${escapeHtml(volume.scopeLabel)}</strong> · ${escapeHtml(statusLabel(volume))}<span>卷导航 / 导读</span></summary>${controls}</details></nav>`;
+    }
+    return `<nav class="deconstruction-volume-bar" aria-label="按卷查看拆解"><span class="eyebrow">拆解卷（按章节范围）</span>${controls}</nav>`;
   }
 
   function renderDeconstructionPage(data) {
