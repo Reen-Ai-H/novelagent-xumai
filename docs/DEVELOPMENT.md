@@ -59,6 +59,8 @@ git diff --check
 
 停服务后备份完整的 `.novel_accounts`、`.novel_ai`、`.novel_independent`、`.novel_projects`、`.novel_memory`、`.novel_transactions` 目录。备份前保留原目录，恢复前先复制当前目录作为回滚副本；不要直接手改 JSON。恢复后先跑匿名首页/登录/书架和确定性测试，再做写入验证。
 
+阶段36新增的 DOCX 标题样式元数据可由新服务兼容读取旧记录，但旧版严格 schema 不认识新字段。新旧服务不得共享写入同一数据目录；回退应用时使用升级前的完整备份，不通过删字段或批量改 JSON 回退。当前验收服务始终使用独立副本，作者原目录不切换。
+
 ## 常见开发故障
 
 - `author_revision_conflict`：作者 revision 优先；确认页面显示作者正文和可重试状态，不手动删 journal。
