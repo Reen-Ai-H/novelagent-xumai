@@ -146,7 +146,12 @@ assert.equal(matches({{ offsetUnit: "utf16_code_unit", charStart: 0, charEnd: 3,
         self.assertIn("closeDeconstructionEvidenceDialog({ clear: false })", self.app_source)
         self.assertNotIn("references.slice(0, 6)", self.app_source)
         self.assertIn("references.map((evidence, index)", self.app_source)
-        self.assertIn("deconstructionApi.readEvidence(projectId, clickedEvidence.id)", self.app_source)
+        self.assertIn("deconstructionApi.readEvidence(projectId, clickedEvidence.id, clickedEvidence.documentId)", self.app_source)
+        evidence_api_start = self.app_source.index('async readEvidence(projectId, evidenceId, documentId = "")')
+        evidence_api_end = self.app_source.index("\n    },", evidence_api_start)
+        evidence_api_source = self.app_source[evidence_api_start:evidence_api_end]
+        self.assertIn("const path = this.evidence(projectId, evidenceId)", evidence_api_source)
+        self.assertIn('documentId ? `${path}?document_id=${encodeURIComponent(documentId)}` : path', evidence_api_source)
 
         input_start = self.app_source.index("function handleDeconstructionDepthInput")
         input_end = self.app_source.index("\n  function handleDeconstructionDepthChange", input_start)

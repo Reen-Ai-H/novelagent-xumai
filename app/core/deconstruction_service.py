@@ -24,6 +24,8 @@ from app.core.deconstruction_store import (
 )
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
 from app.core.project_lock import ProjectLockError
+from app.core.character_aggregation import CharacterReportSlice, aggregate_character_slices
+from schemas.analysis_report import AnalysisImport, AnalysisRequest, AnalysisReport
 from schemas.deconstruction import (
     ChapterBreakdown,
     DeconstructionActions,
@@ -41,6 +43,7 @@ from schemas.deconstruction import (
     DeconstructionSource,
     DeconstructionState,
     DeconstructionStatus,
+    DeconstructionVolumeItem,
     EvidenceRef,
     TimelineNode,
     DepthEvidence,
@@ -180,6 +183,110 @@ class DeconstructionService:
             previous_end = end
         return normalized
 
+    # ---- 范围（卷）语义：拆解文档只对自已覆盖的连续章节负责 ----
+    @staticmethod
+    def _scoped(doc: DeconstructionDocument) -> bool:
+        return doc.scope_start is not None and doc.scope_end is not None
+
+    @staticmethod
+    def _chapter_digest(chapter) -> str:
+        payload = {
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "content": chapter.content,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    def _scope_hash(self, source: _Source, start: int, end: int) -> str | None:
+        """只统计 [start, end] 范围内章节的正文内容，不含整本哈希或编辑计数。"""
+        by_number = {chapter.chapter_number: chapter for chapter in source.chapters}
+        if any(number not in by_number for number in range(start, end + 1)):
+            return None
+        payload = {
+            "scope": [start, end],
+            "chapters": [
+                {"chapter_number": number, "digest": self._chapter_digest(by_number[number])}
+                for number in range(start, end + 1)
+            ],
+        }
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _whole_matches(source: _Source, doc: DeconstructionDocument) -> bool:
+        return bool(
+            source.sufficient
+            and doc.source_version_id == source.version_id
+            and doc.source_revision == source.source_revision
+            and doc.source_hash == source.source_hash
+        )
+
+    def _scope_matches(self, source: _Source, doc: DeconstructionDocument) -> bool:
+        if not source.sufficient or not self._scoped(doc):
+            return False
+        return doc.source_version_id == source.version_id and self._scope_hash(source, doc.scope_start, doc.scope_end) == doc.scope_hash
+
+    def _doc_matches(self, source: _Source, doc: DeconstructionDocument) -> bool:
+        if doc is None:
+            return False
+        return self._scope_matches(source, doc) if self._scoped(doc) else self._whole_matches(source, doc)
+
+    def _document_effective(self, source: _Source, doc: DeconstructionDocument | None) -> DeconstructionStatus | None:
+        if doc is None:
+            return None
+        if not source.sufficient:
+            return "empty"
+        if source.pending_changes:
+            return "rebuild_required"
+        if not self._doc_matches(source, doc):
+            return "stale"
+        return doc.status
+
+    @staticmethod
+    def _pick_focus_document(record: DeconstructionProjectRecord | None) -> DeconstructionDocument | None:
+        if record is None:
+            return None
+        scoped = [doc for doc in record.documents if doc.scope_start is not None]
+        if scoped:
+            pool = [doc for doc in scoped if doc.status == "completed"] or scoped
+            return max(pool, key=lambda doc: doc.updated_at)
+        return DeconstructionService._document(record, record.active_document_id)
+
+    def _volumes(self, source: _Source, record: DeconstructionProjectRecord | None) -> list[dict[str, object]]:
+        if record is None:
+            return []
+        newest_by_scope: dict[tuple[int, int], DeconstructionDocument] = {}
+        for doc in record.documents:
+            if not self._scoped(doc):
+                continue
+            key = (doc.scope_start, doc.scope_end)
+            previous = newest_by_scope.get(key)
+            if previous is None or doc.updated_at > previous.updated_at:
+                newest_by_scope[key] = doc
+        items: list[dict[str, object]] = []
+        for (start, end), doc in sorted(newest_by_scope.items(), key=lambda pair: pair[0]):
+            status = self._document_effective(source, doc)
+            items.append(DeconstructionVolumeItem(
+                document_id=doc.document_id,
+                scope_start=start,
+                scope_end=end,
+                scope_label=f"第 {start}–{end} 章",
+                status=status or doc.status,
+                run_status=doc.status if doc.status in {"queued", "running", "failed_retryable"} else "completed",
+                match=self._doc_matches(source, doc),
+                analysis_label=doc.analysis_label,
+                chapter_count=end - start + 1,
+                evidence_count=len(doc.evidence),
+                latest=True,
+                created_at=doc.created_at,
+                updated_at=doc.updated_at,
+                completed_at=doc.completed_at,
+            ).model_dump(mode="json"))
+        return items
+
     def _load_independent_record(self, project_id: str, account_id: str):
         try:
             return self.independent._load(project_id, account_id)  # noqa: SLF001 - 同一后端侧车的内部来源边界。
@@ -295,6 +402,7 @@ class DeconstructionService:
                 "source_version_id",
                 "source_revision",
                 "source_hash",
+                "analysis_contract_version",
                 "retry_count",
                 "analysis_label",
                 "created_at",
@@ -371,15 +479,10 @@ class DeconstructionService:
         *,
         force_status: DeconstructionStatus | None = None,
         empty_reason: str | None = None,
+        focus: DeconstructionDocument | None = None,
     ) -> dict[str, object]:
-        active = self._document(record, record.active_document_id if record else None)
-        source_match = bool(
-            active is not None
-            and source.sufficient
-            and active.source_version_id == source.version_id
-            and active.source_revision == source.source_revision
-            and active.source_hash == source.source_hash
-        )
+        active = focus if focus is not None else self._pick_focus_document(record)
+        source_match = bool(active is not None and self._doc_matches(source, active))
         status: DeconstructionStatus
         if force_status is not None:
             status = force_status
@@ -390,6 +493,7 @@ class DeconstructionService:
             status = "rebuild_required"
         elif active is None:
             status = "rebuild_required"
+            empty_reason = empty_reason or "当前还没有可展示的作品拆解，请先生成或导入一卷拆解。"
         elif not source_match:
             status = "stale"
         elif active.analysis_contract_version == "1.0" and active.status == "completed":
@@ -410,7 +514,12 @@ class DeconstructionService:
             progress = active.progress_percent if active else 0
             current_stage = "等待根据当前正文更新"
             error_message = (
-                "当前正式正文已变化，请生成一版新的作品拆解。"
+                (
+                    f"第 {active.scope_start}–{active.scope_end} 章范围内的正文已变化，"
+                    "请为该范围重新生成拆解；其它卷不受影响，不需要全本重跑。"
+                    if self._scoped(active)
+                    else "当前正式正文已变化，请生成一版新的作品拆解。"
+                )
                 if status == "stale"
                 else "当前作者修改尚未确认，请先完成修改后再生成作品拆解。"
             )
@@ -492,11 +601,13 @@ class DeconstructionService:
             "source_version_id": source.version_id,
             "source_revision": source.source_revision,
             "source_hash": source.source_hash,
-            "analysis_label": ANALYSIS_LABEL,
+            "analysis_label": active.analysis_label if active else ANALYSIS_LABEL,
             "empty_reason": empty_reason,
             "error_message": error_message,
             "retryable": retryable,
             "document": public_active,
+            "focus_document_id": active.document_id if active is not None else None,
+            "volumes": self._volumes(source, record),
         }
         payload["deconstruction"] = canonical.model_dump(mode="json")
         return payload
@@ -593,14 +704,160 @@ class DeconstructionService:
                 continue
         return processed
 
-    def read(self, project_id: str, account_id: str) -> dict[str, object]:
+    def read(self, project_id: str, account_id: str, document_id: str | None = None) -> dict[str, object]:
         self.reconcile_outbox(project_id, account_id)
         source = self._source(project_id, account_id)
         record = self._record(project_id, account_id)
+        focus = None
+        if document_id is not None:
+            focus = self._document(record, document_id)
+            if focus is None:
+                raise DeconstructionServiceError("document_missing", "这份卷拆解不存在或已被移除。", status_code=404)
         if source.sufficient and not source.pending_changes and record is None:
             self.enqueue_for_project(project_id, account_id, reason="首次读取补建")
             record = self._record(project_id, account_id)
-        return self._response(source, record)
+        return self._response(source, record, focus=focus)
+
+    def guide(self, project_id: str, account_id: str) -> dict[str, object]:
+        """Return the source-bound cross-volume character index.
+
+        Volume reports remain the authoritative, independently checkable
+        documents. This projection only groups their character snapshots; it
+        never replaces a volume card with a later card and never invents a
+        cross-volume literary conclusion.
+        """
+
+        source = self._source(project_id, account_id)
+        record = self._record(project_id, account_id)
+        slices: list[CharacterReportSlice] = []
+        if record is not None:
+            newest_by_scope: dict[tuple[int, int], DeconstructionDocument] = {}
+            for document in record.documents:
+                if (
+                    not self._scoped(document)
+                    or document.status != "completed"
+                    or not self._doc_matches(source, document)
+                    or not isinstance(document.report, AnalysisReport)
+                ):
+                    continue
+                key = (document.scope_start, document.scope_end)
+                previous = newest_by_scope.get(key)
+                if previous is None or document.updated_at > previous.updated_at:
+                    newest_by_scope[key] = document
+            for document in newest_by_scope.values():
+                slices.append(CharacterReportSlice(
+                    source_key=document.document_id,
+                    scope_start=document.scope_start,
+                    scope_end=document.scope_end,
+                    report=document.report,
+                ))
+        characters = aggregate_character_slices(slices)
+        return {
+            "schema_version": "1.0",
+            "project_id": project_id,
+            "source_version_id": source.version_id,
+            "source_hash": source.source_hash,
+            "complete": bool(slices) and set(n for item in slices for n in range(item.scope_start, item.scope_end + 1)) == {c.chapter_number for c in source.chapters},
+            "volumes": self._volumes(source, record),
+            "characters": [item.model_dump(mode="json") for item in characters],
+        }
+    async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
+        """Read a bounded source snapshot; model failure never replaces the current result."""
+        from app.agents.deconstruction_model import analysis_messages
+        from app.agents.llm_runtime import LLMRuntimeError
+        source = self._source(project_id, account_id)
+        bindings = payload.model_dump(exclude={"chapter_numbers"})
+        self._check_source_precondition(source, **bindings)
+        if not source.sufficient or source.pending_changes:
+            raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        requested = set(payload.chapter_numbers)
+        chapters = [c for c in source.chapters if c.chapter_number in requested]
+        if len(requested) != len(payload.chapter_numbers) or len(chapters) != len(requested):
+            raise DeconstructionServiceError("report_scope_invalid", "请选择当前稿本中不重复的章节。", status_code=422)
+        if sum(len(c.content) for c in chapters) > 30000:
+            raise DeconstructionServiceError("report_scope_large", "本轮请缩小章节范围至约三万字以内。", status_code=422)
+        try:
+            result = await asyncio.wait_for(runtime.structured(
+                call_id=f"deconstruction:{project_id}:{source.source_hash}",
+                messages=analysis_messages([dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters]),
+                response_model=AnalysisReport, max_tokens=8192, temperature=0.3,
+            ), timeout=1220)
+        except TimeoutError:
+            raise DeconstructionServiceError("model_timeout", "本轮拆解等待超时，请缩小范围后重试；现有结果已保留。", status_code=504) from None
+        except LLMRuntimeError as exc:
+            raise DeconstructionServiceError(exc.code, "模型拆解未完成，请稍后重试；现有结果已保留。", status_code=exc.status_code) from None
+        report = AnalysisReport.model_validate(result.data)
+        report.producer = runtime.model
+        if set(report.chapter_numbers) != requested:
+            raise DeconstructionServiceError("report_scope_invalid", "模型返回的章节范围不一致，现有结果已保留。", status_code=422)
+        by_number = {c.chapter_number: c for c in chapters}
+        if any(by_number[e.chapter_number].content.count(e.quote) != 1 for e in report.evidence):
+            raise DeconstructionServiceError("report_evidence_invalid", "模型引文未逐字匹配正文，现有结果已保留。", status_code=422)
+        self._check_source_precondition(self._source(project_id, account_id), **bindings)
+        return AnalysisImport(**bindings, report=report)
+
+    def import_report(self, project_id: str, account_id: str, payload: AnalysisImport) -> dict[str, object]:
+        """Bind model-authored claims to exact current text. Never modify the author's manuscript."""
+        try:
+            with self.independent._author_write_guard(project_id, account_id), self._lock:
+                source = self._source(project_id, account_id)
+                self._check_source_precondition(source, **payload.model_dump(exclude={"report"}))
+                if not source.sufficient or source.pending_changes:
+                    raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+                report = payload.report
+                chapters = {x.chapter_number: x for x in source.chapters}
+                if not set(report.chapter_numbers) <= set(chapters):
+                    raise DeconstructionServiceError("report_scope_invalid", "拆解范围包含当前稿本不存在的章节。", status_code=422)
+                ordered = sorted(set(report.chapter_numbers))
+                if ordered != list(range(ordered[0], ordered[-1] + 1)):
+                    raise DeconstructionServiceError("report_scope_invalid", "每份拆解报告必须覆盖一段连续章节（一个卷）。", status_code=422)
+                scope_start, scope_end = ordered[0], ordered[-1]
+                scope_hash = self._scope_hash(source, scope_start, scope_end)
+                if scope_hash is None:
+                    raise DeconstructionServiceError("report_scope_invalid", "拆解范围的章节在当前稿本中不完整。", status_code=422)
+                digest = hashlib.sha256(report.model_dump_json().encode("utf-8")).hexdigest()
+                document_id = self._slug(f"analysis-scope:{project_id}:{scope_start}-{scope_end}:{scope_hash}:{digest}")
+                evidence = []
+                for item in report.evidence:
+                    chapter = chapters[item.chapter_number]
+                    start = chapter.content.find(item.quote)
+                    if start < 0 or chapter.content.find(item.quote, start + 1) >= 0:
+                        raise DeconstructionServiceError("report_evidence_invalid", f"证据 {item.id} 未在指定章节唯一匹配，请修正引文。", status_code=422)
+                    evidence.append(EvidenceRef(
+                        evidence_id=item.id, document_id=document_id,
+                        source_version_id=source.version_id, source_revision=source.source_revision,
+                        source_hash=source.source_hash, chapter_id=chapter.chapter_id,
+                        chapter_number=chapter.chapter_number,
+                        start_offset=len(chapter.content[:start].encode("utf-16-le")) // 2,
+                        end_offset=len(chapter.content[:start + len(item.quote)].encode("utf-16-le")) // 2,
+                        excerpt=item.quote, label="拆解依据",
+                    ))
+                record = self._record(project_id, account_id) or DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
+                if self._document(record, document_id) is None:
+                    now = self._now()
+                    record.documents.append(DeconstructionDocument(
+                        document_id=document_id, project_id=project_id, account_id=account_id,
+                        source_version_id=source.version_id, source_revision=source.source_revision,
+                        source_hash=source.source_hash, status="completed", progress_percent=100,
+                        analysis_contract_version="model.1",
+                        current_stage="拆解结果已导入", idempotency_key=digest,
+                        analysis_label=f"{report.producer} · 导入分析",
+                        overview=DeconstructionOverview(title=report.title, chapter_count=len(report.chapter_numbers),
+                            total_word_count=sum(self._word_count(chapters[n].content) for n in report.chapter_numbers)),
+                        report=report, evidence=evidence, completed_at=now,
+                        scope_start=scope_start, scope_end=scope_end, scope_hash=scope_hash,
+                    ))
+                record.active_document_id = document_id
+                record.updated_at = self._now()
+                # Keep the active result even when re-importing an older identical package.
+                active = self._document(record, document_id)
+                record.documents = [x for x in record.documents if x.document_id != document_id][-(MAX_HISTORY - 1):] + [active]
+                self.store.save(record)
+                return self._response(source, record, focus=active)
+        except IndependentServiceError as exc:
+            raise DeconstructionServiceError(exc.code, exc.message, status_code=exc.status_code) from None
+        except DeconstructionStoreError:
+            raise DeconstructionServiceError("deconstruction_store_unavailable", "拆解结果暂时无法保存，请重试。", status_code=503) from None
 
     def enqueue_for_project(
         self,
@@ -1467,7 +1724,7 @@ class DeconstructionService:
     async def process_background_tasks_async(self, *, limit: int = 8) -> int:
         return await asyncio.to_thread(self.process_background_tasks, limit=limit)
 
-    def evidence(self, project_id: str, account_id: str, evidence_id: str) -> dict[str, object]:
+    def evidence(self, project_id: str, account_id: str, evidence_id: str, *, document_id: str | None = None) -> dict[str, object]:
         source = self._source(project_id, account_id)
         record = self._record(project_id, account_id)
         if record is None:
@@ -1479,11 +1736,14 @@ class DeconstructionService:
             and active.analysis_contract_version == "2.0"
             and self._document_matches_source(active, source)
         )
-        for document in record.documents:
+        current_scope_ids = {item["document_id"] for item in self._volumes(source, record) if item["match"]}
+        for document in sorted(record.documents, key=lambda item: item.document_id != record.active_document_id):
+            if document_id is not None and document.document_id != document_id:
+                continue
             for item in document.evidence:
                 if item.evidence_id != evidence_id:
                     continue
-                source_matches_current = bool(
+                depth_current = bool(
                     active_depth
                     and active is not None
                     and item.document_id == active.document_id
@@ -1493,6 +1753,21 @@ class DeconstructionService:
                     and item.source_hash == source.source_hash
                 )
                 chapter = next((chapter for chapter in source.chapters if chapter.chapter_id == item.chapter_id), None)
+                scope_current = bool(
+                    document.analysis_contract_version == "model.1"
+                    and document.status == "completed"
+                    and not source.pending_changes
+                    and document.document_id in current_scope_ids
+                    and item.document_id == document.document_id
+                    and item.source_version_id == document.source_version_id
+                    and item.source_revision == document.source_revision
+                    and item.source_hash == document.source_hash
+                    and chapter is not None
+                    and chapter.chapter_number == item.chapter_number
+                    and 0 <= item.start_offset < item.end_offset <= len(chapter.content.encode("utf-16-le")) // 2
+                    and chapter.content.encode("utf-16-le")[item.start_offset * 2:item.end_offset * 2] == item.excerpt.encode("utf-16-le")
+                )
+                source_matches_current = depth_current or scope_current
                 if not source_matches_current or chapter is None:
                     # 历史稿本不再是当前正文时，返回最小历史定位；不把旧证据
                     # 默认跳到当前同编号章节，也不复制历史正文。

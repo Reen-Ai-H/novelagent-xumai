@@ -22,6 +22,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("DASHSCOPE_API_KEY"),
     )
+    mimo_api_key: str | None = Field(default=None, validation_alias=AliasChoices("MIMO_API_KEY"))
+    mimo_base_url: str = Field(default="https://api.xiaomimimo.com/v1", validation_alias=AliasChoices("MIMO_BASE_URL"))
+    mimo_model: str = Field(default="mimo-v2.6-pro", validation_alias=AliasChoices("MIMO_MODEL"))
+    llm_provider: str = ""
     openai_base_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("OPENAI_BASE_URL", "DASHSCOPE_BASE_URL", "LLM_BASE_URL"),
@@ -43,10 +47,14 @@ class Settings(BaseSettings):
 
     @property
     def effective_api_key(self) -> str:
+        if self.llm_provider == "mimo":
+            return (self.mimo_api_key or "").strip()
         return (self.openai_api_key or self.dashscope_api_key or "").strip()
 
     @property
     def provider(self) -> str:
+        if self.llm_provider == "mimo":
+            return "mimo" if (self.mimo_api_key or "").strip() else "unavailable"
         if self.openai_api_key:
             return "openai"
         if self.dashscope_api_key:
@@ -55,6 +63,8 @@ class Settings(BaseSettings):
 
     @property
     def effective_base_url(self) -> str | None:
+        if self.llm_provider == "mimo":
+            return self.mimo_base_url.strip().rstrip("/") or "https://api.xiaomimimo.com/v1"
         if self.openai_base_url:
             return self.openai_base_url.strip().rstrip("/") or None
         if self.provider == "dashscope":
@@ -65,6 +75,8 @@ class Settings(BaseSettings):
 
     @property
     def effective_model(self) -> str:
+        if self.llm_provider == "mimo":
+            return self.mimo_model.strip() or "mimo-v2.6-pro"
         if self.llm_model and self.llm_model.strip():
             return self.llm_model.strip()
         if self.provider == "dashscope":

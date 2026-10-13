@@ -178,6 +178,7 @@ class ModelUsage(BaseModel):
     prompt_tokens: int = Field(default=0, ge=0)
     completion_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
+    cache_read_tokens: int = Field(default=0, ge=0)
 
 
 class ModelCallMetadata(BaseModel):

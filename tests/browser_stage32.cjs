@@ -1,6 +1,7 @@
-/* Real Windows browser + real local HTTP worker; no intercepted/fake responses.
+/* Real browser + real local HTTP worker; no intercepted/fake responses.
  * Start tests/browser_server.py in a clean worktree first. Requires Playwright
- * and installed Microsoft Edge. Evidence is ignored by Git in test-results/.
+ * and Playwright Chromium or an installed XUMAI_BROWSER_CHANNEL (e.g. chrome).
+ * Evidence is ignored by Git in test-results/.
  */
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -8,7 +9,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 const origin = process.env.XUMAI_BROWSER_URL || 'http://127.0.0.1:8032';
 assert.equal(new URL(origin).hostname, '127.0.0.1', 'Only the isolated localhost server may be tested');
-const out = path.join(__dirname, '..', 'test-results', 'stage32-browser');
+const out = process.env.XUMAI_BROWSER_OUTPUT || path.join(__dirname, '..', 'test-results', 'stage32-browser');
 const manuscript = `# 第一章 一把钥匙
   🧭林舟捡起铜钥匙，发现齿口少了一角。他想找到失踪的姐姐，却害怕再次走进旧站。
 顾遥拦住林舟，说：“我会替你守住站门，你去找她。”林舟把手里的地图交给顾遥。
@@ -71,7 +72,7 @@ async function oneViewport(browser, width) {
     await page.locator('#chapterEditor').waitFor({state: 'visible'});
     const initialBody = await page.locator('#chapterEditor').inputValue();
     assert.ok(initialBody.includes('铜钥匙'));
-    await page.locator('[data-action="show-deconstruction"]').click();
+    await page.locator('.spine-link[data-action="show-deconstruction"]').click();
     await waitComplete(page);
     await layout(page, width, 'overview');
     assert.equal(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), true);
@@ -79,6 +80,7 @@ async function oneViewport(browser, width) {
     // Six real views must be reachable by keyboard with evidence available.
     const views = ['人物', '剧情', '伏笔', '节奏', '读者', '文笔'];
     const overviewTab = page.getByRole('tab', {name: '总览'});
+    await overviewTab.click();
     await overviewTab.focus();
     assert.equal(await overviewTab.getAttribute('aria-selected'), 'true');
     for (let index = 0; index < views.length; index += 1) {
@@ -121,7 +123,7 @@ async function oneViewport(browser, width) {
       end: currentEvidence.end,
       text: currentEvidence.excerpt,
     });
-    await page.locator('[data-action="show-deconstruction"]').click();
+    await page.locator('.spine-link[data-action="show-deconstruction"]').click();
     await waitComplete(page);
     await page.reload();
     await waitComplete(page);
@@ -175,7 +177,7 @@ async function oneViewport(browser, width) {
     await page.locator('[data-action="review-changes"]').click();
     await page.locator('#rebuildChangesButton').click();
     await page.locator('#pendingChangesDialog').waitFor({state: 'hidden'});
-    await page.locator('[data-action="show-deconstruction"]').click();
+    await page.locator('.spine-link[data-action="show-deconstruction"]').click();
     await waitComplete(page);
     const rebuilt = await (await context.request.get(`${origin}/api/independent/projects/${projectId}/deconstruction`)).json();
     assert.notEqual(rebuilt.source.hash, oldHash);
@@ -196,7 +198,7 @@ async function oneViewport(browser, width) {
     return {width, height: 900, completed: true, consoleErrorsAndWarnings: diagnostics.length, views: views.length};
   } catch (error) {
     await page.screenshot({path: path.join(out, `${width}-failure.png`), fullPage: true});
-    console.error(JSON.stringify({width, diagnostics, error: error.message}));
+    console.error(JSON.stringify({width, diagnostics, error: error.stack}));
     throw error;
   } finally {
     await context.close();
@@ -205,12 +207,12 @@ async function oneViewport(browser, width) {
 
 (async () => {
   await fs.mkdir(out, {recursive: true});
-  const browser = await chromium.launch({channel: 'msedge', headless: true});
+  const browser = await chromium.launch({headless: true, ...(process.env.XUMAI_BROWSER_CHANNEL ? {channel: process.env.XUMAI_BROWSER_CHANNEL} : {})});
   try {
     const results = [];
     for (const width of [1440, 1024]) results.push(await oneViewport(browser, width));
-    const report = {browser: `Microsoft Edge ${browser.version()}`, platform: process.platform, results};
-    await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
+    const report = {browser: `${process.env.XUMAI_BROWSER_CHANNEL || 'chromium'} ${browser.version()}`, platform: process.platform, results};
+    await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
     console.log(JSON.stringify(report));
   } finally {
     await browser.close();

@@ -22,7 +22,7 @@ def run() -> None:
     if (root / ".env").exists():
         parser.error("Use a clean worktree without .env; this helper does not read developer secrets.")
     for name in tuple(os.environ):
-        if name.upper().startswith(("OPENAI_", "DASHSCOPE_", "LLM_")):
+        if name.upper().startswith(("OPENAI_", "DASHSCOPE_", "LLM_", "MIMO_", "DECONSTRUCTION_")):
             del os.environ[name]
     sys.path.insert(0, str(root))
     marker_name = ".xumai-browser-fixture"
@@ -42,6 +42,7 @@ def run() -> None:
     from app.core.ai_store import AIStore
     from app.core.deconstruction_service import DeconstructionService
     from app.core.deconstruction_store import DeconstructionStore
+    from app.core.book_analysis import BookAnalysis
     from app.core.entry_service import EntryService
     from app.core.independent_service import IndependentWorkspaceService
     from app.core.independent_store import IndependentStore
@@ -78,6 +79,7 @@ def run() -> None:
     independent_routes.independent_service = independent
     ai_routes.ai_service = ai
     deconstruction_routes.deconstruction_service = deconstruction
+    deconstruction_routes.book_analysis = BookAnalysis(deconstruction, runtime_factory=NoPaidRuntime)
     print(f"Isolated browser data: {data}", flush=True)
     uvicorn.run(main.app, host="127.0.0.1", port=args.port)
 
