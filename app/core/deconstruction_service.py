@@ -23,6 +23,7 @@ from app.core.deconstruction_store import (
     DeconstructionStoreError,
 )
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
+from app.core.person_recognition import discover_person_names
 from app.core.project_lock import ProjectLockError
 from app.core.character_aggregation import CharacterReportSlice, aggregate_character_slices
 from schemas.analysis_report import AnalysisImport, AnalysisRequest, AnalysisReport
@@ -1122,13 +1123,7 @@ class DeconstructionService:
         return None
 
     def _character_names_for_chapter(self, source: _Source, chapter: _SourceChapter) -> list[str]:
-        names = list(source.character_names)
-        for group in re.findall(r"人物\s*[:：]\s*([^\n。；;]+)", chapter.content):
-            for candidate in re.split(r"[、，,；;和与及]\s*", group):
-                candidate = candidate.strip(" ：:，,、；;")
-                if 1 < len(candidate) <= 20 and candidate not in names:
-                    names.append(candidate)
-        return names[:12]
+        return discover_person_names([chapter], source.character_names)
 
     def _chapter_function(self, index: int, total: int, text: str) -> str:
         if total == 1:
@@ -1237,6 +1232,7 @@ class DeconstructionService:
             )
 
             chapter_local_offset = 0
+            chapter_names = self._character_names_for_chapter(source, chapter)
             for scene_index, paragraph in enumerate(paragraphs[:8]):
                 local_offset = text.find(paragraph, chapter_local_offset)
                 if local_offset < 0:
@@ -1267,9 +1263,11 @@ class DeconstructionService:
                         word_end=word_end,
                         event=event,
                         narrative_function=function,
-                        characters=self._character_names_for_chapter(source, chapter),
+                        characters=chapter_names[:30],
+                        recognized_character_count=len(chapter_names),
                         confidence=0.72 if event else 0.4,
-                        uncertainty=[] if event else ["正文片段不足以判断事件。"],
+                        uncertainty=(["时间线摘要最多展示30位候选，完整候选见人物视角。"] if len(chapter_names) > 30 else [])
+                        + ([] if event else ["正文片段不足以判断事件。"]),
                         evidence_refs=[ref],
                     )
                 )
@@ -1330,12 +1328,8 @@ class DeconstructionService:
         )
 
         character_candidates: list[DeconstructionCandidate] = []
-        all_names = list(source.character_names)
-        for chapter in chapters:
-            for name in self._character_names_for_chapter(source, chapter):
-                if name not in all_names:
-                    all_names.append(name)
-        for name in all_names[:12]:
+        all_names = discover_person_names(chapters, source.character_names)
+        for name in all_names:
             chapter = next(
                 (item for item in chapters if name in item.content),
                 first_chapter,
@@ -1376,6 +1370,8 @@ class DeconstructionService:
             overview_uncertainty.append("当前只有少量正式章节，长程节奏和结尾判断仍不稳定。")
         if not character_candidates:
             overview_uncertainty.append("未发现明确人物标记，人物候选暂为空。")
+        if len(character_candidates) > 30:
+            overview_uncertainty.append("总览摘要最多展示30位候选，完整候选见人物视角。")
         if not conflict_candidates:
             overview_uncertainty.append("未发现明确核心冲突标记，冲突候选暂为空。")
         volume_titles = [
@@ -1395,7 +1391,8 @@ class DeconstructionService:
             total_word_count=total_words,
             chapter_count=len(chapters),
             structure_units=structure_units,
-            main_character_candidates=character_candidates,
+            main_character_candidates=character_candidates[:30],
+            recognized_character_count=len(all_names),
             core_conflict_candidates=conflict_candidates,
             opening=DeconstructionObservation(
                 text=f"开端观察：{self._clip(opening_sentence, 360)}",
