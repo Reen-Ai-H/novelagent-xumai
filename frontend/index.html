@@ -8,7 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
     <link rel="stylesheet" href="/static/styles.css?v=stage34-20261011" />
     <link rel="stylesheet" href="/static/deconstruction-report.css?v=guide-cards-v6" />
-    <link rel="stylesheet" href="/static/workspace-ui.css?v=stage35" />
+    <link rel="stylesheet" href="/static/workspace-ui.css?v=stage35-reading" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -309,9 +309,10 @@
             <div class="deconstruction-header-actions"><span id="deconstructionStatusPill" class="deconstruction-status-pill">等待读取</span><button id="deconstructionRefreshButton" class="button button-outline" type="button" data-action="deconstruction-refresh">刷新拆解</button></div>
           </header>
           <div id="deconstructionNotice" class="notice deconstruction-notice is-hidden" role="status"></div>
-          <div class="model-analysis-controls"><button class="button button-outline" data-action="book-start">智能拆解全文 / 继续</button><button class="quiet-link" data-action="book-pause">暂停</button><span id="bookAnalysisStatus" role="status">确认开始后，分段阅读全文并逐步展示。</span></div>
+          <details class="model-analysis-options"><summary>模型分析（可选）<span id="modelAnalysisActivity"></span></summary><div class="model-analysis-controls"><button class="button button-outline" data-action="book-start">智能分析人物与剧情 / 继续（调用模型）</button><button class="quiet-link" data-action="book-pause">暂停</button><span id="bookAnalysisStatus" role="status">确认开始后，分段阅读全文并逐步展示。</span></div>
           <details class="model-analysis-panel"><summary>试拆选定章节</summary><div class="model-analysis-controls"><label>章节范围 <input id="modelAnalysisChapters" type="text" value="1-5" placeholder="例如 1-5 或 1,3" /></label><button type="button" class="button button-outline" data-action="model-analyze">开始试拆</button><span id="modelAnalysisStatus" role="status">先预览，再采用。</span></div><div id="modelAnalysisPreview"></div></details>
-          <section id="deconstructionPageContent" class="deconstruction-page-content" aria-live="polite" aria-busy="false"></section>
+          </details>
+          <section id="deconstructionPageContent" class="deconstruction-page-content" aria-busy="false"></section>
         </main>
       </section>
 
@@ -465,7 +466,9 @@
       </div>
     </dialog>
 
-    <script src="/static/deconstruction-report.js?v=stage35" defer></script>
-    <script src="/static/app.js?v=stage35" defer></script>
+    <script src="/static/report-browser.js?v=stage35-reading" defer></script>
+    <script src="/static/rule-report.js?v=stage35-reading" defer></script>
+    <script src="/static/deconstruction-report.js?v=stage35-reading" defer></script>
+    <script src="/static/app.js?v=stage35-reading" defer></script>
   </body>
 </html>

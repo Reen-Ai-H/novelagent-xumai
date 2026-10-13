@@ -60,14 +60,14 @@ async function verify(browser, width) {
     assert.equal(await page.locator('#analyzeWholeImport').isChecked(),false);
     await page.locator('.import-chapter-preview summary').first().focus();
     await page.keyboard.press('Enter');
-    assert.equal(await page.locator('.import-chapter-body').first().textContent(),body1);
+    assert.equal(await page.locator('.import-chapter-body').first().textContent(),body1 + '\n\n');
     assert.ok((await page.locator('.unrecognized-fragments').textContent()).includes(fragment));
     layouts.push(await capture(page,width,'import-preview'));
     await page.locator('[data-action="confirm-import"]').click();
     await page.locator('#chapterEditor').waitFor();
     await page.locator('.chapter-list-item').first().click();
-    await page.waitForFunction(expected=>document.querySelector('#chapterEditor')?.value===expected,body1);
-    assert.equal(await page.locator('#chapterEditor').inputValue(),body1);
+    await page.waitForFunction(expected=>document.querySelector('#chapterEditor')?.value===expected,body1 + '\n\n');
+    assert.equal(await page.locator('#chapterEditor').inputValue(),body1 + '\n\n');
     layouts.push(await capture(page,width,'editor'));
     await page.locator('#toggleArchiveButton').click();
     assert.equal(await page.locator('#toggleArchiveButton').getAttribute('aria-expanded'),'false');
