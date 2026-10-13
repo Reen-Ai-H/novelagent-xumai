@@ -1,5 +1,7 @@
 # 叙脉文档索引
 
+> 当前实施更新为 [阶段 35 · 独立创作体验与识别优化](goals/STAGE_35_INDEPENDENT_EXPERIENCE.md)。用户确认的管理方式、范围与协作见 DECISIONS 顶部；阶段 34 保留为继承基线，真实内容未通过的结论仍待验证。
+
 > 当前实施为 [阶段 34 · MiMo 与独立创作](goals/STAGE_34_MIMO_INDEPENDENT.md)。用户已授权真实研发及前 10 章样本验证；进度与实际门禁见 [PROGRESS](../PROGRESS.md) 和 [BLOCKED](../BLOCKED.md)。下方阶段 32 数字是历史基线，不是阶段 34 验收结果。
 
 2026-09-23 新增 [完整平台演进与架构评估](research/PLATFORM_EVOLUTION_ASSESSMENT_2026-09-23.md)：区分最新主线与未合并拆解候选，含竞品研究复核、隔离测试、定向重构建议与完整平台交付路线。该报告不是新的产品决策或功能验收结论；其中标明本页旧状态与远端实际状态的差异。

@@ -1,5 +1,13 @@
 # 当前任务进度
 
+## 2026-10-13 · 阶段 35 开始
+
+- 用户授权建立简化 Notion 表并统筹独立创作窗口与识别效果改进；主任务为 [阶段 35](docs/goals/STAGE_35_INDEPENDENT_EXPERIENCE.md)。继承 A 版，AI 写作暂缓。
+- 分支 codex/stage-35-independent-experience，基线 e5cb94e。隔离工作区创建完成；原阶段 34 工作区与全部未提交改动保持原状。
+- 开工实测：原项目虚拟环境执行本工作区 scripts/verify_offline.py，297 tests / 0 failures / 0 errors / 0 skipped，8.300 秒，无凭据源码副本并阻断网络。
+- Notion 数据库已建立，schema 为五列主视图加模块分组；三视图配置已回读。条目与阶段进展继续填充，数据库链接保存在本机忽略的管理记录，避免将私人工作区地址带入公共仓库。
+- 初步代码证据：章节数字解析只覆盖至九十九，卷与章混作标题；人物候选通过动作前短语产生，需反例验证。下一步由 Sol 分别实现后端和前端，Luna 负责资料与独立验证。
+
 ## 2026-10-13 · 阶段 34 断点恢复
 
 - 已推送功能提交 `28d8bc11b1ceba0f4c24e62610a63e96e563ae54`，交付为 [Draft PR #11](https://github.com/Reen-Ai-H/novelagent-xumai/pull/11)，未合并、未部署。原代码审计首轮 P2/P3 全部闭合，同一审计员隔离复验98项通过。
