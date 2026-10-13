@@ -81,6 +81,26 @@ class StoryArchive(BaseModel):
     snapshots: list[ArchiveSnapshot] = Field(default_factory=list)
 
 
+class ImportedHeadingStyle(BaseModel):
+    """Original DOCX formatting, not inferred or persisted reading sections.
+
+    Positions are UTF-16 line starts in the exact imported content. A changed
+    draft must ignore these hints unless its hash matches again.
+    """
+    model_config = ConfigDict(extra="forbid")
+    content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    heading_levels: dict[int, int] = Field(default_factory=dict)
+
+
+class ChapterSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    section_id: str
+    title: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    kind: Literal["opening", "explicit", "inferred"]
+
+
 class ChapterDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -96,6 +116,7 @@ class ChapterDocument(BaseModel):
     status: ChapterStatus = "drafting"
     last_completed_hash: str | None = None
     updated_at: datetime
+    imported_heading_style: ImportedHeadingStyle | None = None
 
 
 class ManuscriptVersion(BaseModel):
@@ -119,6 +140,7 @@ class ImportChapterPreview(BaseModel):
     title: str
     content: str
     word_count: int = Field(default=0, ge=0)
+    imported_heading_style: ImportedHeadingStyle | None = None
 
 
 class ImportPreview(BaseModel):
@@ -143,6 +165,11 @@ class ImportPreviewRecord(ImportPreview):
     """带原始文本的内部记录；原文不会通过公开响应合同返回。"""
 
     raw_text: str = ""
+
+
+class ImportPreviewProjection(ImportPreview):
+    """Public-only sections keyed by preview chapter number (no chapter ID yet)."""
+    chapter_sections: dict[int, list[ChapterSection]] = Field(default_factory=dict)
 
 
 class ChangeSummary(BaseModel):
