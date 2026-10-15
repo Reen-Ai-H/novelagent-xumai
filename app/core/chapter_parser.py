@@ -6,6 +6,7 @@ in the title. Bare numbered prose is deliberately not a chapter signal.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from collections.abc import Mapping
 from pathlib import Path
@@ -203,10 +204,15 @@ def parse_document(filename: str, text: str, *, heading_levels: Mapping[int, int
     narrative = [h for i, h in enumerate(headings)
                  if h and h.kind in {"chapter", "special", "section", "markdown"} and i not in toc_lines]
     numbered = [h for h in narrative if h.kind in {"chapter", "special"}]
-    # Numbered chapters identify the chapter layer (e.g. H2 under a book H1).
-    # At that layer, unnumbered peers are chapters too. Without such anchors,
-    # use the outer declared layer across *all* heading kinds, including 节.
+    # Numbered chapters anchor the chapter layer (e.g. H2 under a book H1).
+    # Repeated shallower declared headings establish an outer chapter layer;
+    # numbered descendants then stay inside those chapters. A lone shallower
+    # heading remains a book wrapper rather than displacing the chapter layer.
     root_level = min((h.level for h in numbered), default=min((h.level for h in narrative if h.level), default=0))
+    if root_level:
+        declared_levels = Counter(h.level for h in narrative if h.level)
+        root_level = min((level for level, count in declared_levels.items()
+                          if level < root_level and count > 1), default=root_level)
 
     def chapter_boundary(heading: Heading) -> bool:
         if heading.kind not in {"chapter", "special", "section", "markdown"}:

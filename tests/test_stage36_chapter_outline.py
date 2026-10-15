@@ -315,6 +315,88 @@ class OutlineApiTest(unittest.TestCase):
                     self.assertEqual([c["content"] for c in workspace["active_version"]["chapters"]],
                                      ["甲。\n", "乙。\n" if suffix == "md" else "乙。"])
 
+    def assert_hierarchy_import(self, suffix, root, titles=("远行", "归来"), *,
+                                nested=("第九章 引用草稿",), depth=1, newline="\r\n", prefix=()):
+        child = root + depth
+        lines = list(prefix) + [(titles[0], root), ("  开篇😀。\t ", 0)]
+        for title in nested:
+            lines.extend([(title, child), ("  内段🪶。  ", 0)])
+        lines.extend([(titles[1], root), ("  终段。\t ", 0)])
+        if suffix == "md":
+            source = "".join(("#" * level + " " if level else "") + text + newline
+                             for text, level in lines)
+            first_body = "  开篇😀。\t " + newline + "".join(
+                "#" * child + " " + title + newline + "  内段🪶。  " + newline for title in nested)
+            last_body = "  终段。\t " + newline
+            fragments = ["".join(("#" * level + " " if level else "") + text + newline
+                                 for text, level in prefix)] if prefix else []
+        else:
+            source = docx("".join(p(text, f'<w:pStyle w:val="Heading{level}"/>' if level else "")
+                                   for text, level in lines))
+            first_body = "  开篇😀。\t \n" + "".join(title + "\n  内段🪶。  \n" for title in nested)
+            last_body = "  终段。\t "
+            fragments = ["".join(text + "\n" for text, _ in prefix)] if prefix else []
+        expected = [first_body, last_body]
+        project = self._project()
+        preview = self.preview(project, source, f"hierarchy.{suffix}")
+        self.assertEqual(preview["status"], "pending")
+        self.assertEqual([c["title"] for c in preview["chapters"]], list(titles))
+        self.assertEqual([c["chapter_number"] for c in preview["chapters"]], [1, 2])
+        self.assertEqual([c["content"] for c in preview["chapters"]], expected)
+        self.assertEqual(preview["unrecognized_fragments"], fragments)
+        workspace = self.confirm(project, preview)
+        for chapter, body in zip(workspace["active_version"]["chapters"], expected):
+            self.assertEqual(chapter["content"], body)
+            self.assertEqual(chapter["formal_content"], body)
+            sections = workspace["chapter_sections"][chapter["chapter_id"]]
+            self.assertEqual([s["title"] for s in sections],
+                             ["本章开篇"] + (list(nested) if body == first_body else []))
+            raw = body.encode("utf-16-le")
+            self.assertEqual("".join(raw[s["start"]*2:s["end"]*2].decode("utf-16-le")
+                                     for s in sections), body)
+        self.assertEqual(len(workspace["active_version"]["chapters"]), 2)
+        self.assertEqual([c["title"] for c in workspace["active_version"]["chapters"]], list(titles))
+        response = self.client.get(f"/api/independent/projects/{project}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["active_version"], workspace["active_version"])
+        self.assertEqual(response.json()["chapter_sections"], workspace["chapter_sections"])
+
+    def test_md_unnumbered_peers_keep_deeper_numbered_chapters_in_body(self):
+        for root in (1, 2, 3):
+            for depth in (1, 2):
+                for nested in (("第九章 引用草稿",), ("Chapter 9: Quoted draft", "尾声 引用草稿")):
+                    for newline in ("\n", "\r\n", "\r"):
+                        with self.subTest(root=root, depth=depth, nested=nested, newline=repr(newline)):
+                            self.assert_hierarchy_import("md", root, nested=nested, depth=depth, newline=newline)
+
+    def test_docx_unnumbered_peers_keep_deeper_numbered_chapters_in_body(self):
+        for root in (1, 2, 3):
+            for depth in (1, 2):
+                for nested in (("第九章 引用草稿",), ("Chapter 9: Quoted draft", "尾声 引用草稿")):
+                    with self.subTest(root=root, depth=depth, nested=nested):
+                        self.assert_hierarchy_import("docx", root, nested=nested, depth=depth)
+
+    def assert_book_wrapper_hierarchy(self, suffix):
+        for root in (2, 3):
+            for titles in (("第一章 远行", "第二章 归来"), ("第一章 远行", "归来"),
+                           ("远行", "第二章 归来"), ("远行", "归来")):
+                with self.subTest(root=root, titles=titles):
+                    self.assert_hierarchy_import(suffix, root, titles, prefix=(("作品名称", root - 1),))
+
+    def test_md_book_wrapper_does_not_become_a_chapter(self):
+        self.assert_book_wrapper_hierarchy("md")
+
+    def test_docx_book_wrapper_does_not_become_a_chapter(self):
+        self.assert_book_wrapper_hierarchy("docx")
+
+    def test_md_toc_and_volumes_do_not_establish_chapter_peer_level(self):
+        prefix = (("目录", 1), ("远行", 1), ("归来", 1), ("第一卷 初见", 1))
+        self.assert_hierarchy_import("md", 2, ("第一章 远行", "第二章 归来"), prefix=prefix)
+
+    def test_docx_toc_and_volumes_do_not_establish_chapter_peer_level(self):
+        prefix = (("目录", 1), ("远行", 1), ("归来", 1), ("第一卷 初见", 1))
+        self.assert_hierarchy_import("docx", 2, ("第一章 远行", "第二章 归来"), prefix=prefix)
+
 
 if __name__ == "__main__":
     unittest.main()
