@@ -11,6 +11,18 @@ const {chromium}=require('playwright');
 const origin=process.env.XUMAI_BROWSER_URL || 'http://127.0.0.1:8053';
 assert.equal(new URL(origin).hostname,'127.0.0.1');
 const out=path.join(__dirname,'../test-results/stage36-visual');
+const assetRelease='stage36-final';
+const assetFiles=['styles.css','deconstruction-report.css','workspace-ui.css','visual-reading.css',
+  'report-browser.js','visual-reading.js','chapter-sections.js','rule-report.js','deconstruction-report.js','app.js'];
+const shellAssets=html=>[...html.matchAll(/(?:href|src)="(\/static\/[^"?]+\.(?:css|js)\?[^\"]+)"/g)].map(m=>m[1]);
+function assertAssetVersions(urls) {
+  const assets=urls.map(value=>new URL(value,origin));
+  assert.deepEqual(assets.map(url=>url.pathname),assetFiles.map(name=>`/static/${name}`),'The shell must include every runtime CSS/JS asset in dependency order');
+  for(const url of assets) {
+    assert.equal(url.origin,origin);
+    assert.equal(url.search,`?v=${assetRelease}`,`${url.pathname}: stale release token`);
+  }
+}
 const narrative=['E3','E1','E2','E4','E5','E6'],story=['E1','E2','E4','E3','E5','E6'];
 const actors={E3:[0,1,2,3,4,5,6],E1:[0,1],E2:[0,2,4],E4:[4,5],E5:[0,3,6,8,9],E6:[0,6,7,9]};
 const names=Array.from({length:10},(_,i)=>`合成录员${String(i+1).padStart(2,'0')}`);
@@ -32,6 +44,8 @@ function modelReport() {
 }
 async function setup(browser) {
   const context=await browser.newContext(),page=await context.newPage(),email=`stage36-visual-${Date.now()}@example.test`;
+  const shellResponse=await context.request.get(origin);assert.equal(shellResponse.status(),200);
+  assertAssetVersions(shellAssets(await shellResponse.text()));
   await page.goto(`${origin}/login`);await page.locator('#emailInput').fill(email);await page.locator('#emailSubmitButton').click();await page.waitForURL('**/library');
   async function project(title) {
     await page.goto(`${origin}/library`);await page.locator('#newProjectButton').click();await page.locator('[data-mode=independent]').click();
@@ -96,6 +110,14 @@ async function verify(browser,fixture,width) {
   let saves=0;page.on('request',r=>{assert.equal(new URL(r.url()).origin,origin);assert.ok(!r.url().endsWith('/book/start'));if(r.method()==='PUT' && r.url().endsWith('/draft'))saves++;});
   try {
     await page.goto(fixture.charactersUrl);await page.locator('.visual-node').first().waitFor();
+    // Ordinary reload with the browser cache enabled must keep a single release
+    // across CSS and JS. No cache clearing, disabled cache or intercepted HTTP.
+    const readAssets=()=>page.evaluate(()=>[...document.querySelectorAll('link[rel=stylesheet][href],script[src]')].map(n=>n.href || n.src));
+    assertAssetVersions(await readAssets());
+    await page.reload({waitUntil:'networkidle'});await page.locator('.visual-node').first().waitFor();
+    const assets=await readAssets();assertAssetVersions(assets);
+    const loadedAssets=await page.evaluate(()=>performance.getEntriesByType('resource').map(r=>r.name).filter(name=>/\/static\/[^?]+\.(?:css|js)(?:\?|$)/.test(name)));
+    assert.deepEqual(new Set(loadedAssets),new Set(assets),'Normal reload must load exactly the versioned shell resources');
     assert.equal(await page.locator('[data-reading-mode=map]').getAttribute('aria-pressed'),'true');
     assert.match(await page.locator('.visual-caption').innerText(),/共同经历.*不代表敌友或亲属/);
     assert.ok(await page.locator('[data-visual-actor]').count()>0,'Other participants must be on the graph, not hidden in long details');
@@ -182,10 +204,12 @@ async function verify(browser,fixture,width) {
       const stale=await (await context.request.get(`${fixture.api}/deconstruction`)).json();
       assert.equal(stale.effective_status,'rebuild_required');assert.equal(stale.error.code,'pending_changes');assert.equal(stale.actions.rebuild,false,'Unconfirmed author changes must gate report rebuilding');
     }
-    assert.deepEqual(errors,[]);return {width,metrics,errors};
+    assert.deepEqual(errors,[]);return {width,assetRelease,normalReload:true,assets,metrics,errors};
   } catch(error) {await page.screenshot({path:path.join(out,`${width}-failure.png`),fullPage:true});throw error;} finally {await context.close();}
 }
 (async()=>{
+  const shell=await fs.readFile(path.join(__dirname,'../frontend/index.html'),'utf8');
+  assertAssetVersions(shellAssets(shell));
   await fs.mkdir(out,{recursive:true});const browser=await chromium.launch({headless:true,channel:process.env.XUMAI_BROWSER_CHANNEL || 'chrome'});
   try {const fixture=await setup(browser);if(process.argv.includes('--setup-only')){console.log(JSON.stringify({...fixture,storageState:undefined}));return;}
     const results=[];for(const width of [1440,1100,1024,390])results.push(await verify(browser,fixture,width));
