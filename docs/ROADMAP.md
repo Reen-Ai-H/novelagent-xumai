@@ -20,7 +20,7 @@
 | 2. 最小集成与试跑 | 样例在现有前端可读；按需读材料、增量修正，复用已有预算账 | 内容、主要流程与受控费用试验通过 |
 | 3. 整书收口 | 利用已有材料补全主要人物、主线和节奏的全书综合 | 用户能看完整结果；范围、费用和未确定项清楚，影响理解与使用的问题已修复 |
 
-当前具体工作与停止条件见 [阶段 34 任务书](goals/STAGE_34_MIMO_INDEPENDENT.md)；[阶段 32 任务书](goals/STAGE_32_DECONSTRUCTION_DEPTH.md) 保留轻量拆解目标的来源。不要求作者评审数据库或 Agent 报告；每次提供内容对比和直接入口。
+当前具体工作与停止条件见 [阶段 36 任务书](goals/STAGE_36_VISUAL_READING.md)；[阶段 34](goals/STAGE_34_MIMO_INDEPENDENT.md)保留模型产品化目标，[阶段 32](goals/STAGE_32_DECONSTRUCTION_DEPTH.md)保留轻量拆解目标的来源。不要求作者评审数据库或 Agent 报告；每次提供内容对比和直接入口。
 
 ## 成本口径
 
