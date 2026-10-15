@@ -46,7 +46,7 @@
 
 ## 当前状态
 
-- 2026-10-13：阶段36在独立分支落实作者反馈，保持 [Draft PR #13](https://github.com/Reen-Ai-H/novelagent-xumai/pull/13)。本地验收副本不覆盖原运行目录；未合并、未部署。
+- 2026-10-15：阶段36图形阅读与章内目录已完成自测和独立复核，Notion同步完成，保持 [Draft PR #13](https://github.com/Reen-Ai-H/novelagent-xumai/pull/13)。本地可编辑验收副本不覆盖原运行目录；未合并、未部署。
 - 代码、运行态、规则与文档状态见 [交付矩阵](CLOSEOUT_MATRIX.md)；准确测试数字与 SHA 只在 [PROGRESS](../PROGRESS.md) 维护，不能沿用旧阶段数字。
 - 独立作品拆解保留来源校验、后台恢复、证据回链和账户隔离，新增图形阅读与只读章内目录；图不编造关系，目录不改正式章。
 - 项目外离线质量门 Q2 已验证：36 例脱敏黄金集、宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过、外部请求/Token/费用为 0。真实生成质量增益、产品集成和 Q3 仍 pending。
