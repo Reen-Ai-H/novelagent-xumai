@@ -47,6 +47,7 @@ const out = path.join(root, 'test-results/stage35-history');
   try{
     for(const width of [1280,390]) {
       const context=await browser.newContext({viewport:{width,height:720},reducedMotion:'reduce'}),page=await context.newPage(),errors=[];
+      await context.addInitScript(()=>sessionStorage.setItem('xumai-reading-view','list'));
       page.on('pageerror',e=>errors.push(e.message));
       page.on('request',r=>{assert.equal(new URL(r.url()).origin,origin);assert.ok(!r.url().endsWith('/book/start'));});
       await page.goto(`${origin}/login`);await page.locator('#emailInput').fill(fixture.email);await page.locator('#emailSubmitButton').click();await page.waitForURL('**/library');

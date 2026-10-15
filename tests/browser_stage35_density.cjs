@@ -23,6 +23,8 @@ const views = [
   const metrics = [], errors = [];
   try {
     const context = await browser.newContext({reducedMotion:'reduce'});
+    // Preserve the full-list density thresholds; graph-first is tested in stage36.
+    await context.addInitScript(()=>sessionStorage.setItem('xumai-reading-view','list'));
     const page = await context.newPage();
     page.on('pageerror', e => errors.push(e.message));
     page.on('request', request => {

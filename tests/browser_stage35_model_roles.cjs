@@ -47,6 +47,7 @@ async function visibleIds(root) {
   const browser=await chromium.launch({headless:true,channel:process.env.XUMAI_BROWSER_CHANNEL || 'chrome'});
   try {
     const context=await browser.newContext({viewport:{width:1280,height:720},reducedMotion:'reduce'});
+    await context.addInitScript(()=>sessionStorage.setItem('xumai-reading-view','list'));
     const page=await context.newPage(),errors=[],metrics=[];
     page.on('pageerror',error=>errors.push(error.message));
     page.on('request',r=>{assert.equal(new URL(r.url()).origin,origin);assert.ok(!r.url().endsWith('/book/start'));});

@@ -1,5 +1,14 @@
 /* A-version paper and real story threads, shared by both report contracts. */
 .visual-view-toggle { display:flex; gap:4px; margin:0 0 8px; }
+.visual-reading-controls { display:flex; align-items:center; justify-content:space-between; gap:6px; grid-column:1/-1; min-width:0; }
+.visual-reading-controls .report-browser-count { font-size:.7rem; }
+.visual-reading-controls .visual-view-toggle { flex:none; margin:0; }
+.visual-reading-controls .visual-view-toggle button { min-height:28px; padding:3px 6px; font-size:.75rem; }
+.visual-summary-status { display:inline-block; margin-bottom:4px; }
+.visual-summary-label { color:var(--ink-soft); font-size:.75rem; margin-right:6px; }
+.visual-person-summary { margin-top:10px; }
+.visual-person-summary p { margin:2px 0 0; font:.95rem/1.8 var(--serif); color:var(--ink-soft); }
+.has-visual-switcher > .report-reading-heading { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .visual-view-toggle button,.visual-person-picks button,.visual-neighbor-pages button { min-height:36px; padding:7px 12px; background:var(--paper); color:var(--ink-soft); border:1px solid var(--line); border-radius:3px; }
 .visual-view-toggle [aria-pressed=true],.visual-person-picks [aria-pressed=true] { color:var(--cobalt); border-color:var(--cobalt); background:var(--cobalt-pale); }
 .visual-map-items { min-width:0; border:1px solid var(--line); background:var(--paper); padding:10px 0; }
@@ -59,9 +68,9 @@
 @media(max-width:1100px) {
   .visual-reader { display:flex; flex-direction:column; gap:0; }
   .visual-reader > * { width:100%; }
-  .visual-reader > .visual-selected { order:0; margin:0 0 10px; }
-  .visual-reader > .visual-map-items { order:1; }
-  .visual-reader > .report-browser-pages { order:2; }
+  .visual-reader > .visual-selected { order:2; margin:10px 0 0; }
+  .visual-reader > .visual-map-items { order:0; }
+  .visual-reader > .report-browser-pages { order:1; }
 }
 @media(max-width:640px) {
   .visual-node { padding-inline:5px; }

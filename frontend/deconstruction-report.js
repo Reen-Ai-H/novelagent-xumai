@@ -129,6 +129,7 @@
       items:[...report.contradictions.map(c=>({type:'contradiction',...c})),...report.open_questions.map(text=>({type:'question',text}))],
       renderItem:item=>item.type==='contradiction' ? `<article><h4>${esc(item.title)}</h4>${claim(item)}</article>` : `<p>${esc(item.text)}</p>`});
     let selected = report.events[0]?.id || null;
+    let selectedPerson = null;
     let tab = options.section || "characters";
     let character = options.character || null;
     let returnPerson = character;
@@ -188,12 +189,16 @@
       return `<article class="analysis-person"><header><span class="eyebrow">${esc(roleLabel)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><div class="analysis-card-summary"><span>性格 / 为人 · ${labels[portrait?.status] || labels.unknown}</span><p class="analysis-portrait">${esc(compact(portrait?.text || "当前报告没有性格判断。"))}</p><span>关键经历 · ${labels[p.change?.status] || labels.unknown}</span><p>${esc(compact(p.change?.text || "当前报告没有经历记录。"))}</p></div>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}${together.length ? lazyDetails(`同场人物 · ${together.length}（不代表关系定性）`,`person-together-${p.id}`) : ''}<details class="analysis-details"><summary>展开原文依据</summary><div class="analysis-details-body"><h4>性格 / 为人</h4>${evidence(portrait?.evidence_ids)}<h4>关键经历</h4>${evidence(p.change?.evidence_ids)}</div></details><button type="button" class="quiet-link analysis-read-more" data-report-person="${esc(p.id)}">完整人物解析 ↗</button></article>`;
     }
     const G = window.XumaiVisualReading;
+    function personSummary(kind, label, value, length, fallback) {
+      const status=labels[value?.status] ? value.status : 'unknown';
+      return `<div class="visual-person-summary" data-summary-kind="${kind}"><span class="visual-summary-label">${label}</span><span class="analysis-badge visual-summary-status is-${status}">${labels[status]}</span><p>${esc(G.short(value?.text || fallback,length))}</p></div>`;
+    }
     const peopleFilters = () => [{name:'importance',label:'人物分组',options:[{value:'',label:'全部人物'},...['主要人物','配角','未分级'].map(value=>({value,label:`${value} · ${report.characters.filter(p=>importance(p)===value).length}`}))],match:(p,value)=>importance(p)===value}];
     function drawMap() {
       view.innerHTML = '<div data-model-map></div>';
       const map = view.querySelector('[data-model-map]');
       if (tab === 'characters') {
-        const controller=G.mount(map,{type:'people',label:'人物',items:peopleForList(),state:browsing.characters,text:personText,filters:peopleFilters(),
+        const controller=G.mount(map,{type:'people',label:'人物',items:peopleForList(),state:browsing.characters,selected:selectedPerson,onSelect:p=>{selectedPerson=p?.id || null;},text:personText,filters:peopleFilters(),
           title:p=>p.name,meta:importance,bind:node=>B.lazy(node,lazyConfigs),
           note:'人物 — 共同经历。连线只表示参与同一事件，不代表敌友或亲属。',
           neighbors:p=>report.events.filter(e=>(e.actor_ids || []).includes(p.id)).map(e=>({id:e.id,title:e.title,label:chapterLabel(e),edgeLabel:'共同经历',actors:(e.actor_ids || []).filter(id=>id!==p.id && people.has(id)).map(id=>({id,name:people.get(id)}))})),
@@ -202,14 +207,14 @@
             document.querySelector('.visual-roster').addEventListener('click',event=>{const button=event.target.closest('[data-roster-person]');if(button){closeActiveModal?.();controller.reveal(button.dataset.rosterPerson);}});
           },
           onNeighbor:n=>{selected=n.id;tab='plot';browsing.plot.query='';browsing.plot.filters={};browsing.plot.page=Math.floor(report.events.findIndex(e=>e.id===n.id)/6)+1;timeMode='narrative';draw();view.querySelector(`[data-visual-node="${CSS.escape(n.id)}"]`)?.focus();},
-          detail:p=>`<article><span class="eyebrow">${esc(importance(p))} · ${esc(G.short(p.role,40))}</span><h3>${esc(p.name)}</h3><p>${esc(G.short((p.portrait || p.identity)?.text || '当前报告没有人物概览。',110))}</p><p>${esc(G.short(p.change?.text,80))}</p><details class="analysis-details"><summary>人物详情与依据</summary>${personCard(p)}</details></article>`});
+          detail:p=>`<article><span class="eyebrow">${esc(importance(p))}</span><h3>${esc(p.name)}</h3>${personSummary('portrait','性格 / 为人',p.portrait || p.identity,110,'当前报告没有性格判断。')}${personSummary('change','关键经历',p.change,80,'当前报告没有经历记录。')}<details class="analysis-details"><summary>完整解析与原文依据</summary>${personCard(p)}</details></article>`});
       } else {
         const ordered=report.story_order.map(id=>byId.get(id)).filter(Boolean),seen=new Set(ordered.map(e=>e.id));
         const events=timeMode==='story'?[...ordered,...report.events.filter(e=>!seen.has(e.id))]:report.events;
         const heading=document.createElement('div');heading.className='visual-order';
         heading.innerHTML=`<div class="analysis-time-toggle" aria-label="事件阅读顺序"><button type="button" data-report-time="narrative" aria-pressed="${timeMode==='narrative'}">正文揭示顺序</button><button type="button" data-report-time="story" aria-pressed="${timeMode==='story'}">故事发生顺序</button></div>${report.time_note?`<details class="visual-time-note"><summary>时间与不确定性</summary><p>${esc(report.time_note)}</p></details>`:''}${timeMode==='story' && events.length>seen.size?'<p class="analysis-scope-note">未提供故事顺序的事件列在末尾，未替它们推断时间。</p>':''}`;
         view.prepend(heading);
-        G.mount(map,{label:'大事件',items:events,state:browsing[tab] || browsing.plot,selected,text:eventText,filters:[chapterFilter],
+        G.mount(map,{label:'大事件',items:events,state:browsing[tab] || browsing.plot,selected,onSelect:e=>{selected=e?.id || null;},text:eventText,filters:[chapterFilter],
           title:e=>e.title,meta:chapterLabel,bind:node=>B.lazy(node,lazyConfigs),
           edges:report.relations.map(r=>({from:r.from_id,to:r.to_id,kind:r.kind,label:kinds[r.kind] || '待核对'})),
           note:'灰色虚线为阅读顺序；标注连线来自报告。先后 ≠ 因果，无虚构选择分支。',
@@ -280,7 +285,17 @@
         if (link) { link.focus({preventScroll:true}); link.scrollIntoView({block:'center',behavior:'instant'}); }
       }
       if (button.dataset.reportTab) { tab = button.dataset.reportTab; draw(); }
-      if (button.dataset.reportTime) { timeMode = button.dataset.reportTime; draw(); view.querySelector(`[data-report-time="${timeMode}"]`).focus(); }
+      if (button.dataset.reportTime) {
+        timeMode = button.dataset.reportTime;
+        if(G?.preference()==='map') {
+          const ordered=report.story_order.map(id=>byId.get(id)).filter(Boolean),seen=new Set(ordered.map(e=>e.id));
+          const events=timeMode==='story'?[...ordered,...report.events.filter(e=>!seen.has(e.id))]:report.events;
+          const state=browsing[tab] || browsing.plot,query=state.query.trim().toLocaleLowerCase();
+          const matches=events.filter(e=>(!query || eventText(e).toLocaleLowerCase().includes(query)) && (!state.filters.chapter || chapterFilter.match(e,state.filters.chapter)));
+          const i=matches.findIndex(e=>e.id===selected);if(i>=0)state.page=Math.floor(i/6)+1;
+        }
+        draw(); view.querySelector(`[data-report-time="${timeMode}"]`).focus();
+      }
       if (button.dataset.reportNode) {
         const id = button.dataset.reportNode;
         if (tab === "plot") renderSelected(byId.get(id));

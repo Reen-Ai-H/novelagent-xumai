@@ -8,8 +8,13 @@
   function preference() { try { return sessionStorage.getItem('xumai-reading-view') === 'list' ? 'list' : 'map'; } catch { return 'map'; } }
   function switcher(root, redraw) {
     const bar=document.createElement('div');bar.className='visual-view-toggle';bar.setAttribute('aria-label','阅读方式');
+    root.classList.add('has-visual-switcher');
     bar.innerHTML=`<button type="button" data-reading-mode="map" aria-pressed="${preference()==='map'}">脉络图</button><button type="button" data-reading-mode="list" aria-pressed="${preference()==='list'}">完整列表</button>`;
-    root.prepend(bar);
+    const count=root.querySelector('.report-browser-count');
+    if(count) {
+      const controls=document.createElement('div');controls.className='visual-reading-controls';
+      count.replaceWith(controls);controls.append(count,bar);
+    } else root.prepend(bar);
     bar.addEventListener('click',event=>{const button=event.target.closest('[data-reading-mode]');if(!button)return;
       try { sessionStorage.setItem('xumai-reading-view',button.dataset.readingMode); } catch { return; }
       redraw();root.querySelector(`[data-reading-mode="${button.dataset.readingMode}"]`)?.focus({preventScroll:true});
@@ -21,7 +26,7 @@
     const edges=(config.edges || []).filter(e=>byId.has(String(e.from)) && byId.has(String(e.to)));
     const title=item=>config.title(item), meta=item=>config.meta?.(item) || '';
     let selected=String(config.selected || items[0]?.id || ''), visible=[], neighborPage=1;
-    let results, detail, browser;
+    let results, detail, browser, renderedWidth=0;
     const state=config.state || {query:'',page:1,filters:{}};
     function summary() {
       const item=byId.get(selected);
@@ -53,13 +58,17 @@
     function board() {
       if(!results || !root.isConnected)return;
       const width=Math.max(250,Math.floor(results.clientWidth)), lines=[];
+      renderedWidth=width;
+      const focused=results.contains(document.activeElement)?document.activeElement:null;
+      const focusAttribute=['data-visual-node','data-visual-pick','data-visual-neighbor','data-visual-actor','data-visual-roster','data-neighbor-page'].find(a=>focused?.hasAttribute(a));
+      const focusValue=focusAttribute?focused.getAttribute(focusAttribute):null;
       if(config.type==='people') {
         const person=byId.get(selected);
         const neighbors=person?(config.neighbors?.(person)||[]):[];
-        const size=3,pages=Math.max(1,Math.ceil(neighbors.length/size));neighborPage=Math.min(pages,neighborPage);
+        const size=width<450?2:3,pages=Math.max(1,Math.ceil(neighbors.length/size));neighborPage=Math.min(pages,neighborPage);
         const slice=neighbors.slice((neighborPage-1)*size,neighborPage*size), nw=Math.min(230,(width-76)/2);
-        const rowHeight=slice.some(n=>n.actors?.length)?126:82;
-        const height=Math.max(148,slice.length*rowHeight+22), cy=(height-62)/2, rx=width-nw-6;
+        const rowHeight=slice.some(n=>n.actors?.length)?(nw<155?160:126):82;
+        const height=Math.max(148,slice.length*rowHeight+22), cy=width<450?12:(height-62)/2, rx=width-nw-6;
         const nodes=person?[button(person,6,cy,nw)]:[];
         slice.forEach((n,i)=>{const y=12+i*rowHeight;nodes.push(button(n,rx,y,nw,true));
           if(n.actors?.length)nodes.push(`<div class="visual-coactors" style="left:${rx}px;top:${y+65}px;width:${nw}px" aria-label="${esc(n.title)}的其他参与者">${n.actors.slice(0,2).map(a=>`<button type="button" data-visual-actor="${esc(a.id)}" title="${esc(a.name)}">${esc(short(a.name,7))}</button>`).join('')}${n.actors.length>2?`<button type="button" data-visual-roster="${esc(n.id)}" aria-label="查看全部 ${n.actors.length} 位其他参与者">+${n.actors.length-2} 人</button>`:''}</div>`);
@@ -87,6 +96,7 @@
       }
       const target=results.querySelector('.visual-node:not(.is-neighbor)');
       if(!results.querySelector('.visual-node[tabindex="0"]'))target?.setAttribute('tabindex','0');
+      if(focusAttribute)results.querySelector(`[${focusAttribute}="${CSS.escape(focusValue)}"]`)?.focus({preventScroll:true});
     }
     browser=B.mount(root,{...config,pageSize:6,className:'visual-map-items',state,
       renderItem:()=>'',afterRender:(node,pageItems)=>{results=node;visible=pageItems;
@@ -123,7 +133,7 @@
       const next=event.key==='Home'?0:event.key==='End'?visible.length-1:(i+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1)+visible.length)%visible.length;
       if(visible[next])select(visible[next].id,true);
     });
-    const observer=new ResizeObserver(()=>{if(!root.isConnected){observer.disconnect();return;}board();});observer.observe(results);
+    const observer=new ResizeObserver(()=>{if(!root.isConnected){observer.disconnect();return;}if(Math.max(250,Math.floor(results.clientWidth))!==renderedWidth)board();});observer.observe(results);
     return {select,reveal,redraw:()=>browser.draw()};
   }
   window.XumaiVisualReading=Object.freeze({mount,switcher,preference,short});

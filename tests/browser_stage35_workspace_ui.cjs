@@ -36,6 +36,8 @@ async function capture(page, width, label) {
 }
 async function verify(browser, width) {
   const context = await browser.newContext({viewport:{width,height:900},reducedMotion:'reduce'});
+  // Stage36 defaults to diagrams; this suite retains all full-list contracts.
+  await context.addInitScript(()=>sessionStorage.setItem('xumai-reading-view','list'));
   const page = await context.newPage();
   const diagnostics = [], layouts = [];
   page.on('pageerror', error => diagnostics.push(error.message));
@@ -69,12 +71,11 @@ async function verify(browser, width) {
     await page.waitForFunction(expected=>document.querySelector('#chapterEditor')?.value===expected,body1 + '\n\n');
     assert.equal(await page.locator('#chapterEditor').inputValue(),body1 + '\n\n');
     layouts.push(await capture(page,width,'editor'));
-    await page.locator('#toggleArchiveButton').click();
-    assert.equal(await page.locator('#toggleArchiveButton').getAttribute('aria-expanded'),'false');
+    assert.equal(await page.locator('#archiveDrawer').isVisible(),false,'Independent editor no longer duplicates the report sidebar');
     await page.locator('#chapterTitleInput').fill('第一章 旧站来信');
     await page.locator('[data-action="save-editor"]').click();
     await page.locator('#editorSaveState.is-saved').waitFor();
-    assert.equal(await page.locator('#toggleArchiveButton').getAttribute('aria-expanded'),'false','save must preserve collapsed drawer');
+    assert.equal(await page.locator('#archiveDrawer').isVisible(),false,'save must preserve the uncluttered independent editor');
     await page.locator('.chapter-list-item').nth(1).click();
     await page.waitForFunction(expected=>document.querySelector('#chapterEditor')?.value===expected,body2);
     assert.equal(await page.locator('#chapterEditor').inputValue(),body2);

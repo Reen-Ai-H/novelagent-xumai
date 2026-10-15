@@ -1075,7 +1075,7 @@
       if(state.activeChapterId!==chapterId || state.editorDirty)return;
       const chapter=activeEditorVersion()?.chapters.find(c=>c.chapter_id===chapterId);
       const section=window.XumaiChapterSections?.read(state.workspace?.chapter_sections,chapterId,chapter?.content).find(s=>s.section_id===sectionId);
-      if(!section || !window.XumaiChapterSections.locate(elements.chapterEditor,section,chapter.content)) {
+      if(!section || !window.XumaiChapterSections.locate(elements.chapterEditor,section,chapter.content,{caret:true})) {
         updateSectionStatus('小节位置已变化。请从更新后的目录重新选择。');return;
       }
       updateSectionStatus(`已定位：${section.title}`);
@@ -1213,6 +1213,9 @@
 
   async function flushPendingSave({ keepalive = false } = {}) {
     window.clearTimeout(state.saveTimer);
+    // A background lifecycle event cannot resolve a failed save or conflict.
+    // Keep the visible buffer and let the author explicitly retry instead.
+    if (keepalive && (state.editorSaveFailed || state.editorConflict)) return false;
     while (state.editorDirty || state.editorSaving) {
       if (state.savePromise) {
         const completed = await state.savePromise;
