@@ -33,6 +33,7 @@ from schemas.deconstruction import (
     DeconstructionActiveRun,
     DeconstructionCandidate,
     DeconstructionDocument,
+    DeconstructionDepthReport,
     DeconstructionDocumentPublic,
     DeconstructionError,
     DeconstructionHistoryItem,
@@ -1159,7 +1160,7 @@ class DeconstructionService:
         if position < 0:
             position = 0
         end = min(len(content), position + MAX_EXCERPT)
-        excerpt = content[position:end].strip()
+        excerpt = content[position:end]
         evidence_id = self._slug(
             f"evidence:{document.document_id}:{source.version_id}:{chapter.chapter_id}:{label}:{position}:{excerpt}"
         )
@@ -1791,6 +1792,92 @@ class DeconstructionService:
     async def process_background_tasks_async(self, *, limit: int = 8) -> int:
         return await asyncio.to_thread(self.process_background_tasks, limit=limit)
 
+    def _evidence_source_matches(self, source: _Source, document: DeconstructionDocument) -> bool:
+        """Validate the original version, using exactly the report's scope.
+
+        A scoped model report survives appending outside its read range, even
+        when that version subsequently becomes historical. Whole-book reports
+        still require the complete source hash; a missing scope hash is never
+        treated as permission to bypass source verification.
+        """
+        if (source.project_id != document.project_id or source.account_id != document.account_id
+                or source.version_id != document.source_version_id):
+            return False
+        if document.analysis_contract_version == "model.1" and self._scoped(document):
+            return bool(document.scope_hash and document.scope_start <= document.scope_end
+                        and self._scope_hash(source, document.scope_start, document.scope_end) == document.scope_hash)
+        return bool(source.source_hash and source.source_hash == document.source_hash)
+
+    def _verified_evidence(self, source: _Source, document: DeconstructionDocument,
+                           item: EvidenceRef) -> EvidenceRef | None:
+        """Exact source-bound projection; legacy whitespace repair is read-only.
+
+        Never search by current chapter number or fuzzy-match a quote. Recovery
+        is limited to the old strip-only bug at the *same* stored UTF-16 span,
+        backed by a validated canonical report or the legacy producer's exact
+        ID/position/length formula. The returned quote must equal the raw slice.
+        """
+        if (not self._evidence_source_matches(source, document)
+                or item.document_id != document.document_id
+                or item.source_version_id != document.source_version_id
+                or item.source_revision != document.source_revision
+                or item.source_hash != document.source_hash):
+            return None
+        if (document.analysis_contract_version == "model.1" and self._scoped(document)
+                and not document.scope_start <= item.chapter_number <= document.scope_end):
+            return None
+        chapter = next((c for c in source.chapters if c.chapter_id == item.chapter_id
+                        and c.chapter_number == item.chapter_number), None)
+        if chapter is None:
+            return None
+        try:
+            raw = chapter.content.encode("utf-16-le")
+            if not 0 <= item.start_offset < item.end_offset <= len(raw) // 2:
+                return None
+            prefix = raw[:item.start_offset * 2].decode("utf-16-le")
+            quote = raw[item.start_offset * 2:item.end_offset * 2].decode("utf-16-le")
+        except UnicodeError:
+            return None
+        canonical = None
+        if isinstance(document.report, DeconstructionDepthReport):
+            canonical = next((e for e in document.report.evidence if e.evidence_id == item.evidence_id), None)
+        if canonical is not None:
+            if (canonical.granularity != "span" or canonical.excerpt != quote or any(
+                getattr(canonical, key) != getattr(item, key) for key in
+                ("document_id", "source_version_id", "source_revision", "source_hash", "chapter_id",
+                 "chapter_number", "start_offset", "end_offset", "offset_unit")
+            )):
+                return None
+        if quote == item.excerpt:
+            return item
+        if not item.excerpt or item.excerpt != quote.strip() or document.analysis_contract_version == "model.1":
+            return None
+        if canonical is not None:
+            if canonical.granularity != "span" or canonical.excerpt != quote:
+                return None
+            try:
+                validate_depth_report_source(
+                    document.report,
+                    source=DepthSource(project_id=source.project_id, document_id=document.document_id,
+                                       source_version_id=document.source_version_id,
+                                       source_revision=document.source_revision, source_hash=document.source_hash),
+                    chapters={c.chapter_id: c.content for c in source.chapters},
+                )
+            except ValueError:
+                return None
+        else:
+            # The stage-31 producer clipped MAX_EXCERPT code points and then
+            # stripped the quote without updating its end offset. Its stable
+            # ID proves this precise old projection; arbitrary IDs/spans fail.
+            position = len(prefix)
+            end = min(len(chapter.content), position + MAX_EXCERPT)
+            legacy_id = self._slug(f"evidence:{document.document_id}:{source.version_id}:"
+                                   f"{chapter.chapter_id}:{item.label}:{position}:{item.excerpt}")
+            if (item.evidence_id != legacy_id
+                    or item.end_offset != self._utf16_length(chapter.content[:end])):
+                return None
+        return EvidenceRef.model_validate({**item.model_dump(), "excerpt": quote})
+
     def evidence(self, project_id: str, account_id: str, evidence_id: str, *, document_id: str | None = None) -> dict[str, object]:
         source = self._source(project_id, account_id)
         record = self._record(project_id, account_id)
@@ -1811,6 +1898,7 @@ class DeconstructionService:
             for item in document.evidence:
                 if item.evidence_id != evidence_id:
                     continue
+                verified = self._verified_evidence(source, document, item)
                 depth_current = bool(
                     active_depth
                     and active is not None
@@ -1819,6 +1907,7 @@ class DeconstructionService:
                     and item.source_version_id == source.version_id
                     and item.source_revision == source.source_revision
                     and item.source_hash == source.source_hash
+                    and verified is not None
                 )
                 chapter = next((chapter for chapter in source.chapters if chapter.chapter_id == item.chapter_id), None)
                 scope_current = bool(
@@ -1832,30 +1921,19 @@ class DeconstructionService:
                     and item.source_hash == document.source_hash
                     and chapter is not None
                     and chapter.chapter_number == item.chapter_number
-                    and 0 <= item.start_offset < item.end_offset <= len(chapter.content.encode("utf-16-le")) // 2
-                    and chapter.content.encode("utf-16-le")[item.start_offset * 2:item.end_offset * 2] == item.excerpt.encode("utf-16-le")
+                    and verified is not None
                 )
                 source_matches_current = depth_current or scope_current
                 if not source_matches_current or chapter is None:
                     historical = self._historical_source(project_id, account_id, item.source_version_id)
                     old_chapter = next((c for c in historical.chapters if c.chapter_id == item.chapter_id
                                         and c.chapter_number == item.chapter_number), None)
-                    available = bool(
-                        historical.version_id == document.source_version_id
-                        and historical.source_hash == document.source_hash and old_chapter is not None
-                        and item.document_id == document.document_id
-                        and item.source_version_id == document.source_version_id
-                        and item.source_revision == document.source_revision
-                        and item.source_hash == document.source_hash
-                        and (getattr(item, "granularity", "span") == "chapter" or (
-                            item.start_offset is not None and item.end_offset is not None
-                            and 0 <= item.start_offset < item.end_offset <= self._utf16_length(old_chapter.content)
-                            and old_chapter.content.encode("utf-16-le")[item.start_offset * 2:item.end_offset * 2]
-                                == item.excerpt.encode("utf-16-le"))))
+                    verified = self._verified_evidence(historical, document, item)
+                    available = verified is not None and old_chapter is not None
                     return {
                         "project_id": project_id,
                         "title": source.title,
-                        "evidence": item.model_dump(mode="json"),
+                        "evidence": (verified or item).model_dump(mode="json"),
                         "chapter": {
                             "chapter_id": item.chapter_id,
                             "chapter_number": item.chapter_number,
@@ -1871,7 +1949,7 @@ class DeconstructionService:
                 return {
                     "project_id": project_id,
                     "title": source.title,
-                    "evidence": item.model_dump(mode="json"),
+                    "evidence": verified.model_dump(mode="json"),
                     "chapter": {
                         "chapter_id": chapter.chapter_id,
                         "chapter_number": chapter.chapter_number,

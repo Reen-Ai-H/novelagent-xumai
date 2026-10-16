@@ -14,7 +14,7 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from schemas.analysis_report import AnalysisReport
 
 
@@ -76,7 +76,9 @@ class EvidenceRef(BaseModel):
     start_offset: int = Field(default=0, ge=0)
     end_offset: int = Field(default=0, ge=0)
     offset_unit: Literal["utf16_code_unit"] = "utf16_code_unit"
-    excerpt: str = Field(default="", max_length=180)
+    # Source quotes are coordinates, not display labels. In particular a CR
+    # before LF is part of the UTF-16 span and must survive every projection.
+    excerpt: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(default="", max_length=180)
     label: str = Field(default="正文证据", max_length=120)
     target_path: str | None = Field(default=None, max_length=500)
 
