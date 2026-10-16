@@ -26,6 +26,7 @@ const node = id => {
     value: '', textContent: '', innerHTML: '', dataset: {}, open: false,
     classList: {add() {}, remove() {}, toggle() {}},
     setAttribute(name, value) { this[name] = value; }, removeAttribute(name) { delete this[name]; },
+    insertAdjacentHTML(position, html) { this.innerHTML += html; },
     querySelector(selector) { return node(`${id} ${selector}`); }, querySelectorAll() { return []; },
     focus() { document.activeElement = this; }, select() {}, getClientRects() { return [{}]; },
     showModal() { this.open = true; }, close() { this.open = false; }, addEventListener() {},
@@ -51,7 +52,9 @@ source = source.replace('  start();\n})();', `  globalThis.api = {
   state, elements, normalizeResult, normalizeDeconstructionResponse, hasDeconstructionResults,
   isModelAnalysisReport, renderDeconstructionEvidence, deconstructionEvidenceMatchesSource,
   deconstructionEvidenceIdentityMatches, deconstructionApi, chooseActiveChapter,
-  updateChapterUrl, flushPendingSave, navigate, previewVersion, openRestoreVersionConfirm
+  updateChapterUrl, flushPendingSave, navigate, previewVersion, openRestoreVersionConfirm,
+  renderDeconstructionEvidenceDialog, refreshModelBudget, renderChapterList,
+  parseModelChapterRange, previewModelAnalysis
 };\n})();`);
 vm.runInNewContext(source, sandbox);
 const api = sandbox.api;
@@ -114,6 +117,26 @@ const modelPayload = () => ({project_id: 'p', title: '合同样本', effective_s
             result = self.run_js("console.log('正文输入与输出🧭'); console.error('错误诊断中文🧭');")
         self.assertEqual(result.stdout, "正文输入与输出🧭\n")
         self.assertEqual(result.stderr, "错误诊断中文🧭\n")
+
+    def test_model_preview_only_accepts_contiguous_chapters_before_any_request(self):
+        self.run_js(r'''
+assert.equal(JSON.stringify(api.parseModelChapterRange('1-6')), '[1,2,3,4,5,6]');
+assert.equal(JSON.stringify(api.parseModelChapterRange('3，1,2')), '[1,2,3]');
+assert.equal(JSON.stringify(api.parseModelChapterRange('6')), '[6]');
+assert.equal(api.parseModelChapterRange('1-20').length,20);
+for(const value of ['1,3','1-2,4-6','1,1','1-21','0','6-1','', '9007199254740992','9'.repeat(400)]) {
+  assert.throws(()=>api.parseModelChapterRange(value));
+  node('#modelAnalysisChapters').value=value;
+  api.state.modelAnalysisBusy=false;
+  api.state.modelAnalysisCandidate={projectId:'p',candidate:{id:'keep'}};
+  let calls=0;fetchHandler=async()=>{calls++;throw new Error('Must not request');};
+  const button={disabled:false};await api.previewModelAnalysis(button);
+  assert.equal(calls,0);assert.equal(button.disabled,false);assert.equal(api.state.modelAnalysisBusy,false);
+  assert.equal(api.state.modelAnalysisCandidate.candidate.id,'keep');
+  assert.ok(node('#modelAnalysisStatus').textContent);
+}
+assert.match(node('#modelAnalysisStatus').textContent,/连续章节/);
+''')
 
     def test_model_contract_accepts_both_versions_and_scoped_revision(self):
         self.run_js(r'''
@@ -236,6 +259,54 @@ api.openRestoreVersionConfirm('selected'); assert.equal(api.elements.restoreVers
 assert.deepEqual(methods,['GET','GET']);
 ''')
 
+
+    def test_historical_content_never_enables_current_editor_navigation(self):
+        self.run_js(r'''
+const chapter={chapter_id:'c1',chapter_number:1,title:'第一章',read_only:true,
+ source_available:true,source_version_id:'v',content:'正文\r\n  😀旧稿\r\n'};
+const payload={historical:true,source_matches_current:false,chapter,evidence};
+api.renderDeconstructionEvidenceDialog(payload,null,true);
+assert.equal(api.state.pendingEvidence,null);
+assert.equal(api.elements.locateDeconstructionEvidenceButton.disabled,true);
+assert.match(api.elements.deconstructionEvidenceContent.innerHTML,/readonly aria-label="历史来源正文"/);
+assert.equal(api.elements.deconstructionEvidenceContent.querySelector('.historical-source textarea').value,chapter.content);
+for(const changed of [{source_available:false},{source_version_id:'other'},{chapter_id:'other'},{content:null},{read_only:false}]) {
+ api.renderDeconstructionEvidenceDialog({...payload,chapter:{...chapter,...changed}},null,false);
+ assert.ok(!api.elements.deconstructionEvidenceContent.innerHTML.includes('historical-source'));
+ assert.equal(api.state.pendingEvidence,null);
+ assert.equal(api.elements.locateDeconstructionEvidenceButton.disabled,true);
+}
+api.renderDeconstructionEvidenceDialog({...payload,historical:false,source_matches_current:true},null,true);
+assert.equal(api.elements.locateDeconstructionEvidenceButton.disabled,false);
+assert.equal(api.state.pendingEvidence.chapterId,'c1');
+assert.ok(!api.elements.deconstructionEvidenceContent.innerHTML.includes('historical-source'));
+''')
+
+    def test_shared_budget_displays_real_cap_and_preserves_zero(self):
+        self.run_js(r'''
+api.state.deconstructionProjectId='p';
+const calls=[];
+fetchHandler=async url=>{calls.push(url);return reply({budget:{budget_cny:2,estimated_spent_cny:1.25,reserved_cny:.75,remaining_cny:0,unknown_usage_calls:1}});};
+await api.refreshModelBudget('p');
+const text=node('#modelSharedBudget').textContent;
+assert.match(text,/共用预算 ¥2.0000/);assert.match(text,/剩余 ¥0.0000/);
+assert.match(text,/在途 ¥0.7500/);assert.match(text,/保守上限/);assert.ok(!text.includes('10.00'));
+assert.deepEqual(calls,['/api/independent/projects/p/deconstruction/model-budget']);
+fetchHandler=async()=>({ok:false,status:503,json:async()=>({detail:{message:'账本不可读'}})});
+await api.refreshModelBudget('p');assert.match(node('#modelSharedBudget').textContent,/账本不可读/);
+''')
+
+    def test_official_chapter_navigation_avoids_double_numbering(self):
+        self.run_js(r'''
+api.state.activeChapterId='c1';
+api.renderChapterList({chapters:[{chapter_id:'c1',chapter_number:1,title:'第一章 潮声',status:'ready'},
+ {chapter_id:'c2',chapter_number:2,title:'无编号题',status:'draft'}]});
+const html=api.elements.chapterList.innerHTML;
+assert.match(html,/正式章节，共 2 章/);assert.match(html,/<option value="c1" selected>第一章 潮声/);
+assert.match(html,/aria-hidden="true"><\/span><span class="chapter-list-copy"><strong>第一章 潮声/);
+assert.match(html,/aria-hidden="true">02<\/span>/);
+assert.ok(!html.includes('select-section'));assert.ok(!html.includes('chapter-section-list'));
+''')
 
 if __name__ == "__main__":
     unittest.main()

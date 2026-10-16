@@ -11,6 +11,9 @@
   const importanceLabels = {main:"主要人物", supporting:"配角", incidental:"偶现人物", unknown:"待确认"};
   function mount(root, report, raw, options) {
     if (!root) return;
+    if (options.workspace && window.XumaiWorkspaceReader) {
+      return window.XumaiWorkspaceReader.mountRule(root, report, raw, options);
+    }
     const progress = options.progress ?? 100;
     const visible = item => (item.normalizedStart ?? 0) <= progress + .0001 && (!options.chapterId || item.chapterIds.includes(options.chapterId));
     const rawCharacters = new Map(list(raw.characters?.characters).map(item => [item.item_id, item]));

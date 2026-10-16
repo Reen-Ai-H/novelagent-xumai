@@ -41,6 +41,8 @@ def run() -> int:
         ["node", "--check", "frontend/rule-report.js"],
         ["node", "--check", "frontend/visual-reading.js"],
         ["node", "--check", "frontend/chapter-sections.js"],
+        ["node", "--check", "frontend/chapter-preview.js"],
+        ["node", "--check", "frontend/workspace-reader.js"],
         ["git", "diff", "--check"],
     ):
         subprocess.run(command, cwd=ROOT, check=True)

@@ -123,6 +123,9 @@
       openModal({ eyebrow: `${event.title} · 小事件（${chapterLabel}）`, title: item.title, body: claim(item) });
     }
 
+    if (options.workspace && window.XumaiWorkspaceReader) {
+      return window.XumaiWorkspaceReader.mountModel(root, report, {...options, evidence, claim, openModal});
+    }
     // A directly embedded, source-bound person profile does not need the list
     // controller. Preserve that standalone use when only this viewer is loaded.
     window.XumaiReportBrowser?.mount(root.querySelector('[data-model-questions]'), {label:"矛盾与疑问",pageSize:6,

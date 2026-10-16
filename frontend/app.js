@@ -18,7 +18,6 @@
     editorLoadToken: 0,
     editorMode: "independent",
     activeChapterId: null,
-    sectionNavigation: false,
     editorBuffer: "",
     editorTitleBuffer: "",
     editorRevision: 0,
@@ -147,6 +146,7 @@
     archivePageNotice: $("#archivePageNotice"),
     archiveAiLink: $("#archiveAiLink"),
     deconstructionProjectTitle: $("#deconstructionProjectTitle"),
+    deconstructionPageTitle: $("#deconstructionPageTitle"),
     deconstructionStatusPill: $("#deconstructionStatusPill"),
     deconstructionRefreshButton: $("#deconstructionRefreshButton"),
     deconstructionNotice: $("#deconstructionNotice"),
@@ -325,6 +325,7 @@
     }
     if (state.screen === "archive" && screen !== "archive") state.archiveScrollSpyCleanup?.();
     if (state.screen === "deconstruction" && screen !== "deconstruction") {
+      document.getElementById('workspaceToolsDialog')?.close();
       window.clearTimeout(state.deconstructionPollTimer);
       state.deconstructionPollTimer = null;
       closeDeconstructionEvidenceDialog?.();
@@ -901,17 +902,12 @@
     const region = $("#importPreviewRegion");
     if (!region) return;
     const failure = preview.status === "failed";
-    const sectionOutline = chapter => {
-      const sections=window.XumaiChapterSections?.read(preview.chapter_sections,chapter.chapter_number,chapter.content) || [];
-      return sections.length ? `<div class="import-section-outline"><span>章内小节 · ${sections.length}（不拆分章节）</span><ol>${sections.map(s=>`<li><strong>${escapeHtml(s.title)}</strong><small>${escapeHtml(window.XumaiChapterSections.labels[s.kind])}</small></li>`).join('')}</ol></div>` : '';
-    };
     region.innerHTML = `
       <div class="import-preview-card ${failure ? "is-failed" : ""}">
         <div class="import-preview-head"><div><span class="eyebrow">${failure ? "导入失败，输入已保留" : "导入预览"}</span><strong>${escapeHtml(preview.filename)}</strong></div><span class="mono">${escapeHtml(preview.format || "未知格式")}</span></div>
         ${failure ? `<p class="import-error-text">${escapeHtml(preview.error_message || "文件无法识别，请重新选择。")}</p>` : `
           <div class="import-facts"><span><strong>${preview.chapter_count}</strong> 章</span><span><strong>${Number(preview.total_word_count || 0).toLocaleString("zh-CN")}</strong> 字</span><span><strong>${preview.unrecognized_fragments?.length || 0}</strong> 段待确认</span></div>
-          <p class="import-review-note">展开章节核对正文。未归类片段不会进入正式正文；如需保留，请在原文件中补上章节标题，再重新选择文件。</p>
-          <div class="import-chapter-list">${(preview.chapters || []).map((chapter) => `<details class="import-chapter-preview"><summary><span class="mono">第 ${chapter.chapter_number} 章</span><strong>${escapeHtml(chapter.title)}</strong><span>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字</span></summary>${sectionOutline(chapter)}<div class="import-chapter-body" tabindex="0" aria-label="${escapeHtml(chapter.title)}的导入正文">${escapeHtml(chapter.content)}</div></details>`).join("")}</div>
+          <div class="import-chapter-list">${(preview.chapters || []).map((chapter) => `<details class="import-chapter-preview"><summary><span class="mono">第 ${chapter.chapter_number} 章</span><strong>${escapeHtml(chapter.title)}</strong><span>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字</span></summary><div class="import-chapter-body" tabindex="0" aria-label="${escapeHtml(chapter.title)}的导入正文">${escapeHtml(chapter.content)}</div></details>`).join("")}</div>
           ${(preview.unrecognized_fragments || []).length ? `<details class="unrecognized-fragments" open><summary>未归类片段 · ${preview.unrecognized_fragments.length}</summary>${preview.unrecognized_fragments.map((fragment) => `<p>${escapeHtml(fragment)}</p>`).join("")}</details>` : ""}
           <label class="book-import-choice"><input id="analyzeWholeImport" type="checkbox" /> 导入后查看基础索引（免费，无模型）</label><div class="import-confirm-actions"><button class="button button-outline" type="button" data-action="open-import">重新选择文件</button><button class="button button-primary" type="button" data-action="confirm-import" data-preview-id="${escapeHtml(preview.preview_id)}">确认预览并写入正式正文 <span aria-hidden="true">→</span></button></div>`}
       </div>`;
@@ -927,19 +923,60 @@
   }
 
   async function previewImportFile(file) {
+    const projectId=state.editorProjectId;
     setEditorSaveState("正在读取导入…");
     try {
       const contentBase64 = await fileToBase64(file);
-      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/imports/preview`, {
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}/chapter-previews/import`, {
         method: "POST",
         body: JSON.stringify({ filename: file.name, content_base64: contentBase64 }),
       });
-      renderImportPreview(payload.preview);
-      setEditorSaveState(payload.preview.status === "failed" ? "导入失败" : "等待确认");
+      if(state.editorProjectId!==projectId || state.screen!=='independent')return;
+      openChapterPreview(payload.preview);
+      setEditorSaveState("等待确认");
     } catch (error) {
+      if(state.editorProjectId!==projectId || state.screen!=='independent')return;
       setEditorSaveState("导入失败", "error");
       setEditorNotice(error.message || "文件预览失败，请保留输入后重试。", "red");
     }
+  }
+
+  function openChapterPreview(preview) {
+    const projectId=state.editorProjectId;
+    window.XumaiChapterPreview.open(preview, {
+      projectId, request:requestJson,
+      beforeConfirm:async()=>{
+        if(state.editorProjectId!==projectId || state.screen!=="independent")return false;
+        if(state.editorSaveFailed || state.editorConflict)return false;
+        return await flushPendingSave() && !state.editorDirty;
+      },
+      onConfirmed:async result=>{
+        if(state.editorProjectId!==projectId || state.screen!=="independent")return;
+        state.workspace=result.workspace;
+        state.activeChapterId=result.workspace.active_version?.chapters?.[0]?.chapter_id || null;
+        state.editorDirty=false;state.editorConflict=null;state.editorSaveFailed=false;
+        updateChapterUrl(state.activeChapterId);
+        await loadIndependentWorkspace(projectId);
+        showToast(preview.kind==='resegment'?'分章已确认，旧稿本与来源保留。':'正式章节已导入。');
+      },
+    });
+  }
+
+  async function previewResegment() {
+    if(!state.workspace?.initialized)return;
+    if(state.editorSaveFailed || state.editorConflict || !(await flushPendingSave()) || state.editorDirty) {
+      setEditorNotice('正文尚未保存成功，请先处理保存状态。','red');return;
+    }
+    try {
+      await loadIndependentWorkspace(state.editorProjectId);
+      if(state.editorDirty || state.editorSaving || state.editorConflict || state.editorSaveFailed) {
+        setEditorNotice('正文仍有未保存修改，请保存后重新分章。','red');return;
+      }
+      const source=state.workspace?.chapter_source;
+      if(!source?.can_resegment) {setEditorNotice(source?.blocked_reason || '当前稿本暂时不能重新分章。','red');return;}
+      const result=await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/chapter-previews/resegment`,{method:'POST',body:JSON.stringify({expected_version_id:source.version_id,expected_source_hash:source.source_hash})});
+      openChapterPreview(result.preview);
+    } catch(error) {setEditorNotice(error.message || '分章预览读取失败，原稿未改动。','red');}
   }
 
   async function startBlankWorkspace() {
@@ -1020,6 +1057,13 @@
         renderEditorWorkspace();
       }
       void loadNotifications();
+      const chapterPreviewId = new URLSearchParams(location.search).get('chapter_preview');
+      if (chapterPreviewId && !document.querySelector('.chapter-preview-dialog')) {
+        try {
+          const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}/chapter-previews/${encodeURIComponent(chapterPreviewId)}`);
+          if (loadToken === state.editorLoadToken) openChapterPreview(payload.preview);
+        } catch (error) { setEditorNotice(error.message || '分章预览读取失败。', 'red'); }
+      }
     } catch (error) {
       if (error.status === 401) {
         state.account = null;
@@ -1035,56 +1079,20 @@
   }
 
   function renderChapterList(version) {
-    elements.chapterList.innerHTML = version.chapters.map((chapter) => {
-      const sections=window.XumaiChapterSections?.read(state.workspace?.chapter_sections,chapter.chapter_id,chapter.content) || [];
+    const mobile=`<select class="mobile-chapter-navigation" aria-label="正式章节，共 ${version.chapters.length} 章">${version.chapters.map(c=>`<option value="${escapeHtml(c.chapter_id)}" ${c.chapter_id===state.activeChapterId?'selected':''}>${escapeHtml(c.title || `第${c.chapter_number}章`)}</option>`).join('')}</select>`;
+    elements.chapterList.innerHTML = mobile + version.chapters.map((chapter) => {
       return `<div class="chapter-directory-entry">
       <button class="chapter-list-item ${chapter.chapter_id === state.activeChapterId ? "is-active" : ""} ${chapter.status === "failed" ? "is-failed" : ""}" type="button" data-action="select-chapter" data-chapter-id="${escapeHtml(chapter.chapter_id)}" ${chapter.chapter_id === state.activeChapterId ? 'aria-current="page"' : ""}>
-        <span class="chapter-list-number mono">${String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapter.status === "ready" ? "已分析" : chapter.status === "analyzing" ? "分析中" : chapter.status === "failed" ? "分析失败" : "写作中")}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
-      </button>${sections.length ? `<details class="chapter-section-list" ${chapter.chapter_id===state.activeChapterId?'open':''}><summary>章内小节 · ${sections.length}</summary><ol>${sections.map(s=>`<li><button type="button" data-action="select-section" data-chapter-id="${escapeHtml(chapter.chapter_id)}" data-section-id="${escapeHtml(s.section_id)}"><span>${escapeHtml(s.title)}</span><small>${escapeHtml(window.XumaiChapterSections.labels[s.kind])}</small></button></li>`).join('')}</ol></details>` : ''}</div>`;
+        <span class="chapter-list-number mono" aria-hidden="true">${/^(?:第\s*[\d〇零一二三四五六七八九十百千两]+\s*[章节回]|chapter\s+\d+)/iu.test(chapter.title || '') ? '' : String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapter.status === "ready" ? "已分析" : chapter.status === "analyzing" ? "分析中" : chapter.status === "failed" ? "分析失败" : "写作中")}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
+      </button></div>`;
     }).join("");
-    const status=document.createElement('p');status.className='chapter-section-status';status.setAttribute('role','status');status.id='chapterSectionStatus';elements.chapterList.append(status);
-    updateSectionStatus();
   }
 
   function setEditorEntryMode(mode) {
     const independent=mode!=='ai_assisted';
     elements.independentScreen.dataset.editorMode=independent?'independent':'ai_assisted';
-    document.querySelectorAll('[data-action="open-version-history"],#openVersionButton').forEach(button=>button.classList.toggle('is-hidden',independent));
+    document.querySelectorAll('[data-action="open-version-history"]:not([data-chapter-history]),#openVersionButton').forEach(button=>button.classList.toggle('is-hidden',independent));
     $('#openVersionButton').closest('.chapter-column-foot')?.classList.toggle('is-hidden',independent);
-  }
-
-  function updateSectionStatus(message) {
-    const status=$('#chapterSectionStatus');if(!status)return;
-    status.textContent=message ?? (state.editorDirty || state.editorSaving ? '正文有修改。点击小节将先保存，再更新目录定位。' : '小节只定位正文，不新建章节。');
-    elements.chapterList.querySelectorAll('[data-action="select-section"]').forEach(button=>button.disabled=state.sectionNavigation);
-  }
-
-  async function selectEditorSection(chapterId,sectionId) {
-    if(state.sectionNavigation)return;
-    state.sectionNavigation=true;updateSectionStatus('正在保存并核对小节位置…');
-    try {
-      const needsRefresh=state.editorDirty || state.editorSaving;
-      if(!(await flushPendingSave()) || state.editorDirty || state.editorConflict || state.editorSaveFailed) {
-        updateSectionStatus('尚未保存成功，未使用旧位置。请处理保存状态后再定位。');return;
-      }
-      if(needsRefresh) {
-        await loadIndependentWorkspace(state.editorProjectId);
-        if(state.editorDirty || state.editorSaving){updateSectionStatus('正文再次变化，请保存后重新选择小节。');return;}
-      }
-      await selectEditorChapter(chapterId);
-      if(state.activeChapterId!==chapterId || state.editorDirty)return;
-      const chapter=activeEditorVersion()?.chapters.find(c=>c.chapter_id===chapterId);
-      const section=window.XumaiChapterSections?.read(state.workspace?.chapter_sections,chapterId,chapter?.content).find(s=>s.section_id===sectionId);
-      if(!section || !window.XumaiChapterSections.locate(elements.chapterEditor,section,chapter.content,{caret:true})) {
-        updateSectionStatus('小节位置已变化。请从更新后的目录重新选择。');return;
-      }
-      updateSectionStatus(`已定位：${section.title}`);
-    } catch(error) {
-      updateSectionStatus(error.message || '目录暂时读不到，请重试；未使用旧位置。');
-    } finally {
-      state.sectionNavigation=false;
-      elements.chapterList.querySelectorAll('[data-action="select-section"]').forEach(button=>button.disabled=false);
-    }
   }
 
   function renderArchiveSummary(archive, selectedChapterNumber = null) {
@@ -1192,7 +1200,6 @@
     state.editorBuffer = elements.chapterEditor.value;
     state.editorTitleBuffer = elements.chapterTitleInput.value;
     state.editorDirty = true; if (state.workspace?.mode !== "ai_assisted") { state.editorAnalysis = null; renderArchiveSummary(state.activeArchive); }
-    updateSectionStatus();
     state.editorChangeToken += 1;
     state.editorConflict = null;
     state.editorSaveFailed = false;
@@ -2575,7 +2582,7 @@
   }
 
   function mountDeconstructionHistory(data) {
-    const root = elements.deconstructionPageContent.querySelector('[data-report-history]');
+    const root = document.getElementById('workspaceSource').querySelector('[data-report-history]');
     if (!root || !window.XumaiReportBrowser) return;
     window.XumaiReportBrowser.mount(root, {label:"拆解记录", items:data.history.slice().reverse(), pageSize:6,
       renderItem:item => renderDeconstructionHistoryItem(data, item)});
@@ -2637,7 +2644,7 @@
       const range = result.scopeStart === result.scopeEnd
         ? `第 ${result.scopeStart} 章`
         : `第 ${result.scopeStart}–${result.scopeEnd} 章`;
-      return `<div class="deconstruction-result">${renderAnalysisSource(data, "模型 / 导入报告", range)}${window.XumaiAnalysis.render(result.report)}</div>`;
+      return `<div class="deconstruction-result">${window.XumaiAnalysis.render(result.report)}</div>`;
     }
     const report = result.depthReport;
     if (!report || report.reportVersion !== "2.0") return "";
@@ -2645,7 +2652,8 @@
     const progress = depthSelectedProgress(report);
     const legacy = data.updateAvailable || !Array.isArray(result.report?.plot?.reading_segments);
     const updateNote = legacy ? `<div class="report-update-note"><p><strong>旧版规则报告</strong> · 已保留</p><button type="button" class="quiet-link" data-action="${data.actions.rebuild ? 'deconstruction-rebuild' : 'deconstruction-refresh'}">${data.actions.rebuild ? '更新规则报告' : '检查可用更新'}</button></div>` : "";
-    return `<div class="deconstruction-depth-result">${renderAnalysisSource(data, "规则分析", `${report.chapters.length} 章`)}${updateNote}${renderDepthTabNavigation(activeView)}${renderDepthControls(report)}${renderDepthPerspectivePanel(report, activeView, progress)}</div>`;
+    if (["characters", "plot", "time"].includes(activeView)) return `<div class="deconstruction-depth-result">${updateNote}<div data-rule-reading="${activeView}"></div></div>`;
+    return `<div class="deconstruction-depth-result">${updateNote}${renderDepthTabNavigation(activeView)}${renderDepthControls(report)}${renderDepthPerspectivePanel(report, activeView, progress)}</div>`;
   }
 
   function renderAnalysisSource(data, label, range) {
@@ -2675,12 +2683,12 @@
     }).join("");
     const hasCurrent = volumes.some((item) => item.match && item.status === "completed");
     const guideButton = hasCurrent ? `<button type="button" class="deconstruction-volume is-guide" data-action="deconstruction-section" data-section="guide">全书导读</button>` : "";
-    const controls = `<div class="deconstruction-volume-list">${guideButton}${items}</div><p class="deconstruction-volume-note">只重跑正文变化的那一卷，已拆卷不会因新增正文而失效。</p>`;
+    const controls = `<div class="deconstruction-volume-list">${items}</div>`;
     if (volumes.length === 1) {
       const volume = volumes[0];
-      return `<nav class="deconstruction-volume-bar is-single-volume" aria-label="按卷查看拆解"><details class="single-volume-nav"><summary><strong>${escapeHtml(volume.scopeLabel)}</strong> · ${escapeHtml(statusLabel(volume))}<span>卷导航 / 导读</span></summary>${controls}</details></nav>`;
+      return `<nav class="deconstruction-volume-bar is-single-volume" aria-label="按卷查看拆解"><details class="single-volume-nav"><summary><strong>${escapeHtml(volume.scopeLabel)}</strong> · ${escapeHtml(statusLabel(volume))}</summary>${controls}</details></nav>`;
     }
-    return `<nav class="deconstruction-volume-bar" aria-label="按卷查看拆解"><span class="eyebrow">拆解卷（按章节范围）</span>${controls}</nav>`;
+    return `<nav class="deconstruction-volume-bar" aria-label="按卷查看拆解"><details><summary>${escapeHtml(volumes.find(v=>v.documentId===focus)?.scopeLabel || '选择章节范围')}</summary>${controls}</details></nav>`;
   }
 
   function renderDeconstructionPage(data) {
@@ -2694,15 +2702,15 @@
     if (data.updateAvailable) elements.deconstructionStatusPill.textContent = "旧规则 · 可更新";
     const routeSection = new URLSearchParams(location.search).get("section");
     if (isRule) state.deconstructionView = depthPerspectiveMeta[routeSection] ? routeSection : "characters";
-    const sections = isRule ? depthPerspectiveOrder.map(id => [id, depthPerspectiveMeta[id].label])
-      : [["characters", "人物与经历"], ["plot", "剧情阅读"], ["time", "双时间线"], ["guide", "全书导读"]];
-    document.getElementById("deconstructionSubnav").innerHTML = sections.map(([id, label]) => `<button type="button" data-action="deconstruction-section" data-section="${id}">${label}</button>`).join("");
+    const sections = [["characters", "人物", "♙"], ["plot", "剧情", "⌇"]];
+    document.getElementById("deconstructionSubnav").innerHTML = sections.map(([id, label, icon]) => `<button class="spine-link" type="button" data-action="deconstruction-section" data-section="${id}"><span class="spine-icon">${icon}</span><strong>${label}</strong></button>`).join("");
     setDeconstructionSectionCurrent(isRule ? state.deconstructionView : routeSection || "characters");
     elements.deconstructionStatusPill.className = `deconstruction-status-pill is-${data.effectiveStatus}`;
     const working = ["queued", "running"].includes(data.runStatus);
     elements.deconstructionRefreshButton.disabled = working;
     elements.deconstructionPageContent.setAttribute("aria-busy", String(working));
     state.deconstructionVolumeId = data.focusDocumentId || "";
+    document.getElementById("workspaceSource").innerHTML = data.result ? renderAnalysisSource(data, isRule ? "规则分析" : "模型报告", data.scopeLabel || `${data.result.scopeStart || 1}–${data.result.scopeEnd || data.source.chapterCount || '—'} 章`) : "";
     const volumeBar = renderDeconstructionVolumeBar(data);
     const readableRuleUpgrade = data.effectiveStatus === "rebuild_required" && data.updateAvailable
       && data.error?.code === "engine_update_available" && isRule && data.runStatus === "completed";
@@ -2715,7 +2723,7 @@
         ? `<section class="deconstruction-working-panel is-upgrade-required"><div class="deconstruction-empty-mark">↗</div><h2>基础拆解已有，深度拆解可生成</h2><p>当前是分析合同 1.0 的基础结果，不会在六个视角中冒充完成。请从服务端提供的升级入口生成 2.0 深度报告；旧结果会保留为历史只读。</p>${data.actions.rebuild ? `<button class="button button-primary" type="button" data-action="deconstruction-rebuild">生成深度拆解 <span aria-hidden="true">→</span></button>` : ""}</section>`
         : `<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>服务端还没有返回可引用内容</h2><p>当前响应没有正式结果，页面保留空白，不将不完整响应冒充分析完成。</p></section>`);
     }
-    content.push(renderDeconstructionHistory(data));
+    document.getElementById('workspaceSource').insertAdjacentHTML('beforeend',renderDeconstructionHistory(data));
     elements.deconstructionPageContent.innerHTML = (volumeBar ? volumeBar : "") + content.join("");
     mountDeconstructionHistory(data);
     const pageParams = new URLSearchParams(location.search);
@@ -2734,7 +2742,9 @@
     state.analysisView = null;
     const ruleRoot = elements.deconstructionPageContent.querySelector('[data-rule-reading]');
     if (ruleRoot && data.result?.depthReport && window.XumaiRuleReport) {
-      window.XumaiRuleReport.mount(ruleRoot, data.result.depthReport, data.result.report, {
+      state.analysisView = window.XumaiRuleReport.mount(ruleRoot, data.result.depthReport, data.result.report, {
+        workspace: true, projectId: data.projectId, documentId: data.result.documentId,
+        section: ruleRoot.dataset.ruleReading, onSection: setDeconstructionSectionCurrent,
         view: ruleRoot.dataset.ruleReading,
         progress: depthSelectedProgress(data.result.depthReport),
         chapterId: state.deconstructionChapterId,
@@ -2748,6 +2758,8 @@
       const section = ["plot", "characters", "time"].includes(params.get("section")) ? params.get("section") : "characters";
       let initialView = true;
       state.analysisView = window.XumaiAnalysis.mount(elements.deconstructionPageContent, data.result.report, data.result.evidenceRefs, renderDeconstructionEvidence, {
+        workspace: true, projectId: data.projectId, documentId: data.result.documentId,
+        onSection: setDeconstructionSectionCurrent,
         section, character: params.get("character"),
         characterUrl: id => `/independent/${encodeURIComponent(data.projectId)}?view=deconstruction&volume=${encodeURIComponent(data.result.documentId)}&section=characters&character=${encodeURIComponent(id)}`,
         onView(section, character) {
@@ -2769,8 +2781,11 @@
   }
 
   function setDeconstructionSectionCurrent(section) {
+    const active = section === "time" ? "plot" : section;
+    elements.deconstructionPageTitle.textContent = active === "characters" ? "人物" : active === "plot" ? "剧情" : "全书导读";
     document.querySelectorAll("[data-action='deconstruction-section']").forEach((button) => {
-      button.setAttribute("aria-current", button.dataset.section === section ? "page" : "false");
+      button.setAttribute("aria-current", button.dataset.section === active ? "page" : "false");
+      button.classList.toggle('is-active', button.dataset.section === active);
     });
   }
 
@@ -2856,9 +2871,15 @@
   async function activateDeconstructionSection(section) {
     const projectId = state.deconstructionProjectId;
     if (!projectId) return;
+    document.getElementById('workspaceToolsDialog')?.close();
+    if (state.analysisView && !state.deconstructionGuideMode && ["characters", "plot", "time"].includes(section)) {
+      state.analysisView.select(section); return;
+    }
     const url = new URL(location.href);
     url.searchParams.set("section", section);
     url.searchParams.delete("character");
+    url.searchParams.delete("event");
+    url.searchParams.delete("pane");
     url.searchParams.delete("focus");
     if (url.href !== location.href) history.pushState({}, "", url);
     if (section === "guide") {
@@ -2892,8 +2913,7 @@
     const url = new URL(location.href);
     url.searchParams.set("section", "plot");
     url.searchParams.set("volume", documentId);
-    url.searchParams.delete("character");
-    url.searchParams.delete("focus");
+    for (const name of ['character','event','pane','focus','q','page','group','inChapter','selected','order']) url.searchParams.delete(name);
     if (url.href !== location.href) history.pushState({}, "", url);
     await loadDeconstructionWorkspace(projectId, { silent: true, documentId });
   }
@@ -3120,7 +3140,7 @@
     }
     state.deconstructionProjectId = projectId;
     document.getElementById("deconstructionSubnav").hidden = false;
-    document.querySelector('[data-action="deconstruction-open-self"]').setAttribute("aria-expanded", "true");
+    document.querySelector('[data-action="deconstruction-open-self"]')?.setAttribute("aria-expanded", "true");
     window.clearTimeout(state.deconstructionPollTimer);
     state.deconstructionPollTimer = null;
     setActiveScreen("deconstruction");
@@ -3285,6 +3305,14 @@
       && payload?.source_matches_current === true
       && payload?.historical === false
       && chapter.source_available !== false;
+    const historicalContent = payload?.historical === true && payload?.source_matches_current === false
+      && chapter.read_only === true && chapter.source_available === true
+      && chapter.source_version_id === evidence?.sourceVersionId && chapter.chapter_id === evidence?.chapterId
+      && typeof chapter.content === 'string' ? chapter.content : null;
+    const historicalSpan = historicalContent !== null && evidence?.granularity === 'span'
+      && evidence.offsetUnit === DECONSTRUCTION_OFFSET_UNIT && evidence.charStart >= 0
+      && evidence.charEnd > evidence.charStart && evidence.charEnd <= historicalContent.length
+      && deconstructionEvidenceExcerptMatches(evidence, historicalContent);
     const precise = Boolean(
       sourceIsCurrent
       && evidence
@@ -3300,6 +3328,13 @@
     elements.locateDeconstructionEvidenceButton.disabled = !precise;
     elements.locateDeconstructionEvidenceButton.textContent = precise ? "在当前正文中定位" : "当前仅可章节级回看";
     elements.locateDeconstructionEvidenceButton.title = precise ? "按 UTF-16 字符位移在当前稿本定位" : "历史或章节级证据不能定位当前正文";
+    if (historicalContent !== null) {
+      elements.deconstructionEvidenceContent.insertAdjacentHTML('beforeend', '<section class="historical-source"><h3>来源旧稿</h3><textarea readonly aria-label="历史来源正文" spellcheck="false"></textarea></section>');
+      const source = elements.deconstructionEvidenceContent.querySelector('.historical-source textarea');
+      source.value = historicalContent;
+      if (historicalSpan) window.XumaiChapterSections?.locate(source, {start:evidence.charStart,end:evidence.charEnd}, historicalContent);
+      elements.locateDeconstructionEvidenceButton.textContent = '历史来源仅供只读查看';
+    }
     state.pendingEvidence = sourceIsCurrent && evidence ? { ...evidence, projectId: state.deconstructionProjectId } : null;
   }
 
@@ -3705,13 +3740,27 @@
     loadAIWorkspace(state.aiProjectId, false);
   }
 
+  async function refreshModelBudget(project) {
+    const node = document.getElementById('modelSharedBudget');
+    try {
+      const {budget} = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/model-budget`);
+      if (state.deconstructionProjectId !== project) return;
+      const amount = value => Number.isFinite(Number(value)) ? `¥${Number(value).toFixed(4)}` : '未知';
+      node.textContent = `本机模型共用预算 ${amount(budget.budget_cny)} · 已计 ${amount(budget.estimated_spent_cny)} · 在途 ${amount(budget.reserved_cny)} · 剩余 ${amount(budget.remaining_cny)}`;
+      if (budget.unknown_usage_calls) node.textContent += ' · 部分用量按保守上限记账';
+    } catch (error) {
+      if (state.deconstructionProjectId === project) node.textContent = `共用预算暂不可读：${error.message}`;
+    }
+  }
+
   async function pollBook(project) {
     clearTimeout(state.bookPollTimer);
+    void refreshModelBudget(project);
     try {
       const { job } = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book`);
       if (state.screen !== "deconstruction" || state.deconstructionProjectId !== project) return;
       const budgetText = job?.budget
-        ? ` · 估算 ¥${Number(job.budget.estimated_spent_cny || 0).toFixed(2)} / ¥${Number(job.budget.budget_cny || 10).toFixed(2)}`
+        ? ` · 本任务估算 ¥${Number(job.budget.estimated_spent_cny || 0).toFixed(4)}`
         : "";
       document.getElementById("bookAnalysisStatus").textContent = job ? `${job.message}（${job.cursor}/${job.total}）${budgetText}` : `当前稿本 ${state.deconstructionWorkspace?.source.chapterCount ?? "—"} 章。开始后逐段更新结果。`;
       document.getElementById("modelAnalysisActivity").textContent = job ? ` · ${job.message}（${job.cursor}/${job.total}）` : " · 需主动开始";
@@ -3734,7 +3783,23 @@
       await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book/${action}`, { method:"POST" });
       await pollBook(project);
     } catch (error) { document.getElementById("bookAnalysisStatus").textContent = error.message; }
-    finally { button.disabled = false; }
+    finally { button.disabled = false; void refreshModelBudget(project); }
+  }
+
+  function parseModelChapterRange(raw) {
+    const numbers = [];
+    for (const part of String(raw).trim().split(/[,，]/)) {
+      const match = part.trim().match(/^(\d+)(?:\s*[-–]\s*(\d+))?$/);
+      if (!match) throw new Error("请输入连续章节范围，例如 1-6。");
+      const start = Number(match[1]), end = Number(match[2] || start);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start || end - start >= 20) throw new Error("每轮请选择 1 至 20 个连续章节。");
+      for (let n = start; n <= end; n++) numbers.push(n);
+      if (numbers.length > 20) throw new Error("每轮最多 20 章，请勿重复选择。");
+    }
+    if (new Set(numbers).size !== numbers.length) throw new Error("每轮最多 20 章，请勿重复选择。");
+    numbers.sort((a,b)=>a-b);
+    if (numbers.some((number,index)=>index && number!==numbers[index-1]+1)) throw new Error("请选择连续章节，例如 1-6；不能跳过中间章节。");
+    return numbers;
   }
 
   async function previewModelAnalysis(button) {
@@ -3742,16 +3807,9 @@
     const projectId = state.deconstructionProjectId;
     const status = document.getElementById("modelAnalysisStatus");
     const preview = document.getElementById("modelAnalysisPreview");
-    const raw = document.getElementById("modelAnalysisChapters").value.trim();
-    const numbers = [];
-    for (const part of raw.split(/[,，]/)) {
-      const match = part.trim().match(/^(\d+)(?:\s*[-–]\s*(\d+))?$/);
-      if (!match) { status.textContent = "请输入章节号，例如 1-5 或 1,3。"; return; }
-      const start = Number(match[1]), end = Number(match[2] || start);
-      if (start < 1 || end < start || end - start >= 20) { status.textContent = "每轮请选择 1 至 20 章。"; return; }
-      for (let n = start; n <= end; n++) numbers.push(n);
-    }
-    if (numbers.length > 20 || new Set(numbers).size !== numbers.length) { status.textContent = "每轮最多 20 章，请勿重复选择。"; return; }
+    let numbers;
+    try { numbers = parseModelChapterRange(document.getElementById("modelAnalysisChapters").value); }
+    catch (error) { status.textContent = error.message; return; }
     state.modelAnalysisBusy = true; button.disabled = true;
     state.modelAnalysisCandidate = null; preview.innerHTML = "";
     status.textContent = "正在阅读和拆解，可能需要数分钟。试拆期间请保持本页打开；长范围可使用后台全文拆解。";
@@ -3766,7 +3824,7 @@
       preview.innerHTML = '<div class="model-preview-actions"><button type="button" class="button button-primary" data-action="model-adopt">采用这份拆解</button><button type="button" class="quiet-link" data-action="model-discard">关闭预览</button></div><nav class="model-preview-tabs" aria-label="试拆视角"><button data-action="model-section" data-section="characters">人物卡</button><button data-action="model-section" data-section="plot">剧情地图</button><button data-action="model-section" data-section="time">双时间线</button></nav>' + window.XumaiAnalysis.render(candidate.report);
       state.modelPreviewView = window.XumaiAnalysis.mount(preview, candidate.report, candidate.report.evidence, refs => refs.map(e => `<blockquote>第 ${e.chapter_number} 章 · ${escapeHtml(e.quote)}</blockquote>`).join(""));
     } catch (error) { status.textContent = error.message || "试拆失败，当前结果已保留。"; }
-    finally { state.modelAnalysisBusy = false; button.disabled = false; }
+    finally { state.modelAnalysisBusy = false; button.disabled = false; void refreshModelBudget(projectId); }
   }
 
   async function adoptModelAnalysis(button) {
@@ -3777,7 +3835,7 @@
       await requestJson(`/api/independent/projects/${encodeURIComponent(selected.projectId)}/deconstruction/import`, { method: "POST", body: JSON.stringify(selected.candidate) });
       state.modelAnalysisCandidate = null;
       document.getElementById("modelAnalysisPreview").innerHTML = "";
-      document.getElementById("modelAnalysisStatus").textContent = "已采用，正文右侧统计会同步更新。";
+      document.getElementById("modelAnalysisStatus").textContent = "已采用这份拆解";
       await loadDeconstructionWorkspace(selected.projectId);
     } catch (error) { document.getElementById("modelAnalysisStatus").textContent = error.message; button.disabled = false; }
   }
@@ -3915,7 +3973,9 @@
     if (action === "open-import") elements.importFileInput?.click();
     if (action === "confirm-import") confirmImport(actionNode.dataset.previewId);
     if (action === "select-chapter") selectEditorChapter(actionNode.dataset.chapterId);
-    if (action === "select-section") void selectEditorSection(actionNode.dataset.chapterId,actionNode.dataset.sectionId);
+    if (action === "resegment-chapters") await previewResegment();
+    if (action === "open-workspace-tools") { const dialog=$('#workspaceToolsDialog'); rememberDialogFocus(dialog); dialog.showModal(); void refreshModelBudget(state.deconstructionProjectId); }
+    if (action === "close-workspace-tools") $('#workspaceToolsDialog').close();
     if (action === "save-editor") {
       if (state.workspace?.initialized && !state.editorReadOnly && await flushPendingSave()) showToast("正文已保存。");
     }
@@ -4048,6 +4108,12 @@
     $('#libraryScreen [data-action="open-notifications"]')?.addEventListener("click", handleAction);
     elements.startWorkspaceContent?.addEventListener("click", handleAction);
     elements.editorWorkspaceContent?.addEventListener("click", handleAction);
+    elements.chapterList?.addEventListener("click", handleAction);
+    elements.chapterList?.addEventListener('change',async event=>{
+      if(!event.target.matches('.mobile-chapter-navigation'))return;
+      await selectEditorChapter(event.target.value);
+      const current=elements.chapterList.querySelector('.mobile-chapter-navigation');if(current)current.value=state.activeChapterId;
+    });
     elements.editorNotice?.addEventListener("click", handleAction);
     $('[data-action="save-editor"]')?.addEventListener("click", handleAction);
     elements.versionHistoryContent?.addEventListener("click", handleAction);
@@ -4059,6 +4125,8 @@
     elements.deconstructionPageContent?.addEventListener("keydown", handleDeconstructionTabKeydown);
     elements.deconstructionEvidenceDialog?.addEventListener("click", handleAction);
     elements.deconstructionEvidenceDialog?.addEventListener("close", () => restoreDialogFocus(elements.deconstructionEvidenceDialog));
+    $('#workspaceToolsDialog').addEventListener('close', () => restoreDialogFocus($('#workspaceToolsDialog')));
+    $('#workspaceToolsDialog').addEventListener('keydown', trapDialogFocus);
     elements.deconstructionEvidenceDialog?.addEventListener("cancel", () => {
       state.deconstructionEvidenceRequestToken += 1;
       state.pendingEvidence = null;

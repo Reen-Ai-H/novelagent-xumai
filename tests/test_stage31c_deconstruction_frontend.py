@@ -20,10 +20,13 @@ class Stage31CDeconstructionFrontendContractTest(unittest.TestCase):
         for label in ("正文", "作品拆解", "故事档案", "版本记录"):
             self.assertIn(f">{label}</strong>", self.index_source)
         self.assertIn('data-action="show-deconstruction"', self.index_source)
-        self.assertIn('data-action="deconstruction-open-self"', self.index_source)
+        # Stage37 replaces the nested disclosure with direct, labelled objects.
+        self.assertNotIn('data-action="deconstruction-open-self"', self.index_source)
+        for label in ("正文", "人物", "剧情"):
+            self.assertIn(f">{label}</strong>", self.index_source)
         self.assertNotIn('data-action="deconstruction-open-archive"', self.index_source)
         self.assertIn('id="deconstructionSubnav"', self.index_source)
-        for section in ("plot", "characters", "time"):
+        for section in ("plot", "characters"):
             self.assertIn(f'data-section="{section}"', self.index_source)
 
     def test_adapter_uses_the_real_stage31_read_and_action_contract(self) -> None:
