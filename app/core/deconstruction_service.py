@@ -111,10 +111,15 @@ class DeconstructionService:
         *,
         independent: IndependentWorkspaceService,
         store: DeconstructionStore | None = None,
+        model_budget_cny: float = 10.0,
+        model_budget_scope: str = "default",
     ) -> None:
         self.independent = independent
         self.store = store or DeconstructionStore()
         self._lock = RLock()
+        from app.core.model_call_budget import DurableModelBudget
+        self.model_budget = DurableModelBudget(self.store.base_dir / "model-budgets",
+                                              scope=model_budget_scope, budget_cny=model_budget_cny)
 
     @staticmethod
     def _now() -> datetime:
@@ -311,10 +316,10 @@ class DeconstructionService:
                     data=ensure_exc.data,
                 ) from None
 
-    def _source(self, project_id: str, account_id: str) -> _Source:
+    def _source(self, project_id: str, account_id: str, *, version_id: str | None = None) -> _Source:
         record = self._load_independent_record(project_id, account_id)
         version = next(
-            (item for item in record.versions if item.version_id == record.active_version_id),
+            (item for item in record.versions if item.version_id == (version_id or record.active_version_id)),
             None,
         )
         if version is None:
@@ -376,9 +381,30 @@ class DeconstructionService:
             source_revision=max((chapter.server_revision for chapter in analysis_chapters), default=0),
             source_hash=source_hash,
             chapters=tuple(chapters),
-            pending_changes=record.pending_changes is not None,
+            pending_changes=record.pending_changes is not None if version.version_id == record.active_version_id else False,
             character_names=archive_names,
         )
+
+    def _historical_source(self, project_id: str, account_id: str, version_id: str) -> _Source:
+        """Read Ampere's immutable source seam, without chapter-number fallback."""
+        reader = getattr(self.independent, "read_source_snapshot", None)
+        if reader is None:
+            # Existing installations retain version records; their formal text
+            # is still a safe fallback until the snapshot helper is integrated.
+            return self._source(project_id, account_id, version_id=version_id)
+        try:
+            snapshot = reader(project_id, account_id, version_id)
+        except IndependentServiceError as exc:
+            raise DeconstructionServiceError(exc.code, exc.message, status_code=exc.status_code) from None
+        if snapshot["project_id"] != project_id or snapshot["source_version_id"] != version_id:
+            raise DeconstructionServiceError("historical_source_invalid", "历史来源绑定不一致。", status_code=409)
+        chapters = tuple(_SourceChapter(chapter_id=c["chapter_id"], chapter_number=c["chapter_number"],
+                                        title=c["title"], content=c["content"], server_revision=c["server_revision"])
+                         for c in sorted(snapshot["chapters"], key=lambda c: c["chapter_number"]))
+        return _Source(project_id=project_id, account_id=account_id, title="历史稿本",
+                       version_id=snapshot["source_version_id"], source_revision=snapshot["source_revision"],
+                       source_hash=snapshot["source_hash"], chapters=chapters,
+                       pending_changes=False, character_names=())
 
     def _record(self, project_id: str, account_id: str) -> DeconstructionProjectRecord | None:
         try:
@@ -788,37 +814,54 @@ class DeconstructionService:
         }
     async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
         """Read a bounded source snapshot; model failure never replaces the current result."""
-        from app.agents.deconstruction_model import analysis_messages
+        from app.agents.deconstruction_model import PREVIEW_MAX_TOKENS, analysis_messages
         from app.agents.llm_runtime import LLMRuntimeError
+        from app.core.analysis_grounding import GroundedReport, bind_selections, source_bank
+        from app.core.model_call_budget import budgeted_structured
+        from app.core.model_budget import ModelBudgetExceeded
         source = self._source(project_id, account_id)
         bindings = payload.model_dump(exclude={"chapter_numbers"})
         self._check_source_precondition(source, **bindings)
         if not source.sufficient or source.pending_changes:
             raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        if not getattr(runtime, "available", True):
+            raise DeconstructionServiceError("model_unavailable", "请先配置作品拆解模型。", status_code=503)
         requested = set(payload.chapter_numbers)
         chapters = [c for c in source.chapters if c.chapter_number in requested]
         if len(requested) != len(payload.chapter_numbers) or len(chapters) != len(requested):
             raise DeconstructionServiceError("report_scope_invalid", "请选择当前稿本中不重复的章节。", status_code=422)
+        if sorted(requested) != list(range(min(requested), max(requested) + 1)):
+            raise DeconstructionServiceError("report_scope_invalid", "请选择连续章节。", status_code=422)
         if sum(len(c.content) for c in chapters) > 30000:
             raise DeconstructionServiceError("report_scope_large", "本轮请缩小章节范围至约三万字以内。", status_code=422)
+        read_text = {c.chapter_number: c.content for c in chapters}
+        bank = source_bank(read_text)
+        def check_source():
+            current = self._source(project_id, account_id)
+            self._check_source_precondition(current, **bindings)
+            if current.pending_changes:
+                raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
         try:
-            result = await asyncio.wait_for(runtime.structured(
+            result = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
                 call_id=f"deconstruction:{project_id}:{source.source_hash}",
-                messages=analysis_messages([dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters]),
-                response_model=AnalysisReport, max_tokens=8192, temperature=0.3,
-            ), timeout=1220)
+                messages=analysis_messages([dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters], bank),
+                response_model=GroundedReport, max_tokens=PREVIEW_MAX_TOKENS, temperature=0.3)
+        except ModelBudgetExceeded:
+            raise DeconstructionServiceError("model_budget_exceeded", "已达到本轮模型总预算上限，现有结果已保留。", status_code=409,
+                                            data={"budget": self.model_budget.public(runtime.model)}) from None
         except TimeoutError:
             raise DeconstructionServiceError("model_timeout", "本轮拆解等待超时，请缩小范围后重试；现有结果已保留。", status_code=504) from None
         except LLMRuntimeError as exc:
             raise DeconstructionServiceError(exc.code, "模型拆解未完成，请稍后重试；现有结果已保留。", status_code=exc.status_code) from None
-        report = AnalysisReport.model_validate(result.data)
-        report.producer = runtime.model
+        except (OSError, ValueError):
+            raise DeconstructionServiceError("model_budget_unavailable", "模型预算账暂不可用，未采用本次结果。", status_code=503) from None
+        try:
+            report = bind_selections(result.data, bank, read_text, producer=runtime.model)
+        except ValueError:
+            raise DeconstructionServiceError("report_evidence_invalid", "模型来源编号、引用或结构未通过校验，现有结果已保留。", status_code=422) from None
         if set(report.chapter_numbers) != requested:
             raise DeconstructionServiceError("report_scope_invalid", "模型返回的章节范围不一致，现有结果已保留。", status_code=422)
-        by_number = {c.chapter_number: c for c in chapters}
-        if any(by_number[e.chapter_number].content.count(e.quote) != 1 for e in report.evidence):
-            raise DeconstructionServiceError("report_evidence_invalid", "模型引文未逐字匹配正文，现有结果已保留。", status_code=422)
-        self._check_source_precondition(self._source(project_id, account_id), **bindings)
+        check_source()
         return AnalysisImport(**bindings, report=report)
 
     def import_report(self, project_id: str, account_id: str, payload: AnalysisImport) -> dict[str, object]:
@@ -1794,8 +1837,21 @@ class DeconstructionService:
                 )
                 source_matches_current = depth_current or scope_current
                 if not source_matches_current or chapter is None:
-                    # 历史稿本不再是当前正文时，返回最小历史定位；不把旧证据
-                    # 默认跳到当前同编号章节，也不复制历史正文。
+                    historical = self._historical_source(project_id, account_id, item.source_version_id)
+                    old_chapter = next((c for c in historical.chapters if c.chapter_id == item.chapter_id
+                                        and c.chapter_number == item.chapter_number), None)
+                    available = bool(
+                        historical.version_id == document.source_version_id
+                        and historical.source_hash == document.source_hash and old_chapter is not None
+                        and item.document_id == document.document_id
+                        and item.source_version_id == document.source_version_id
+                        and item.source_revision == document.source_revision
+                        and item.source_hash == document.source_hash
+                        and (getattr(item, "granularity", "span") == "chapter" or (
+                            item.start_offset is not None and item.end_offset is not None
+                            and 0 <= item.start_offset < item.end_offset <= self._utf16_length(old_chapter.content)
+                            and old_chapter.content.encode("utf-16-le")[item.start_offset * 2:item.end_offset * 2]
+                                == item.excerpt.encode("utf-16-le"))))
                     return {
                         "project_id": project_id,
                         "title": source.title,
@@ -1803,9 +1859,11 @@ class DeconstructionService:
                         "chapter": {
                             "chapter_id": item.chapter_id,
                             "chapter_number": item.chapter_number,
-                            "title": "历史稿本章节",
+                            "title": old_chapter.title if available else "历史稿本章节",
                             "read_only": True,
-                            "source_available": False,
+                            "source_available": available,
+                            "source_version_id": item.source_version_id,
+                            "content": old_chapter.content if available else None,
                         },
                         "source_matches_current": False,
                         "historical": True,

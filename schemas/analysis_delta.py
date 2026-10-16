@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import Field
 
 from schemas.analysis_report import (
-    Character, CharacterInsight, Event, Finding, Relation, ReportEvidence, StrictModel,
+    Character, CharacterInsight, CharacterRelation, Event, Finding, Relation, ReportEvidence, StrictModel,
 )
 
 
@@ -30,6 +30,8 @@ class AnalysisDelta(StrictModel):
     revised_events: list[Event] = Field(default_factory=list, max_length=50)
     new_relations: list[Relation] = Field(default_factory=list, max_length=60)
     withdrawn_relations: list[RelationKey] = Field(default_factory=list, max_length=60)
+    new_character_relations: list[CharacterRelation] = Field(default_factory=list, max_length=60)
+    withdrawn_character_relations: list["CharacterRelationKey"] = Field(default_factory=list, max_length=60)
     withdrawn_ids: list[str] = Field(default_factory=list, max_length=60)
     # Optional means "no change". Empty lists can intentionally clear a set.
     story_order: list[str] | None = Field(default=None, max_length=300)
@@ -37,3 +39,12 @@ class AnalysisDelta(StrictModel):
     contradictions: list[CharacterInsight] | None = Field(default=None, max_length=30)
     title: str | None = Field(default=None, min_length=1, max_length=160)
     time_note: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+class CharacterRelationKey(StrictModel):
+    from_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    to_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    label: str = Field(min_length=1, max_length=40)
+
+
+AnalysisDelta.model_rebuild()

@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from app.agents.deconstruction_model import create_runtime
 from app.agents.llm_runtime import LLMResult, LLMUsage
 from app.core.analysis_delta import compact_index, merge_delta
+from app.core.analysis_grounding import GroundedDelta, bind_selections, source_bank, validate_event_evidence
+from app.core.model_call_budget import budgeted_structured
 from app.core.model_budget import BudgetLedger, ModelBudgetExceeded, pricing_for_model
 from schemas.analysis_delta import AnalysisDelta
 from schemas.analysis_report import AnalysisReport, AnalysisImport
@@ -89,9 +91,13 @@ class BookAnalysis:
             if temp_path is not None and temp_path.exists():
                 temp_path.unlink()
 
-    @staticmethod
-    def public(job):
-        return {k: job[k] for k in ("status", "cursor", "total", "message", "budget")} if job else None
+    def public(self, job):
+        if not job:
+            return None
+        result = {k: job[k] for k in ("status", "cursor", "total", "message", "budget")}
+        if job.get("model"):
+            result["budget"] = self.service.model_budget.public(job["model"])
+        return result
 
     def ensure_task(self, job):
         project = job["project_id"]
@@ -172,12 +178,14 @@ class BookAnalysis:
             job = dict(project_id=project, account_id=account, source_hash=source.source_hash,
                        source_version=source.version_id, source_revision=source.source_revision,
                        run_id=uuid4().hex,
+                       model=runtime.model,
                        status="running", cursor=0, total=len(reading_batches(source.chapters)),
                        memory="", draft=None, report=None, synthesized=False,
                        message="已开始全文阅读",
                        budget=previous_budget or BudgetLedger(pricing=pricing_for_model(runtime.model)).public())
         elif "budget" not in job:
             job["budget"] = BudgetLedger(pricing=pricing_for_model(runtime.model)).public()
+        job["model"] = runtime.model
         if job["status"] not in {"running", "completed"}:
             job["run_id"] = uuid4().hex
         if job["status"] != "completed":
@@ -210,10 +218,11 @@ class BookAnalysis:
         current["budget"] = ledger.public()
         self.save(current)  # A crash after this point retains the full upper-bound hold.
         try:
-            answer = await asyncio.wait_for(runtime.structured(
+            answer = await budgeted_structured(runtime, self.service.model_budget,
+                check_source=lambda: self._check_ready_source(project, account, job), timeout=timeout,
                 call_id=f"book:{project}:{stage}:{job['cursor']}", messages=messages,
                 response_model=response_model, max_tokens=max_tokens,
-                temperature=0.3), timeout=timeout)
+                temperature=0.3)
         except Exception as exc:
             usage = getattr(exc, "usage", None)
             if not isinstance(usage, LLMUsage):
@@ -261,6 +270,13 @@ class BookAnalysis:
                         read_text[c["chapter_number"]] = read_text.get(c["chapter_number"], "") + c["content"]
                 context = {"memory": job["memory"], "known_objects": compact_index(job.get("draft") or job.get("report")),
                            "previous_tail": batches[i-1][-1]["content"][-400:] if i else ""}
+                previous_sizes = {}
+                for batch in batches[:i]:
+                    for c in batch:
+                        previous_sizes[c["chapter_number"]] = previous_sizes.get(c["chapter_number"], 0) + len(c["content"])
+                bank = {key: passage for key, passage in source_bank(read_text).items()
+                        if passage.chapter_number in {c["chapter_number"] for c in batches[i]}
+                        and passage.end > previous_sizes.get(passage.chapter_number, 0)}
                 messages = [
                     {"role": "system", "content":
                      "逐段阅读小说，只返回本段新增或修正的分析声明 AnalysisDelta JSON。新增对象使用本轮临时ID；"
@@ -272,10 +288,10 @@ class BookAnalysis:
                      "以下细读规则提供文学判断依据；其中完整报告格式与chapter_numbers要求由本轮AnalysisDelta合同替代：\n"
                      + RELATION_DELTA_INSTRUCTIONS + "\n" + literary_rules},
                     {"role": "user", "content": "先前阅读记忆与稳定ID索引（材料）：\n" + json.dumps(context, ensure_ascii=False)
-                     + "\n当前正文片段（材料）：\n" + json.dumps(batches[i], ensure_ascii=False)},
+                     + "\n当前正文片段与来源库（材料）：\n" + json.dumps({"chapters": batches[i], "sourcebank": [x.public() for x in bank.values()]}, ensure_ascii=False)},
                 ]
                 answer = await self._call(project, account, job, ledger, runtime, stage="segment",
-                                          messages=messages, response_model=AnalysisDelta,
+                                          messages=messages, response_model=GroundedDelta,
                                           max_tokens=8192, timeout=STRUCTURED_CALL_TIMEOUT)
                 if answer is None:
                     return
@@ -292,11 +308,12 @@ class BookAnalysis:
                         raise DeconstructionServiceError("unread_evidence", "引文超出已读范围，请重试本段。", status_code=422)
                     draft = report.model_dump(mode="json")
                 else:
-                    change = AnalysisDelta.model_validate(answer.data)
+                    change = bind_selections(answer.data, bank, read_text, delta=True)
                     draft, report = merge_delta(job.get("draft") or job.get("report"), change,
                                                 chapters=sorted(expected), read_text=read_text,
                                                 producer=runtime.model,
                                                 scope=f"全文分段阅读：已完成 {i+1}/{len(batches)} 段。")
+                    validate_event_evidence(draft)
                 current = self.load(project, account)
                 if current["status"] != "running" or not self._same_job(current, job):
                     return
@@ -327,13 +344,21 @@ class BookAnalysis:
                     job = current
             if not job.get("legacy_protocol") and not job.get("synthesized"):
                 self.service._check_source_precondition(self.service._source(project, account), **bindings)
+                read_text = {}
+                for batch in batches:
+                    for c in batch:
+                        read_text[c["chapter_number"]] = read_text.get(c["chapter_number"], "") + c["content"]
+                prior = job.get("draft") or job.get("report")
+                used_quotes = {(x["chapter_number"], x["quote"]) for x in prior["evidence"]}
+                bank = {key: passage for key, passage in source_bank(read_text).items()
+                        if (passage.chapter_number, passage.quote) in used_quotes}
                 synthesis_messages = [
                     {"role":"system", "content":"这是独立的全书综合步骤。依据已读全文形成的分析草稿与阅读记忆，检查跨章因果、人物变化、伏笔/揭示和时间顺序。返回AnalysisDelta，只声明新增/修正/撤回；不要无证据创造事实。完成时必须让最终报告具有有效人物、事件、发现、证据及覆盖所有事件的story_order。" + RELATION_DELTA_INSTRUCTIONS + "\n以下细读规则提供文学判断依据；完整报告格式由AnalysisDelta合同替代：\n" + literary_rules},
                     {"role":"user", "content":json.dumps({"draft":job.get("draft") or job.get("report"),
-                                                               "memory":job["memory"]}, ensure_ascii=False)},
+                                                               "memory":job["memory"], "sourcebank": [x.public() for x in bank.values()]}, ensure_ascii=False)},
                 ]
                 answer = await self._call(project, account, job, ledger, runtime, stage="synthesis",
-                                          messages=synthesis_messages, response_model=AnalysisDelta,
+                                          messages=synthesis_messages, response_model=GroundedDelta,
                                           max_tokens=8192, timeout=STRUCTURED_CALL_TIMEOUT)
                 if answer is None:
                     return
@@ -343,9 +368,10 @@ class BookAnalysis:
                     for c in batch:
                         read_text[c["chapter_number"]] = read_text.get(c["chapter_number"], "") + c["content"]
                 draft, report = merge_delta(job.get("draft") or job.get("report"),
-                                            AnalysisDelta.model_validate(answer.data),
+                                            bind_selections(answer.data, bank, read_text, delta=True),
                                             chapters=sorted(read_text), read_text=read_text,
                                             producer=runtime.model, scope="全文综合：全部正文已读。", final=True)
+                validate_event_evidence(draft)
                 current = self.load(project, account)
                 if current["status"] != "running" or not self._same_job(current, job):
                     return

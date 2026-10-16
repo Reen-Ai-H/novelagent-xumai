@@ -67,7 +67,7 @@ def estimate_prompt_tokens(messages: Iterable[Mapping[str, object]]) -> int:
     overhead. This is a deliberately high guard estimate, not billing usage.
     """
 
-    characters = sum(len(str(message.get("content", ""))) for message in messages)
+    characters = sum(len(str(message.get("content", "")).encode("utf-8")) for message in messages)
     return max(1, characters)
 
 
@@ -160,8 +160,8 @@ class BudgetLedger:
             raise ValueError("没有对应的在途预算预留")
         if not isinstance(usage, LLMUsage) or not usage.known:
             self.unknown_usage_calls += 1
-            self.calls += 1
-            self.spent_cny = round(self.spent_cny + (reserved or 0.0), 6)
+            self.calls += max(1, getattr(result, "attempts", 1))
+            self.spent_cny = round(self.spent_cny + (reserved or 0.0), 12)
             self._records.append({"call_id": call_id, "stage": stage, "usage_known": False,
                                   "estimated_cost_cny": reserved or 0.0})
             return reserved or 0.0
@@ -174,8 +174,10 @@ class BudgetLedger:
         )
         # If provider counters exceed our preflight estimate, never understate the exposure.
         cost = max(cost, 0.0)
-        self.spent_cny = round(self.spent_cny + cost, 6)
-        self.calls += 1
+        # Cache tokens can cost fractions of a micro-yuan. Persist them rather
+        # than rounding each request down and reopening the shared hard cap.
+        self.spent_cny = round(self.spent_cny + cost, 12)
+        self.calls += max(1, getattr(result, "attempts", 1))
         self.input_tokens += uncached_input
         self.cache_read_tokens += cache_read
         self.output_tokens += usage.completion_tokens
@@ -188,7 +190,7 @@ class BudgetLedger:
             "cache_read_tokens": cache_read,
             "completion_tokens": usage.completion_tokens,
             "total_tokens": usage.total_tokens,
-            "estimated_cost_cny": round(cost, 6),
+            "estimated_cost_cny": round(cost, 12),
         })
         return cost
 
@@ -197,7 +199,7 @@ class BudgetLedger:
             "budget_cny": self.budget_cny,
             "reserve_cny": self.reserve_cny,
             "estimated_spent_cny": round(self.spent_cny, 4),
-            "accounted_spent_cny": round(self.spent_cny, 6),
+            "accounted_spent_cny": round(self.spent_cny, 12),
             "remaining_cny": round(max(0.0, self.budget_cny - self.spent_cny
                                        - sum(self.pending_attempts.values())), 4),
             "pricing_version": self.pricing.version,
