@@ -52,6 +52,8 @@ class DurableModelBudget:
             try:
                 descriptor = os.open(self.directory, os.O_RDONLY)
             except OSError:
+                if os.name != "nt":
+                    raise
                 descriptor = None
             if descriptor is not None:
                 try:
@@ -92,14 +94,67 @@ class DurableModelBudget:
                     break
             self._save(ledger, records)
 
+    def release_unsent(self, model, token):
+        with self.locks.project_lock(self.scope):
+            ledger = self._load(model)
+            ledger.release_unsent(token)
+            records = self._records()
+            for record in records:
+                if record["attempt_id"] == token:
+                    record["status"] = "not_sent"
+                    break
+            self._save(ledger, records)
 
-async def budgeted_structured(runtime, budget, *, check_source, timeout=1220, **kwargs):
+
+def _reserve_all(budgets, model, messages, max_tokens, *, attempts, stage, check_source):
+    """No await/transport until every durable hold and the last source check pass.
+
+    The pair is not an atomic transaction: a crash/persistence failure can leave
+    an orphan hold, which must remain conservative across restart. Only tokens
+    successfully returned to this still-pre-dispatch stack may be released.
+    """
+    holds = []
+    try:
+        check_source()
+        for budget in budgets:
+            token = budget.reserve(model, messages, max_tokens, attempts=attempts, stage=stage)
+            holds.append((budget, token))
+        if len(budgets) > 1:
+            check_source()
+        return holds
+    except BaseException:
+        release_error = None
+        for budget, token in reversed(holds):
+            try:
+                budget.release_unsent(model, token)
+            except Exception as exc:
+                release_error = release_error or exc
+        if release_error is not None:
+            raise release_error
+        raise
+
+
+def _settle_all(holds, model, result, *, stage):
+    # One failed write must not prevent settling the other ledger. A failed
+    # ledger keeps its persisted hold; never retry or release it as unsent.
+    settle_error = None
+    for budget, token in holds:
+        try:
+            budget.settle(model, token, result, stage=stage)
+        except Exception as exc:
+            settle_error = settle_error or exc
+    if settle_error is not None:
+        raise settle_error
+
+
+async def budgeted_structured(runtime, budget, *, check_source, task_budget=None, timeout=1220, **kwargs):
     """Track real HTTP attempts separately, including structured format repair.
 
     Runtime retries are disabled for this adapter: format repair remains one
     bounded additional request. Cancellation leaves the durable hold intact.
     Deterministic runtimes without an HTTP boundary reserve both attempts.
     """
+    budgets = (task_budget, budget) if task_budget is not None else (budget,)
     if isinstance(runtime, LLMRuntime):
         class TrackedRuntime(LLMRuntime):
             guard_error = None
@@ -112,21 +167,29 @@ async def budgeted_structured(runtime, budget, *, check_source, timeout=1220, **
                 messages = [*request["messages"], {"role": "system", "content":
                             json.dumps(request.get("json_schema"), ensure_ascii=False)}]
                 try:
-                    check_source()
-                    token = budget.reserve(self.model, messages, request["max_tokens"], stage=request["call_id"])
+                    holds = _reserve_all(budgets, self.model, messages, request["max_tokens"],
+                                         attempts=1, stage=request["call_id"], check_source=check_source)
                 except Exception as exc:
                     self.guard_error = exc
                     raise
                 try:
                     result = await super()._request(**request)
                 except Exception as exc:
-                    budget.settle(self.model, token,
-                                  LLMResult(call_id=request["call_id"], text="",
-                                            usage=getattr(exc, "usage", LLMUsage(known=False))),
-                                  stage=request["call_id"] + ":failed")
+                    self._settle(holds, LLMResult(call_id=request["call_id"], text="",
+                                                 usage=getattr(exc, "usage", LLMUsage(known=False))),
+                                 stage=request["call_id"] + ":failed")
                     raise
-                budget.settle(self.model, token, result, stage=request["call_id"])
+                self._settle(holds, result, stage=request["call_id"])
                 return result
+
+            def _settle(self, holds, result, *, stage):
+                try:
+                    _settle_all(holds, self.model, result, stage=stage)
+                except Exception as exc:
+                    # A durable-accounting failure is not a JSON format error.
+                    # structured() must not turn it into another paid request.
+                    self.guard_error = exc
+                    raise
         tracked = TrackedRuntime(runtime.settings, transport=runtime._transport, max_retries=0)
         try:
             return await asyncio.wait_for(tracked.structured(**kwargs), timeout=timeout)
@@ -136,16 +199,17 @@ async def budgeted_structured(runtime, budget, *, check_source, timeout=1220, **
             if tracked.guard_error is not None:
                 raise tracked.guard_error from None
             raise
-    check_source()
-    token = budget.reserve(runtime.model, kwargs["messages"], kwargs["max_tokens"], attempts=2,
-                           stage=kwargs["call_id"])
+    messages = [*kwargs["messages"], {"role": "system", "content":
+                json.dumps(kwargs["response_model"].model_json_schema(), ensure_ascii=False)}]
+    holds = _reserve_all(budgets, runtime.model, messages, kwargs["max_tokens"], attempts=2,
+                         stage=kwargs["call_id"], check_source=check_source)
     try:
         answer = await asyncio.wait_for(runtime.structured(**kwargs), timeout=timeout)
     except Exception as exc:
-        budget.settle(runtime.model, token,
-                      LLMResult(call_id=kwargs["call_id"], text="",
-                                usage=getattr(exc, "usage", LLMUsage(known=False)),
-                                attempts=getattr(exc, "attempts", 1)), stage=kwargs["call_id"] + ":failed")
+        _settle_all(holds, runtime.model,
+                    LLMResult(call_id=kwargs["call_id"], text="",
+                              usage=getattr(exc, "usage", LLMUsage(known=False)),
+                              attempts=getattr(exc, "attempts", 1)), stage=kwargs["call_id"] + ":failed")
         raise
-    budget.settle(runtime.model, token, answer, stage=kwargs["call_id"])
+    _settle_all(holds, runtime.model, answer, stage=kwargs["call_id"])
     return answer

@@ -196,6 +196,16 @@ class BudgetLedger:
         })
         return cost
 
+    def release_unsent(self, attempt_id: str) -> None:
+        """Only the pre-dispatch coordinator may release a definitely unsent hold.
+
+        Never use this for cancellation, timeout, restart or provider failure.
+        Releasing a hold is not an HTTP request or an unknown-usage settlement.
+        """
+        if attempt_id not in self.pending_attempts:
+            raise ValueError("没有对应的未发送预算预留")
+        del self.pending_attempts[attempt_id]
+
     def public(self) -> dict[str, object]:
         return {
             "budget_cny": self.budget_cny,
