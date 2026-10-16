@@ -815,7 +815,7 @@ class DeconstructionService:
         }
     async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
         """Read a bounded source snapshot; model failure never replaces the current result."""
-        from app.agents.deconstruction_model import PREVIEW_MAX_TOKENS, analysis_messages
+        from app.agents.deconstruction_model import analysis_messages, preview_max_tokens
         from app.agents.llm_runtime import LLMRuntimeError
         from app.core.analysis_grounding import GroundedReport, bind_selections, source_bank
         from app.core.model_call_budget import budgeted_structured
@@ -846,7 +846,7 @@ class DeconstructionService:
             result = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
                 call_id=f"deconstruction:{project_id}:{source.source_hash}",
                 messages=analysis_messages([dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters], bank),
-                response_model=GroundedReport, max_tokens=PREVIEW_MAX_TOKENS, temperature=0.3)
+                response_model=GroundedReport, max_tokens=preview_max_tokens(runtime), temperature=0.3)
         except ModelBudgetExceeded:
             raise DeconstructionServiceError("model_budget_exceeded", "已达到本轮模型总预算上限，现有结果已保留。", status_code=409,
                                             data={"budget": self.model_budget.public(runtime.model)}) from None

@@ -7,6 +7,16 @@ from app.agents.llm_runtime import LLMRuntime, LLMRuntimeSettings
 
 # Includes reasoning and final JSON in the official MiMo thinking mode.
 PREVIEW_MAX_TOKENS = 24576
+DEFAULT_PREVIEW_MAX_TOKENS = 12288
+
+
+def preview_max_tokens(runtime) -> int:
+    """Only official MiMo thinking receives the larger reasoning+JSON cap."""
+    if (isinstance(runtime, LLMRuntime)
+            and runtime.settings.base_host in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}
+            and runtime.settings.thinking == "enabled"):
+        return PREVIEW_MAX_TOKENS
+    return DEFAULT_PREVIEW_MAX_TOKENS
 
 
 class DeconstructionModelSettings(BaseSettings):

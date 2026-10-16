@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.agents.deconstruction_model import PREVIEW_MAX_TOKENS, analysis_messages
+from app.agents.deconstruction_model import DEFAULT_PREVIEW_MAX_TOKENS, analysis_messages
 from app.agents.llm_runtime import LLMResult, LLMRuntime, LLMRuntimeSettings, LLMUsage
 from app.core.analysis_delta import compact_index, merge_delta
 from app.core.analysis_grounding import (
@@ -314,7 +314,8 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         source = self.deconstruction._source(first_project, account)
         chapters = [{"chapter_number": c.chapter_number, "title": c.title, "content": c.content} for c in source.chapters]
         messages = [*analysis_messages(chapters), {"role": "system", "content": json.dumps(GroundedReport.model_json_schema(), ensure_ascii=False)}]
-        bound = estimate_structured_call_bound(messages, PREVIEW_MAX_TOKENS, model="mimo-v2.6-pro", attempts=1)
+        # This fixture uses a nonofficial runtime; its original cap stays 12288.
+        bound = estimate_structured_call_bound(messages, DEFAULT_PREVIEW_MAX_TOKENS, model="mimo-v2.6-pro", attempts=1)
         service = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
                                        model_budget_cny=bound * 1.5, model_budget_scope="concurrent-validation")
         calls = []
