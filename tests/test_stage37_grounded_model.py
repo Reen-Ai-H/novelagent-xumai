@@ -24,6 +24,31 @@ from schemas.deconstruction import DeconstructionEvidenceResponse
 from test_stage32_analysis_import import AnalysisImportTest, selector_report, preview_selector_report
 
 
+BOOK_PROMPT_SHA256 = "64df0abe136d33f29451455f8fedd7034ebd1ba4e2b7158d96bdc56e4ef9fbdf"
+
+
+class BookPromptNewlineTest(unittest.TestCase):
+    def test_lf_and_crlf_checkouts_have_identical_runtime_text_and_hash(self):
+        prompt = (Path(__file__).resolve().parents[1] / "app/agents/deconstruction_prompt.md").read_text(encoding="utf-8")
+        lf = prompt.encode("utf-8")
+        crlf = prompt.replace("\n", "\r\n").encode("utf-8")
+        self.assertNotEqual(lf, crlf)
+        self.assertNotEqual(sha256(lf).hexdigest(), sha256(crlf).hexdigest())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prompt.md"
+            for raw in (lf, crlf):
+                with self.subTest(line_ending="CRLF" if b"\r\n" in raw else "LF"):
+                    path.write_bytes(raw)
+                    # Production BookAnalysis uses this exact universal-newline
+                    # text read, not a hash of Git checkout's disk bytes.
+                    rendered = path.read_text(encoding="utf-8")
+                    self.assertEqual(rendered, prompt)
+                    self.assertEqual(sha256(rendered.encode("utf-8")).hexdigest(), BOOK_PROMPT_SHA256)
+                    path.write_bytes(raw + "内容被改动".encode("utf-8"))
+                    changed = path.read_text(encoding="utf-8")
+                    self.assertNotEqual(sha256(changed.encode("utf-8")).hexdigest(), BOOK_PROMPT_SHA256)
+
+
 def runtime_for(transport):
     return LLMRuntime(LLMRuntimeSettings(api_key="offline-fixture", base_url="https://offline.invalid/v1",
                                       model="mimo-v2.6-pro", provider="offline"),
@@ -362,13 +387,13 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("sourcebank" in call["messages"][1]["content"] for call in calls))
         # f7ba873's shared prompt is untouched, including the legacy Event
         # chapter skeleton; both real book request systems still carry it.
-        prompt = (Path(__file__).resolve().parents[1] / "app/agents/deconstruction_prompt.md").read_bytes()
-        self.assertEqual(sha256(prompt).hexdigest(), "64df0abe136d33f29451455f8fedd7034ebd1ba4e2b7158d96bdc56e4ef9fbdf")
+        prompt = (Path(__file__).resolve().parents[1] / "app/agents/deconstruction_prompt.md").read_text(encoding="utf-8")
+        self.assertEqual(sha256(prompt.encode("utf-8")).hexdigest(), BOOK_PROMPT_SHA256)
         schema_suffix = "\n\n只返回一个 JSON 对象，严格符合以下 schema，不要 Markdown 或解释：" + json.dumps(
             GroundedDelta.model_json_schema(), ensure_ascii=False, separators=(",", ":"))
         for call in calls:
             system = call["messages"][0]["content"]
-            self.assertTrue(system.endswith(prompt.decode("utf-8") + schema_suffix))
+            self.assertTrue(system.endswith(prompt + schema_suffix))
             self.assertIn('"chapter_number":1,"chapter_end":1', system)
             self.assertNotIn("简短可辨认的ASCII语义ID", system)
             self.assertNotIn("PreviewEvent", system)
