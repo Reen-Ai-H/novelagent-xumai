@@ -526,6 +526,10 @@ class LLMRuntime:
             body_payload["max_completion_tokens"] = body_payload.pop("max_tokens")
             body_payload["stream"] = True
             body_payload["stream_options"] = {"include_usage": True}
+            if self.settings.thinking == "enabled":
+                # Official MiMo thinking does not accept custom sampling controls.
+                body_payload.pop("temperature", None)
+                body_payload.pop("top_p", None)
         if self.settings.thinking in {"enabled", "disabled"} and self.settings.base_host in {"api.deepseek.com", "api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}:
             body_payload["thinking"] = {"type": self.settings.thinking}
         if json_schema is not None:

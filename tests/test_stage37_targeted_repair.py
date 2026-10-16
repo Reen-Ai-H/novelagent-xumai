@@ -73,7 +73,7 @@ class CandidateRepairTest(unittest.IsolatedAsyncioTestCase):
             configured = deconstruction_model.create_runtime()
         self.assertIs(configured.settings.targeted_structured_repair, True)
         self.assertEqual(configured.settings.thinking, "disabled")
-        self.assertEqual(deconstruction_model.PREVIEW_MAX_TOKENS, 12288)
+        self.assertEqual(deconstruction_model.PREVIEW_MAX_TOKENS, 24576)
         candidate = json.dumps({"answer": 7, ATTACK: ATTACK})
         first_calls = []
         for enabled in (None, False, True):

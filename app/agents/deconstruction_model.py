@@ -5,7 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.agents.llm_runtime import LLMRuntime, LLMRuntimeSettings
 
 
-PREVIEW_MAX_TOKENS = 12288
+# Includes reasoning and final JSON in the official MiMo thinking mode.
+PREVIEW_MAX_TOKENS = 24576
 
 
 class DeconstructionModelSettings(BaseSettings):
@@ -18,13 +19,15 @@ class DeconstructionModelSettings(BaseSettings):
     )
 
 
-def create_runtime():
-    config = DeconstructionModelSettings()
+def create_runtime(config: DeconstructionModelSettings | None = None):
+    config = config if config is not None else DeconstructionModelSettings()
     base_url = config.base_url.strip() or "https://api.xiaomimimo.com/v1"
+    official_mimo = urlparse(base_url).hostname in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}
     return LLMRuntime(LLMRuntimeSettings(
         api_key=config.api_key.strip(), base_url=base_url, model=config.model.strip() or "mimo-v2.6-pro",
-        provider="mimo" if urlparse(base_url).hostname in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"} else "deconstruction",
-        temperature=0.3, timeout_seconds=600, thinking="disabled", targeted_structured_repair=True,
+        provider="mimo" if official_mimo else "deconstruction",
+        temperature=0.3, timeout_seconds=600, thinking="enabled" if official_mimo else "disabled",
+        targeted_structured_repair=True,
     ), max_retries=0)
 
 

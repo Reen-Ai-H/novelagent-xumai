@@ -231,7 +231,7 @@ class PreviewUsageSafetyTest(unittest.TestCase):
         count = len(calls)
         self.assertGreaterEqual(count, 3)
         # A preview refusal alone does not imply that a smaller book request
-        # cannot fit: its output cap is 8192 rather than 12288, and prompt edits
+        # cannot fit: its output cap is 8192 rather than 24576, and prompt edits
         # change the remaining balance. Establish the no-fit precondition with
         # a larger synthetic source instead of relying on incidental rounding.
         second = self._project()
