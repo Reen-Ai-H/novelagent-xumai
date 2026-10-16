@@ -11,7 +11,7 @@ const {chromium}=require('playwright');
 const origin=process.env.XUMAI_BROWSER_URL || 'http://127.0.0.1:8053';
 assert.equal(new URL(origin).hostname,'127.0.0.1');
 const out=path.join(__dirname,'../test-results/stage36-visual');
-const assetRelease='stage37-final';
+const assetRelease='stage37-final2';
 const assetFiles=['styles.css','deconstruction-report.css','workspace-ui.css','visual-reading.css','workspace-reader.css',
   'report-browser.js','visual-reading.js','chapter-sections.js','chapter-preview.js','workspace-reader.js','rule-report.js','deconstruction-report.js','app.js'];
 const shellAssets=html=>[...html.matchAll(/(?:href|src)="(\/static\/[^"?]+\.(?:css|js)\?[^\"]+)"/g)].map(m=>m[1]);

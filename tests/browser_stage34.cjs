@@ -358,7 +358,7 @@ async function oneViewport(browser, width) {
     // Complete chapter one, then create the next chapter. The completed chapter
     // stays readable and the new chapter becomes the active URL/focus target.
     await page.locator('#completeChapterButton').click();
-    await page.locator('#completeChapterButton').filter({hasText: '新建下一章'}).waitFor({timeout: 20000});
+    await page.locator('#completeChapterButton').filter({hasText: '新建章节'}).waitFor({timeout: 20000});
     await waitForNextChapterAction(page);
     assert.equal(await page.locator('#chapterEditor').inputValue(), firstChapter);
 
@@ -387,7 +387,7 @@ async function oneViewport(browser, width) {
     const actionAfterIgnore = page.locator('#completeChapterButton');
     if (await actionAfterIgnore.getAttribute('data-next-chapter') !== 'true') {
       await actionAfterIgnore.click();
-      await page.locator('#completeChapterButton').filter({hasText: '新建下一章'}).waitFor({timeout: 20000});
+      await page.locator('#completeChapterButton').filter({hasText: '新建章节'}).waitFor({timeout: 20000});
       await waitForNextChapterAction(page);
     }
 

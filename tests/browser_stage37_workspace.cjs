@@ -46,6 +46,13 @@ async function capture(page,width,label) {
           await page.locator('[data-reader-detail=characters]').waitFor();assert.equal(await page.locator('[data-person-index]').count(),0);
           assert.equal(new URL(page.url()).searchParams.get('character'),last);assert.ok(new URL(page.url()).searchParams.get('volume'));
           const detailUrl=page.url();await page.reload();await page.locator('[data-reader-detail=characters]').waitFor();assert.equal(page.url(),detailUrl);
+          await page.locator('#deconstructionSubnav [data-section=plot]').click();await page.locator('[data-event-index]').waitFor();
+          // Check BEFORE capture(), which intentionally scrolls screenshot fixtures to the top.
+          const entry=await page.evaluate(()=>({y:scrollY,title:document.querySelector('#deconstructionPageTitle').getBoundingClientRect().top,
+            logo:document.querySelector('#deconstructionScreen a[aria-label="返回书架"]').getBoundingClientRect().top}));
+          assert.equal(entry.y,0);assert.ok(entry.title>=0 && entry.title<900);assert.ok(entry.logo>=0);
+          await page.reload();await page.locator('[data-event-index]').waitFor();assert.equal(await page.evaluate(()=>scrollY),0);
+          await page.goBack();await page.locator('[data-reader-detail=characters]').waitFor();
           if(kind==='model')assert.equal(await page.locator('.workspace-empty').innerText(),'暂无已记录的关系');
           metrics.push(await capture(page,width,`${kind}-person-relations`));
           await page.locator('[data-reader-pane=experiences]').click();assert.equal(await page.locator('[data-reader-pane=experiences]').getAttribute('aria-pressed'),'true');
@@ -82,7 +89,7 @@ async function capture(page,width,label) {
         await page.goto(fixture.modelPeopleUrl);await page.locator('[data-person-index]').waitFor();await page.locator('[data-action=open-workspace-tools]').click();
         await page.locator('#workspaceToolsDialog[open]').waitFor();await page.keyboard.press('Escape');assert.equal(await page.locator('[data-action=open-workspace-tools]').evaluate(n=>n===document.activeElement),true);
         await page.reload();const assets=await page.evaluate(()=>[...document.querySelectorAll('script[src],link[rel=stylesheet]')].map(n=>n.src || n.href));
-        assert.ok(assets.every(url=>new URL(url).searchParams.get('v')==='stage37-final'));
+        assert.ok(assets.every(url=>new URL(url).searchParams.get('v')==='stage37-final2'));
         assert.deepEqual(errors,[]);results.push({width,metrics,errors});
       } catch(error) {await page.screenshot({path:path.join(out,`${width}-failure.png`),fullPage:true});console.error({url:page.url(),errors});throw error;}
       finally {await context.close();}

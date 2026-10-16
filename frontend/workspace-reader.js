@@ -109,15 +109,26 @@
     }
     function sync(push=false) {
       persist();const url=urlFor();
-      if(url.href!==location.href)history[push?'pushState':'replaceState']({},'',url);
+      if(url.href!==location.href)history[push?'pushState':'replaceState'](push?{}:history.state,'',url);
       options.onSection?.(section,object);
+    }
+    function rememberIndexReturn(restore) {
+      // A remembered selection alone must not scroll a fresh primary entry.
+      const entry={...history.state};
+      if(restore)entry.xumaiReaderReturn={key,section};
+      else delete entry.xumaiReaderReturn;
+      history.replaceState(entry,'',location.href);
     }
     function link(targetSection,id,text,cls='quiet-link') {
       return `<a class="${cls}" href="${esc(urlFor(targetSection,id))}" data-reader-open="${esc(id)}" data-reader-section="${targetSection}">${esc(text)}</a>`;
     }
-    function navigate(targetSection,id=null,targetPane='relations') {
-      if(id && !object && targetSection===section)state().selected=id;
-      section=targetSection;object=id;pane=targetPane;sync(true);draw(true);
+    function navigate(targetSection,id=null,targetPane='relations',restoreIndex=false) {
+      if(id && !object && targetSection===section){
+        state().selected=id;sync(false);rememberIndexReturn(true);
+      }
+      section=targetSection;object=id;pane=targetPane;sync(true);
+      if(!object)rememberIndexReturn(restoreIndex);
+      draw(restoreIndex?'restore':'top');
     }
     function orderEvents() {
       if(state().order!=='story')return data.events;
@@ -207,7 +218,7 @@
       B.mount(root.querySelector('[data-event-relations]'),{label:'事件联系',items:relations,pageSize:6,renderItem:r=>`<article><div class="relationship-route">${link('plot',r.from,events.get(String(r.from))?.title || '未命名事件')}<span class="relationship-edge">${esc(r.label)}</span>${link('plot',r.to,events.get(String(r.to))?.title || '未命名事件')}</div>${r.body()}</article>`});
       B.mount(root.querySelector('[data-event-beats]'),{label:'事件细节',items:data.subEvents(event),pageSize:8,renderItem:s=>`<article><h3>${esc(s.title)}</h3>${s.body()}</article>`});
     }
-    function draw(focus=false) {
+    function draw(entry='preserve') {
       edgeChoices=[];
       root.classList.add('workspace-reader');
       const item=(section==='characters'?people:events).get(String(object));
@@ -215,12 +226,12 @@
       else if(item) {if(section==='characters')personPage(item);else eventPage(item);}
       else if(section==='characters')personIndex();else plotIndex();
       if(!object && data.extras){const extra=document.createElement('div');extra.className='workspace-reader-extras';extra.innerHTML=data.extras();root.append(extra);data.bindExtras?.(extra);}
-      if(focus || (!object && state().selected)) {
+      if(entry==='restore' || (entry==='top' && object)) {
         const target=object?root.querySelector('h2[tabindex]'):Array.from(root.querySelectorAll('[data-reader-open]')).find(n=>n.dataset.readerOpen===state().selected);
         target?.focus({preventScroll:true});
-        if(object)window.scrollTo({top:0,behavior:'instant'});
-        else target?.scrollIntoView({block:'center',behavior:'instant'});
+        if(!object)target?.scrollIntoView({block:'center',behavior:'instant'});
       }
+      if(entry==='top')window.scrollTo({top:0,behavior:'instant'});
     }
     root.addEventListener('click',event=>{
       const edge=event.target.closest('[data-reader-edges]');
@@ -230,7 +241,7 @@
       const insight=event.target.closest('[data-report-phrase]');if(insight){const [id,index]=insight.dataset.reportPhrase.split('~');data.openInsight?.(id,index);return;}
       const open=event.target.closest('[data-reader-open]');
       if(open && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey){event.preventDefault();navigate(open.dataset.readerSection,open.dataset.readerOpen);return;}
-      if(event.target.closest('[data-reader-back]')){event.preventDefault();navigate(section);return;}
+      if(event.target.closest('[data-reader-back]')){event.preventDefault();navigate(section,null,'relations',true);return;}
       const tab=event.target.closest('[data-reader-pane]');if(tab){pane=tab.dataset.readerPane;sync(true);draw();root.querySelector(`[data-reader-pane="${pane}"]`).focus();return;}
       const order=event.target.closest('[data-reader-order]');if(order){state().order=order.dataset.readerOrder;
         const matches=orderEvents().filter(e=>(!state().query || e.search.toLocaleLowerCase().includes(state().query.trim().toLocaleLowerCase())) && (!state().filters.chapter || e.chapters.includes(Number(state().filters.chapter))));
@@ -245,7 +256,8 @@
       event.preventDefault();state().selected=links[next].dataset.readerOpen;sync(false);links[next].focus();
     });
     root.addEventListener('focusin',event=>{if(!object && section==='plot' && event.target.matches('[data-reader-open]')){state().selected=event.target.dataset.readerOpen;sync(false);updatePlotFocus();}});
-    sync(false);draw();
+    const returning=history.state?.xumaiReaderReturn;
+    sync(false);draw(!object && returning?.key===key && returning.section===section?'restore':'top');
     return {select(next){navigate(next==='characters'?'characters':'plot');}};
   }
   window.XumaiWorkspaceReader=Object.freeze({mountModel,mountRule,personSlots,plotSlots});

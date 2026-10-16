@@ -13,7 +13,7 @@ class WorkspaceFrontendTest(unittest.TestCase):
         html = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
         assets = re.findall(r'(?:href|src)="/static/([^"?]+\.(?:css|js))\?v=([^"&]+)"', html)
         self.assertEqual(len(assets), 13)
-        self.assertEqual({release for _, release in assets}, {"stage37-final"})
+        self.assertEqual({release for _, release in assets}, {"stage37-final2"})
         self.assertEqual(len({name for name, _ in assets}), 13)
         for name, _ in assets:
             self.assertTrue((ROOT / "frontend" / name).is_file(), name)
@@ -68,6 +68,52 @@ for(let count=0;count<=6;count++) {
  assert.equal(new Set(slots.map(p=>JSON.stringify(p))).size,count);
  slots.forEach(p=>assert.ok(p.x!==50 && p.y>=16 && p.y<=84));
 }
+'''
+        result = subprocess.run(["node", "-"], input=script, text=True, encoding="utf-8",
+                                cwd=ROOT, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_index_scroll_requires_explicit_return_context(self):
+        script = r'''
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const report=require('./tests/browser_stage37_fixture.cjs').report;
+const location=new URL('http://localhost/independent/p?view=deconstruction&volume=doc&section=plot');
+const scrolls=[],focuses=[],tops=[],storage=new Map();
+const links=['C0','E0','E5'].map(id=>({dataset:{readerOpen:id,readerSection:id[0]==='C'?'characters':'plot'},
+ focus(options){assert.equal(options.preventScroll,true);focuses.push(id);},scrollIntoView(){scrolls.push(id);}}));
+const heading={focus(){focuses.push('heading');}};
+function node(){return {innerHTML:'',classList:{add(){},toggle(){}},listeners:{},append(){},insertAdjacentHTML(){},
+ addEventListener(type,fn){this.listeners[type]=fn;},focus(){},
+ querySelector(selector){return selector==='h2[tabindex]'?heading:node();},
+ querySelectorAll(selector){return selector==='[data-reader-open]'?links:[];}};}
+const history={state:null,replaceState(state,title,url){this.state=state;if(url)location.href=url;},pushState(state,title,url){this.state=state;location.href=url;}};
+const context={URL,URLSearchParams,location,history,document:{createElement:node},
+ sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},
+ window:{scrollTo:options=>tops.push(options.top),XumaiVisualReading:{short:String},
+  XumaiReportBrowser:{esc:String,mount(root,config){config.afterRender?.(node(),config.items || []);config.onState?.();}}}};
+vm.runInNewContext(fs.readFileSync('frontend/workspace-reader.js','utf8'),context);
+const mount=root=>context.window.XumaiWorkspaceReader.mountModel(root,report,{projectId:'p',documentId:'doc',section:'plot',claim:()=>'',evidence:()=>''});
+const root=node(),view=mount(root);
+assert.equal(location.searchParams.get('selected'),'E0');
+assert.deepEqual(tops,[0]);assert.deepEqual(scrolls,[]);assert.deepEqual(focuses,[]);
+function click(selector,target){root.listeners.click({target:{closest:key=>key===selector?target:null},preventDefault(){}});}
+view.select('characters');click('[data-reader-open]',links[0]);
+assert.equal(location.searchParams.get('character'),'C0');
+tops.length=scrolls.length=focuses.length=0;view.select('plot');
+assert.deepEqual(tops,[0]);assert.deepEqual(scrolls,[]);assert.deepEqual(focuses,[]);
+assert.equal(history.state.xumaiReaderReturn,undefined);
+click('[data-reader-open]',links[2]);
+assert.equal(location.searchParams.get('event'),'E5');
+tops.length=scrolls.length=focuses.length=0;click('[data-reader-back]',{});
+assert.deepEqual(scrolls,['E5']);assert.deepEqual(focuses,['E5']);assert.deepEqual(tops,[]);
+assert.equal(history.state.xumaiReaderReturn.section,'plot');
+tops.length=scrolls.length=focuses.length=0;mount(node());
+assert.deepEqual(scrolls,['E5']);assert.deepEqual(focuses,['E5']);
+// The same URL/remembered selection is not enough for a fresh top-level entry.
+tops.length=scrolls.length=focuses.length=0;view.select('plot');
+assert.deepEqual(tops,[0]);assert.deepEqual(scrolls,[]);assert.equal(history.state.xumaiReaderReturn,undefined);
+tops.length=0;history.state={xumaiReaderReturn:{key:'another-document',section:'plot'}};mount(node());
+assert.deepEqual(tops,[0]);assert.deepEqual(scrolls,[]);
 '''
         result = subprocess.run(["node", "-"], input=script, text=True, encoding="utf-8",
                                 cwd=ROOT, capture_output=True, timeout=15)

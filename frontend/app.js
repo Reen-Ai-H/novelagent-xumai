@@ -1078,12 +1078,34 @@
     }
   }
 
+  function chapterStateLabel(chapter) {
+    // Independent imports become ready on confirmation, without any analysis task.
+    if (chapter.status === 'ready') return state.workspace?.mode === 'ai_assisted' ? '已分析' : '正式稿';
+    return chapter.status === 'analyzing' ? '分析中' : chapter.status === 'failed' ? '分析失败' : '写作中';
+  }
+
+  function nextIndependentChapter() {
+    if (state.workspace?.mode === 'ai_assisted') return null;
+    const chapters=activeEditorVersion()?.chapters || [];
+    const current=chapters.find(chapter=>chapter.chapter_id===state.activeChapterId);
+    return current ? [...chapters].sort((a,b)=>a.chapter_number-b.chapter_number).find(chapter=>chapter.chapter_number>current.chapter_number) || null : null;
+  }
+
+  function renderCompleteChapterAction(chapter,taskRunning=false) {
+    const next=nextIndependentChapter();
+    const completed=chapter?.status==='ready' && !state.editorDirty && !taskRunning;
+    elements.completeChapterButton.dataset.nextChapter=next?'existing':completed?'true':'false';
+    elements.completeChapterButton.textContent=next?'下一章 →':completed?(state.workspace?.mode==='ai_assisted'?'新建下一章 →':'新建章节 →'):'完成本章 →';
+    elements.completeChapterButton.disabled=state.completeInFlight || state.addChapterInFlight || state.editorReadOnly
+      || state.editorSaveFailed || Boolean(state.editorConflict) || (!next && !completed && !state.editorBuffer.trim()) || taskRunning;
+  }
+
   function renderChapterList(version) {
     const mobile=`<select class="mobile-chapter-navigation" aria-label="正式章节，共 ${version.chapters.length} 章">${version.chapters.map(c=>`<option value="${escapeHtml(c.chapter_id)}" ${c.chapter_id===state.activeChapterId?'selected':''}>${escapeHtml(c.title || `第${c.chapter_number}章`)}</option>`).join('')}</select>`;
     elements.chapterList.innerHTML = mobile + version.chapters.map((chapter) => {
       return `<div class="chapter-directory-entry">
       <button class="chapter-list-item ${chapter.chapter_id === state.activeChapterId ? "is-active" : ""} ${chapter.status === "failed" ? "is-failed" : ""}" type="button" data-action="select-chapter" data-chapter-id="${escapeHtml(chapter.chapter_id)}" ${chapter.chapter_id === state.activeChapterId ? 'aria-current="page"' : ""}>
-        <span class="chapter-list-number mono" aria-hidden="true">${/^(?:第\s*[\d〇零一二三四五六七八九十百千两]+\s*[章节回]|chapter\s+\d+)/iu.test(chapter.title || '') ? '' : String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapter.status === "ready" ? "已分析" : chapter.status === "analyzing" ? "分析中" : chapter.status === "failed" ? "分析失败" : "写作中")}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
+        <span class="chapter-list-number mono" aria-hidden="true">${/^(?:第\s*[\d〇零一二三四五六七八九十百千两]+\s*[章节回]|chapter\s+\d+)/iu.test(chapter.title || '') ? '' : String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapterStateLabel(chapter))}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
       </button></div>`;
     }).join("");
   }
@@ -1173,11 +1195,7 @@
     }
     const latestTask = (workspace.tasks || []).find((task) => task.version_id === version.version_id && ["queued", "running", "failed"].includes(task.status));
     const taskRunning = Boolean(latestTask && ["queued", "running"].includes(latestTask.status));
-    const completedCurrent = chapter.status === "ready" && !state.editorDirty && !taskRunning;
-    elements.completeChapterButton.dataset.nextChapter = completedCurrent ? "true" : "false";
-    elements.completeChapterButton.textContent = completedCurrent ? "新建下一章 →" : "完成本章 →";
-    elements.completeChapterButton.disabled = state.completeInFlight || state.addChapterInFlight || state.editorReadOnly
-      || (!completedCurrent && !state.editorBuffer.trim()) || taskRunning;
+    renderCompleteChapterAction(chapter,taskRunning);
     if (latestTask && latestTask.status === "failed") {
       setEditorNoticeHtml(`<strong>后台分析失败。</strong> ${escapeHtml(latestTask.error_message || "可以修改正文后重试。")} <button class="notice-action" type="button" data-action="retry-task" data-task-id="${escapeHtml(latestTask.task_id)}">重试 →</button>`, "red");
       setEditorAnalysisState("分析失败", "error");
@@ -1185,7 +1203,7 @@
       setEditorAnalysisState("分析中…", "saving");
       scheduleIndependentTaskPoll(latestTask.task_id);
     } else {
-      setEditorAnalysisState(chapter.status === "ready" ? "已分析" : "写作中", chapter.status === "ready" ? "saved" : "");
+      setEditorAnalysisState(chapterStateLabel(chapter), chapter.status === "ready" ? "saved" : "");
     }
     if (state.editorSaving) setEditorSaveState("保存中…", "saving");
     else if (state.editorConflict) setEditorSaveState("保存冲突", "error");
@@ -1204,9 +1222,9 @@
     state.editorConflict = null;
     state.editorSaveFailed = false;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
-    elements.completeChapterButton.dataset.nextChapter = "false";
-    elements.completeChapterButton.textContent = "完成本章 →";
-    elements.completeChapterButton.disabled = !state.editorBuffer.trim() || state.completeInFlight || state.addChapterInFlight;
+    const version=activeEditorVersion();
+    renderCompleteChapterAction(version?.chapters.find(chapter=>chapter.chapter_id===state.activeChapterId),
+      (state.workspace?.tasks || []).some(task=>task.version_id===version?.version_id && ['queued','running'].includes(task.status)));
     setEditorSaveState("本地待保存");
     window.clearTimeout(state.saveTimer);
     state.saveTimer = window.setTimeout(() => { flushPendingSave(); }, 720);
@@ -1284,13 +1302,15 @@
     return promise;
   }
 
-  function handleCompleteButtonClick() {
-    if (state.completeInFlight) return;
+  async function handleCompleteButtonClick() {
+    if (state.completeInFlight || state.addChapterInFlight || state.editorReadOnly || state.editorSaveFailed || state.editorConflict) return;
+    const next=nextIndependentChapter();
+    if (next) { await selectEditorChapter(next.chapter_id); return; }
     if (elements.completeChapterButton.dataset.nextChapter === "true") {
-      void addIndependentChapter();
+      await addIndependentChapter();
       return;
     }
-    void completeCurrentChapter();
+    await completeCurrentChapter();
   }
 
   async function completeCurrentChapter() {
