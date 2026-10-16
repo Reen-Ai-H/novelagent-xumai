@@ -4,12 +4,16 @@ These guards keep generic constraints on the actual request path. Synthetic
 transports do not establish that a real model will obey them; new candidates
 still require independent semantic review against their own source.
 """
+from copy import deepcopy
 import json
 import unittest
 
+from pydantic import ValidationError
+
 from app.agents.deconstruction_model import PREVIEW_MAX_TOKENS, analysis_messages
 from app.agents.llm_runtime import LLMRuntime, LLMRuntimeError, LLMRuntimeSettings
-from app.core.analysis_grounding import GroundedDelta, bind_selections, source_bank
+from app.core.analysis_grounding import GroundedDelta, GroundedReport, bind_selections, source_bank
+from schemas.analysis_report import Event
 
 
 class PromptContractTest(unittest.TestCase):
@@ -72,6 +76,139 @@ class PromptContractTest(unittest.TestCase):
                      "不设固定事件数目标", "不强制全部建人物卡", "不截断JSON凑通过",
                      "new_evidence/revised_evidence同样只选source_id", "所选证据的最小/最大章节")
         self.assertEqual(PREVIEW_MAX_TOKENS, 12288)
+
+    def test_event_wire_example_has_complete_sibling_claims(self):
+        marker = "事件同级骨架（占位值须替换为本轮有据内容）："
+        self.assertTrue(marker in self.rules, "Prompt must include the generic event wire example")
+        self.require(marker, "action、consequence、sub_events必须同级",
+                     "action/consequence各自只含必填的text/status/evidence_ids")
+        example = json.loads(self.rules.split(marker, 1)[1].split("`")[1])
+        Event.model_validate(example, strict=True)
+        self.assertEqual(set(example), set(Event.model_fields))
+        for field in ("action", "consequence"):
+            self.assertEqual(set(example[field]), {"text", "status", "evidence_ids"})
+
+    def test_titled_observations_are_distinguished_from_findings(self):
+        self.require("findings每项必须有id",
+                     "contradictions、人物insights、事件sub_events每项只含title/text/status/evidence_ids，不含id")
+
+
+class EventWireRegressionTest(unittest.IsolatedAsyncioTestCase):
+    """Synthetic structural counterexamples; never load or repair private candidates."""
+
+    def setUp(self):
+        self.text = "守门人听见铃声。守门人关上了门。"
+        self.bank = source_bank({1: self.text})
+        claim = {"text": "守门人听见铃声。", "status": "fact", "evidence_ids": ["Q1"]}
+        observation = {"title": "合成结构观察", **claim}
+        self.wire = deepcopy({
+            "title": "合成结构", "scope": "合成一章", "chapter_numbers": [1],
+            "findings": [{"id": "F1", **observation}],
+            "characters": [{"id": "C1", "name": "守门人", "role": "行动者",
+                            "identity": claim, "motivation": claim, "change": claim,
+                            "insights": [deepcopy(observation)]}],
+            "events": [{"id": "E1", "title": "听铃关门", "chapter_number": 1,
+                        "story_time": "当下", "actor_ids": ["C1"], "action": claim,
+                        "consequence": {"text": "守门人关上了门。", "status": "fact", "evidence_ids": ["Q2"]},
+                        "sub_events": [deepcopy(observation)]}],
+            "relations": [], "story_order": ["E1"], "time_note": "一个合成事件。",
+            "evidence": [{"id": f"Q{index}", "source_id": source}
+                         for index, source in enumerate(self.bank, 1)],
+            "open_questions": [], "contradictions": [deepcopy(observation), deepcopy(observation)],
+        })
+        self.messages = analysis_messages([{"chapter_number": 1, "title": "合成", "content": self.text}], self.bank)
+
+    def nested_event(self):
+        bad = deepcopy(self.wire)
+        event = bad["events"][0]
+        event["action"] = {"text": event["action"]["text"], "consequence": event.pop("consequence"),
+                           "sub_events": event.pop("sub_events")}
+        return bad
+
+    def observations_with_ids(self):
+        bad = deepcopy(self.wire)
+        bad["contradictions"] = [{**item, "id": f"X{index}"}
+                                 for index, item in enumerate(bad["contradictions"], 1)]
+        return bad
+
+    def error_set(self, wire):
+        with self.assertRaises(ValidationError) as error:
+            GroundedReport.model_validate(wire, strict=True)
+        return {(tuple(item["loc"]), item["type"]) for item in error.exception.errors()}
+
+    def test_nested_event_retains_all_five_strict_errors(self):
+        self.assertEqual(self.error_set(self.nested_event()), {
+            (("events", 0, "action", "status"), "missing"),
+            (("events", 0, "action", "evidence_ids"), "missing"),
+            (("events", 0, "action", "consequence"), "extra_forbidden"),
+            (("events", 0, "action", "sub_events"), "extra_forbidden"),
+            (("events", 0, "consequence"), "missing"),
+        })
+
+    def test_observation_ids_remain_forbidden(self):
+        self.assertEqual(self.error_set(self.observations_with_ids()), {
+            (("contradictions", 0, "id"), "extra_forbidden"),
+            (("contradictions", 1, "id"), "extra_forbidden"),
+        })
+        for path in (("characters", 0, "insights", 0), ("events", 0, "sub_events", 0)):
+            with self.subTest(path=path):
+                bad = deepcopy(self.wire)
+                node = bad
+                for part in path:
+                    node = node[part]
+                node["id"] = "X1"
+                self.assertEqual(self.error_set(bad), {((*path, "id"), "extra_forbidden")})
+
+    def test_findings_still_require_id_and_valid_wire_binds_exact_sources(self):
+        report = bind_selections(self.wire, self.bank, {1: self.text}, producer="offline")
+        self.assertEqual([item.quote for item in report.evidence], [item.quote for item in self.bank.values()])
+        bad = deepcopy(self.wire)
+        del bad["findings"][0]["id"]
+        self.assertEqual(self.error_set(bad), {(("findings", 0, "id"), "missing")})
+
+    async def run_responses(self, responses, *, valid):
+        originals = deepcopy(responses)
+        calls = []
+
+        def transport(url, headers, body, timeout):
+            calls.append(json.loads(body))
+            content = json.dumps(responses[len(calls) - 1], ensure_ascii=False, separators=(",", ":"))
+            return 200, json.dumps({"choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+                                    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}).encode()
+
+        runtime = LLMRuntime(LLMRuntimeSettings(api_key="synthetic-only", base_url="https://offline.invalid/v1",
+                                              model="mimo-v2.6-pro", provider="fake"),
+                             transport=transport, max_retries=0)
+        request = dict(call_id="wire-regression", messages=self.messages, response_model=GroundedReport,
+                       max_tokens=PREVIEW_MAX_TOKENS)
+        if valid:
+            result = await runtime.structured(**request)
+            report = bind_selections(result.data, self.bank, {1: self.text}, producer="offline")
+            self.assertEqual(report.events[0].action.evidence_ids, ["Q1"])
+            self.assertEqual(report.events[0].consequence.evidence_ids, ["Q2"])
+        else:
+            with self.assertRaises(LLMRuntimeError) as error:
+                await runtime.structured(**request)
+            result = error.exception
+            self.assertEqual(result.code, "provider_bad_json")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result.attempts, 2)
+        self.assertTrue(result.usage.known)
+        self.assertEqual(result.usage.total_tokens, 60)
+        self.assertEqual(responses, originals)
+        for call in calls:
+            self.assertEqual(call["max_tokens"], 12288)
+            self.assertEqual(call["messages"][0]["role"], "system")
+            # The runtime appends its schema to this trusted system message.
+            self.assertTrue(call["messages"][0]["content"].startswith(self.messages[0]["content"]))
+            self.assertIn("action、consequence、sub_events必须同级", call["messages"][0]["content"])
+            self.assertIn("contradictions、人物insights、事件sub_events", call["messages"][0]["content"])
+
+    async def test_two_different_bad_shapes_are_rejected_after_bounded_repair(self):
+        await self.run_responses([self.nested_event(), self.observations_with_ids()], valid=False)
+
+    async def test_complete_sibling_wire_can_pass_existing_bounded_repair(self):
+        await self.run_responses([self.nested_event(), deepcopy(self.wire)], valid=True)
 
 
 class PromptRequestBoundaryTest(unittest.IsolatedAsyncioTestCase):
