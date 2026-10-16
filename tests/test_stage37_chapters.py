@@ -111,6 +111,72 @@ class ChapterPartitionParserTest(unittest.TestCase):
     def test_single_uncertain_title_is_manual_only(self):
         self.assert_partition(NARRATIVE + "\n渡口旧事\n" + NARRATIVE, ["现有章题"])
 
+    def test_single_bare_title_fills_exact_number_gap(self):
+        body = NARRATIVE * 3
+        for left, right, label in [("第一章 开端", "第三章 终点", "古驿"),
+                                    ("第九回 开端", "第十一回 终点", "旧城来客"),
+                                    ("Chapter 4 Start", "Chapter 6 End", "秋信"),
+                                    ("第１２章 开端", "第１４章 终点", "离岸")]:
+            with self.subTest(left=left, label=label):
+                text = left + "\r\n\r\n" + body + "😀\r\n\r\n" + label + "\r\n\r\n" + body + "\r\n" + right + "\r\n" + body
+                items = self.assert_partition(text, [left, label, right])
+                self.assertEqual(items[1]["start"], utf16_length(text[:text.index(label)]))
+                self.assertEqual(items[1]["confidence"], "inferred")
+                self.assertIn("编号", items[1]["reason"])
+
+    def test_number_gap_supports_markdown_and_docx_at_same_layer(self):
+        body = NARRATIVE * 3
+        text = "# 书名\n## 第一章 开端\n" + body + "\n古驿\n" + body + "\n## 第三章 终点\n" + body
+        self.assert_partition(text, ["第一章 开端", "古驿", "第三章 终点"])
+        text, levels = IndependentWorkspaceService._decode_docx_structure(docx([
+            ("书名", 1), ("第一章 开端", 2), (body, None), ("秋信", None),
+            (body, None), ("第三章 终点", 2), (body, None)]))
+        self.assert_partition(text, ["第一章 开端", "秋信", "第三章 终点"], levels)
+
+    def test_single_bare_title_without_exact_number_gap_stays_body(self):
+        body = NARRATIVE * 3
+        for left, right in [("第一章 开端", "第二章 终点"), ("第一章 开端", "第四章 终点"),
+                            ("第三章 开端", "第一章 终点"), ("第一章 开端", "第一章 终点"),
+                            ("# 开端", "# 终点"), ("序章", "第三章 终点")]:
+            with self.subTest(left=left, right=right):
+                self.assert_partition(left + "\n" + body + "\n古驿\n" + body + "\n" + right + "\n" + body,
+                                      [left.lstrip("# "), right.lstrip("# ")])
+        self.assert_partition("第一章 开端\n" + body + "\n古驿\n" + body, ["第一章 开端"])
+        self.assert_partition(body + "\n古驿\n" + body + "\n第三章 终点\n" + body, ["第三章 终点"])
+
+    def test_number_gap_requires_substantial_narrative_on_both_sides(self):
+        for before, after in [("仅有这一句前文。", NARRATIVE * 3), (NARRATIVE * 3, "仅有这一句后文。"),
+                              (NARRATIVE, NARRATIVE * 3), (NARRATIVE * 3, NARRATIVE),
+                              (NARRATIVE + " \n\t" * 300, NARRATIVE * 3)]:
+            with self.subTest(before_length=len(before), after_length=len(after)):
+                text = "第一章 开端\n" + before + "\n古驿\n" + after + "\n第三章 终点\n" + NARRATIVE
+                self.assert_partition(text, ["第一章 开端", "第三章 终点"])
+
+    def test_number_gap_with_two_ambiguous_identical_labels_is_not_resolved(self):
+        body = NARRATIVE * 3
+        text = "第一章 开端\n" + body + "\n古驿\n" + body + "\n古驿\n" + body + "\n第三章 终点\n" + body
+        self.assert_partition(text, ["第一章 开端", "第三章 终点"])
+
+    def test_number_gap_does_not_promote_prose_quotes_code_or_lists(self):
+        body = NARRATIVE * 3
+        for line in ["他没有回答", "转头望向窗外", "夜色", "难道还要等吗", "古驿。", "“古驿”", "> 古驿"]:
+            with self.subTest(line=line):
+                self.assert_partition("第一章 开端\n" + body + "\n" + line + "\n" + body + "\n第三章 终点\n" + body,
+                                      ["第一章 开端", "第三章 终点"])
+        for middle in ["古驿\n秋信\n" + body, "“\n古驿\n" + body + "\n”",
+                       "```text\n古驿\n" + body + "\n```"]:
+            self.assert_partition("第一章 开端\n" + body + "\n" + middle + "\n第三章 终点\n" + body,
+                                  ["第一章 开端", "第三章 终点"])
+
+    def test_number_gap_does_not_cross_volumes_toc_or_nested_headings(self):
+        body = NARRATIVE * 3
+        for wrapper in ["第二卷 冬", "目录", "正文", "## 内层引文"]:
+            with self.subTest(wrapper=wrapper):
+                text = "第一章 开端\n" + body + "\n古驿\n" + body + "\n" + wrapper + "\n第三章 终点\n" + body
+                self.assert_partition(text, ["第一章 开端", "第三章 终点"])
+        text = "# 第一章 开端\n" + body + "\n古驿\n" + body + "\n## 第三章 内层引用\n" + body
+        self.assert_partition(text, ["第一章 开端"])
+
     def test_toc_and_volume_not_official_chapters(self):
         text = "# 书名\n目录\n第一章 远行 ... 1\n第二章 归来 ... 2\n正文\n第一卷 春\n第一章 远行\n甲。\n第二章 归来\n乙。"
         self.assert_partition(text, ["第一章 远行", "第二章 归来"])
@@ -193,6 +259,17 @@ class ChapterPartitionApiTest(unittest.TestCase):
         self.assertEqual(service.mock_calls, [])
         self.assertIsNone(result["previous_version_id"])
         self.assertEqual(self.confirm(p, 409)["detail"]["code"], "chapter_preview_confirmed")
+
+    def test_import_number_gap_single_bare_title_preview_and_lossless_confirm(self):
+        self.init_project()
+        body = NARRATIVE * 6
+        text = "第一章 开端\n\n" + body + "\n\n古驿\n\n" + body + "\n\n第三章 终点\n\n" + body
+        p = self.preview(text, "编号缺口.txt")
+        self.assertEqual([c["title"] for c in p["chapters"]], ["第一章 开端", "古驿", "第三章 终点"])
+        self.assertFalse(self.client.get(self.base).json()["initialized"])
+        chapters = self.confirm(p)["workspace"]["active_version"]["chapters"]
+        self.assertEqual([c["chapter_number"] for c in chapters], [1, 2, 3])
+        self.assertEqual("".join(c["formal_content"] for c in chapters), text)
 
     def test_import_txt_md_docx_utf16_and_gb18030(self):
         source = "第一章 远行\r\n甲。\r\n第二章 归来\r\n乙。\r\n"

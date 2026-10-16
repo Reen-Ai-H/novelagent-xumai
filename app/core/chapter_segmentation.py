@@ -53,12 +53,46 @@ def _bare_title(value: str) -> str | None:
     return value
 
 
+def _number_gap_inferences(rows: list[dict], anchors: list[dict], candidates: list[dict],
+                           heading_levels: dict[int, int]) -> list[dict]:
+    """A single missing number can support one otherwise unpaired bare title.
+
+    Only adjacent formal chapters at the same declared level qualify. Require
+    exactly one candidate and 200 non-whitespace narrative characters on EACH
+    side, excluding code/dialogue. Any intervening structural heading breaks
+    the inference (volumes, TOCs and nested sections are not missing chapters).
+    """
+    starts = [c["start"] for c in candidates]
+    row_starts = [r["start"] for r in rows]
+    inferred = []
+    for left, right in zip(anchors, anchors[1:]):
+        before, after = recognize_heading(left["value"]), recognize_heading(right["value"])
+        if (before is None or after is None or before.kind != "chapter" or after.kind != "chapter"
+                or before.number is None or after.number != before.number + 2
+                or heading_levels.get(left["position"], before.level)
+                != heading_levels.get(right["position"], after.level)):
+            continue
+        choices = candidates[bisect_right(starts, left["start"]):bisect_right(starts, right["start"])]
+        if len(choices) != 1:
+            continue
+        candidate = choices[0]
+        between = rows[bisect_right(row_starts, left["start"]):bisect_right(row_starts, right["start"])-1]
+        narrative = [r for r in between if r["value"] and not r["blocked"]]
+        if any(recognize_heading(r["value"]) or r["position"] in heading_levels for r in narrative):
+            continue
+        counts = [sum(len(re.sub(r"\s+", "", r["value"])) for r in narrative if r["start"] < candidate["start"]),
+                  sum(len(re.sub(r"\s+", "", r["value"])) for r in narrative if r["start"] > candidate["start"])]
+        if min(counts) >= 200:
+            inferred.append(dict(candidate, reason="相邻正式章编号恰缺一章，唯一短标题两侧均有充分正文；请核对"))
+    return inferred
+
+
 def suggest_boundaries(text: str, title: str, *, heading_levels: dict[int, int] | None = None,
                        preserve_opening: bool = False) -> list[dict]:
     """Use declared chapter hierarchy and repeated isolated narrative headings.
 
     heading_levels uses code-point offsets, as supplied by the DOCX decoder.
-    Returned offsets use UTF-16. Bare singletons remain manually correctable;
+    Returned offsets use UTF-16. Bare singletons need a supported number gap;
     short dialogue, lists, TOCs and code are never enough to establish a layer.
     """
     parsed = parse_document(title, text, heading_levels=heading_levels)
@@ -80,10 +114,11 @@ def suggest_boundaries(text: str, title: str, *, heading_levels: dict[int, int] 
         position += len(line)
         units += utf16_length(line)
     by_position = {row["position"]: row for row in rows}
-    explicit = []
+    explicit, anchors = [], []
     for chapter in parsed.chapters:
         row = by_position.get(chapter.heading_start)
         if row is not None and not row["blocked"]:
+            anchors.append(row)
             explicit.append(dict(start=row["start"], title=chapter.title,
                                  confidence="explicit", reason="原文编号或声明的章节标题层级"))
     occupied = [row for row in rows if row["value"]]
@@ -124,6 +159,9 @@ def suggest_boundaries(text: str, title: str, *, heading_levels: dict[int, int] 
                  next((c for c in candidates if c["title"] != first["title"]), first),
                  next((c for c in reversed(candidates) if c["title"] != last["title"]), last)]
     inferred = [c for c in candidates if any(p["title"] != c["title"] and abs(p["start"]-c["start"]) >= 80 for p in peers)]
+    inferred_starts = {c["start"] for c in inferred}
+    inferred.extend(c for c in _number_gap_inferences(rows, anchors, candidates, heading_levels or {})
+                    if c["start"] not in inferred_starts)
     boundaries = sorted(explicit + inferred, key=lambda b: b["start"])
     if not boundaries:
         return [dict(start=0, title=title or "第一章", confidence="fallback", reason="未发现可靠分界，可在预览添加切点")]
