@@ -129,6 +129,7 @@ class ManuscriptVersion(BaseModel):
     updated_at: datetime
     recoverable_until: datetime | None = None
     source_version_id: str | None = None
+    chapter_preview_id: str | None = None
     chapters: list[ChapterDocument] = Field(default_factory=list)
     archive: StoryArchive = Field(default_factory=StoryArchive)
 
@@ -170,6 +171,69 @@ class ImportPreviewRecord(ImportPreview):
 class ImportPreviewProjection(ImportPreview):
     """Public-only sections keyed by preview chapter number (no chapter ID yet)."""
     chapter_sections: dict[int, list[ChapterSection]] = Field(default_factory=dict)
+
+
+class ChapterBoundary(BaseModel):
+    """Author-controlled metadata only; manuscript text never comes back here."""
+    model_config = ConfigDict(extra="forbid")
+    start: int = Field(ge=0, strict=True)
+    title: str = Field(min_length=1, max_length=200)
+
+
+class ChapterPartitionItem(ChapterBoundary):
+    chapter_number: int = Field(ge=1)
+    end: int = Field(ge=1)
+    char_count: int = Field(ge=1)
+    word_count: int = Field(ge=0)
+    confidence: Literal["explicit", "inferred", "manual", "fallback"]
+    reason: str
+
+
+class ChapterSourceSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    chapter_id: str
+    title: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    server_revision: int = Field(ge=0)
+
+
+class ChapterPartitionPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    preview_id: str
+    kind: Literal["import", "resegment"]
+    status: Literal["pending", "confirmed"] = "pending"
+    revision: int = Field(default=1, ge=1)
+    source_version_id: str | None = None
+    source_hash: str
+    source_length: int = Field(ge=1)
+    source_text: str
+    source_chapters: list[ChapterSourceSpan] = Field(default_factory=list)
+    chapters: list[ChapterPartitionItem]
+    warnings: list[str] = Field(default_factory=list)
+    created_at: datetime
+    expires_at: datetime
+    confirmed_version_id: str | None = None
+
+
+class ChapterPartitionRecord(ChapterPartitionPreview):
+    source_text_hash: str
+    heading_levels: dict[int, int] = Field(default_factory=dict)
+
+
+class ResegmentChaptersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version_id: str = Field(min_length=1)
+    expected_source_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class ConfirmChapterPartitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class CorrectChapterPartitionRequest(ConfirmChapterPartitionRequest):
+    boundaries: list[ChapterBoundary] = Field(min_length=1, max_length=5000)
 
 
 class ChangeSummary(BaseModel):
@@ -247,6 +311,7 @@ class IndependentProjectRecord(BaseModel):
     active_version_id: str | None = None
     versions: list[ManuscriptVersion] = Field(default_factory=list)
     pending_imports: list[ImportPreviewRecord] = Field(default_factory=list)
+    chapter_previews: list[ChapterPartitionRecord] = Field(default_factory=list)
     pending_changes: PendingChangeBatch | None = None
     tasks: list[AnalysisTask] = Field(default_factory=list)
     notifications: list[NotificationRecord] = Field(default_factory=list)
