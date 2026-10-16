@@ -158,15 +158,17 @@ class BudgetLedger:
         reserved = self.pending_attempts.pop(attempt_id, None) if attempt_id is not None else None
         if attempt_id is not None and reserved is None:
             raise ValueError("没有对应的在途预算预留")
-        if not isinstance(usage, LLMUsage) or not usage.known:
+        # Adapters/fakes can construct LLMUsage directly, bypassing the provider
+        # parser. Never release a durable hold based only on its `known` flag.
+        if not isinstance(usage, LLMUsage) or not usage.is_valid:
             self.unknown_usage_calls += 1
             self.calls += max(1, getattr(result, "attempts", 1))
             self.spent_cny = round(self.spent_cny + (reserved or 0.0), 12)
             self._records.append({"call_id": call_id, "stage": stage, "usage_known": False,
                                   "estimated_cost_cny": reserved or 0.0})
             return reserved or 0.0
-        cache_read = min(max(0, usage.prompt_tokens), max(0, usage.cache_read_tokens))
-        uncached_input = max(0, usage.prompt_tokens - cache_read)
+        cache_read = usage.cache_read_tokens
+        uncached_input = usage.prompt_tokens - cache_read
         cost = self.pricing.cost(
             input_tokens=uncached_input,
             cache_read_tokens=cache_read,
