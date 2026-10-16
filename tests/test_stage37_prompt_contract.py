@@ -6,14 +6,19 @@ still require independent semantic review against their own source.
 """
 from copy import deepcopy
 import json
+from pathlib import Path
 import unittest
 
 from pydantic import ValidationError
 
 from app.agents.deconstruction_model import PREVIEW_MAX_TOKENS, analysis_messages
 from app.agents.llm_runtime import LLMRuntime, LLMRuntimeError, LLMRuntimeSettings
-from app.core.analysis_grounding import GroundedDelta, GroundedReport, bind_selections, source_bank
+from app.core.analysis_grounding import GroundedDelta, GroundedReport, PreviewEvent, bind_selections, source_bank
 from schemas.analysis_report import Event
+
+
+def book_rules():
+    return (Path(__file__).resolve().parents[1] / "app/agents/deconstruction_prompt.md").read_text(encoding="utf-8")
 
 
 class PromptContractTest(unittest.TestCase):
@@ -74,7 +79,9 @@ class PromptContractTest(unittest.TestCase):
                      "不把同一情节在identity、change、portrait、insights反复复述",
                      "不靠删除必要人物、关键前因或主事件压缩篇幅", "不设固定人数目标",
                      "不设固定事件数目标", "不强制全部建人物卡", "不截断JSON凑通过",
-                     "new_evidence/revised_evidence同样只选source_id", "所选证据的最小/最大章节")
+                     "所选证据的最小/最大章节")
+        self.assertIn("new_evidence/revised_evidence同样只选source_id", book_rules())
+        self.assertNotIn("new_evidence/revised_evidence", self.rules)
         # Stage37's explicit thinking-mode contract includes reasoning + answer.
         self.assertEqual(PREVIEW_MAX_TOKENS, 24576)
 
@@ -84,8 +91,11 @@ class PromptContractTest(unittest.TestCase):
         self.require(marker, "action、consequence、sub_events必须同级",
                      "action/consequence各自只含必填的text/status/evidence_ids")
         example = json.loads(self.rules.split(marker, 1)[1].split("`")[1])
-        Event.model_validate(example, strict=True)
-        self.assertEqual(set(example), set(Event.model_fields))
+        PreviewEvent.model_validate(example, strict=True)
+        self.assertEqual(set(example), set(PreviewEvent.model_fields))
+        legacy_example = json.loads(book_rules().split(marker, 1)[1].split("`")[1])
+        Event.model_validate(legacy_example, strict=True)
+        self.assertEqual(set(legacy_example), set(Event.model_fields))
         for field in ("action", "consequence"):
             self.assertEqual(set(example[field]), {"text", "status", "evidence_ids"})
 
@@ -128,7 +138,12 @@ class EventWireRegressionTest(unittest.IsolatedAsyncioTestCase):
                          for index, source in enumerate(self.bank, 1)],
             "open_questions": [], "contradictions": [deepcopy(observation), deepcopy(observation)],
         })
-        self.messages = analysis_messages([{"chapter_number": 1, "title": "合成", "content": self.text}], self.bank)
+        # These legacy GroundedReport tests deliberately retain the original
+        # contract, including chapter fields. Preview has separate regressions.
+        self.messages = [{"role": "system", "content": book_rules()}, {"role": "user", "content": json.dumps({
+            "chapters": [{"chapter_number": 1, "title": "合成", "content": self.text}],
+            "sourcebank": [p.public() for p in self.bank.values()],
+        }, ensure_ascii=False)}]
 
     def nested_event(self):
         bad = deepcopy(self.wire)

@@ -20,7 +20,7 @@ from app.core.book_analysis import BookAnalysis
 from app.core.deconstruction_service import DeconstructionService
 from app.core.model_budget import BudgetLedger, MIMO_PRO_PRICING, estimate_structured_call_bound
 from app.core.model_call_budget import DurableModelBudget, budgeted_structured
-from test_stage32_analysis_import import AnalysisImportTest, selector_report
+from test_stage32_analysis_import import AnalysisImportTest, preview_selector_report
 
 
 MODEL = "mimo-v2.6-pro"
@@ -199,7 +199,7 @@ class PreviewUsageSafetyTest(unittest.TestCase):
         account = self.independent.store.load(project).account_id
         body = {key: value for key, value in self.payload.items() if key != "report"}
         body["chapter_numbers"] = [1]
-        wire = selector_report(self.payload["report"])
+        wire = preview_selector_report(self.payload["report"])
         old_document = self.client.get(self.url).json()["result"]["document_id"]
         old_source = self.independent.store.load(project).model_dump(mode="json")
         service = DeconstructionService(independent=self.independent, store=self.deconstruction.store,

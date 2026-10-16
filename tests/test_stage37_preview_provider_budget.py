@@ -8,7 +8,7 @@ from unittest.mock import patch
 from app import deconstruction_routes
 from app.agents import deconstruction_model
 from app.agents.llm_runtime import LLMResult, LLMUsage
-from app.core.analysis_grounding import GroundedReport, source_bank
+from app.core.analysis_grounding import PreviewGroundedReport, source_bank
 from app.core.model_call_budget import DurableModelBudget
 import test_stage32_analysis_import as fixtures
 
@@ -32,7 +32,7 @@ class PreviewProviderBudgetTest(unittest.TestCase):
         self.deconstruction.model_budget = budget
         runtime = deconstruction_model.create_runtime(deconstruction_model.DeconstructionModelSettings(
             _env_file=None, api_key="synthetic-only", base_url=f"https://{host}/v1", model=MODEL))
-        wire = fixtures.selector_report(self.payload["report"])
+        wire = fixtures.preview_selector_report(self.payload["report"])
         calls = []
 
         def transport(url, headers, body, timeout):
@@ -86,7 +86,7 @@ class PreviewProviderBudgetTest(unittest.TestCase):
                 chapters = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in source.chapters]
                 bank = source_bank({c["chapter_number"]: c["content"] for c in chapters})
                 messages = deconstruction_model.analysis_messages(chapters, bank)
-                messages.append({"role": "system", "content": json.dumps(GroundedReport.model_json_schema(), ensure_ascii=False)})
+                messages.append({"role": "system", "content": json.dumps(PreviewGroundedReport.model_json_schema(), ensure_ascii=False)})
                 # Independent arithmetic reproduces the old-fit/new-refused boundary.
                 input_bound = (sum(len(m["content"].encode("utf-8")) for m in messages) + 8192) * 3 / 1_000_000
                 old_bound, new_bound = input_bound + 12288 * 6 / 1_000_000, input_bound + 24576 * 6 / 1_000_000

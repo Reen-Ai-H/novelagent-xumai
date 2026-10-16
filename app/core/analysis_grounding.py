@@ -9,7 +9,7 @@ import re
 from pydantic import Field, create_model
 
 from schemas.analysis_delta import AnalysisDelta
-from schemas.analysis_report import AnalysisReport, StrictModel
+from schemas.analysis_report import AnalysisReport, Event, ReportEvidence, StrictModel, validate_character_relations
 
 
 class SourceSelection(StrictModel):
@@ -31,6 +31,16 @@ GroundedReport = _selector_model("GroundedReport", AnalysisReport, {
 GroundedDelta = _selector_model("GroundedDelta", AnalysisDelta, {
     "new_evidence": (list[SourceSelection], Field(default_factory=list, max_length=60)),
     "revised_evidence": (list[SourceSelection], Field(default_factory=list, max_length=60)),
+})
+
+# Preview alone delegates source-position metadata to the server. Do not inherit
+# Event: accepting then discarding its chapter fields would accept the old wire.
+PreviewEvent = create_model("PreviewEvent", __base__=StrictModel, **{
+    key: (field.annotation, deepcopy(field)) for key, field in Event.model_fields.items()
+    if key not in {"chapter_number", "chapter_end"}
+})
+PreviewGroundedReport = _selector_model("PreviewGroundedReport", GroundedReport, {
+    "events": (list[PreviewEvent], Field(min_length=1, max_length=300)),
 })
 
 
@@ -94,6 +104,83 @@ def bind_selections(data, bank, read_text, *, delta=False, producer=None):
         validate_event_evidence(report.model_dump(mode="json"))
         return report
     return AnalysisDelta.model_validate(payload, strict=True)
+
+
+def _validate_preview_references(preview, evidence):
+    """Check the whole reference graph before deriving any event metadata.
+
+    Mirror AnalysisReport's non-range checks here; its final validation remains
+    mandatory as a backstop. No placeholder chapters or filtered references.
+    """
+    ids = [x.id for group in (preview.findings, preview.characters, preview.events, evidence) for x in group]
+    if len(ids) != len(set(ids)):
+        raise ValueError("分析 ID 重复")
+    chapters = set(preview.chapter_numbers)
+    if len(chapters) != len(preview.chapter_numbers) or any(n < 1 for n in chapters):
+        raise ValueError("阅读章节范围无效")
+    evidence_ids = {x.id for x in evidence}
+    character_ids = {x.id for x in preview.characters}
+    event_ids = {x.id for x in preview.events}
+    claims = [*preview.findings, *preview.relations, *preview.character_relations, *preview.contradictions]
+    for person in preview.characters:
+        claims.extend((person.identity, person.motivation, person.change, *person.insights))
+        if person.portrait is not None:
+            claims.append(person.portrait)
+    for event in preview.events:
+        if not set(event.actor_ids) <= character_ids:
+            raise ValueError("事件人物引用无效")
+        claims.extend((event.action, event.consequence, *event.sub_events))
+    for claim in claims:
+        if not set(claim.evidence_ids) <= evidence_ids:
+            raise ValueError("判断引用了不存在的证据")
+    if any(x.chapter_number not in chapters for x in evidence):
+        raise ValueError("证据超出已读范围")
+    if any(x.from_id not in event_ids or x.to_id not in event_ids or x.from_id == x.to_id
+           for x in preview.relations):
+        raise ValueError("剧情连线端点无效")
+    validate_character_relations(preview.character_relations, character_ids)
+    if len(preview.story_order) != len(event_ids) or set(preview.story_order) != event_ids:
+        raise ValueError("故事时间线必须覆盖每个事件一次")
+
+
+def _derive_preview_event_ranges(payload):
+    evidence = {x["id"]: x["chapter_number"] for x in payload["evidence"]}
+    for event in payload["events"]:
+        claims = [event["action"], event["consequence"], *event["sub_events"]]
+        numbers = [evidence[key] for claim in claims for key in claim["evidence_ids"]]
+        event["chapter_number"], event["chapter_end"] = min(numbers), max(numbers)
+
+
+def bind_preview_selections(data, bank, read_text, *, producer):
+    """Bind strict preview selectors, validate every reference, then derive ranges."""
+    preview = PreviewGroundedReport.model_validate(data, strict=True)
+    evidence = []
+    for selection in preview.evidence:
+        passage = bank.get(selection.source_id)
+        if passage is None:
+            raise ValueError("模型选择了未提供的原文来源编号")
+        if (not isinstance(passage, SourcePassage) or passage.id != selection.source_id
+                or type(passage.chapter_number) is not int or passage.chapter_number not in read_text
+                or type(passage.start) is not int or type(passage.end) is not int
+                or not isinstance(passage.quote, str)
+                or passage.id != source_id(passage.chapter_number, passage.quote)):
+            raise ValueError("来源编号或范围无效")
+        body = read_text[passage.chapter_number]
+        if (not 0 <= passage.start < passage.end <= len(body)
+                or body[passage.start:passage.end] != passage.quote
+                or body.find(passage.quote) != passage.start
+                or body.find(passage.quote, passage.start + 1) >= 0):
+            raise ValueError("来源片段不在已读正文中逐字唯一出现")
+        evidence.append(ReportEvidence.model_validate({"id": selection.id,
+            "chapter_number": passage.chapter_number, "quote": passage.quote}, strict=True))
+    _validate_preview_references(preview, evidence)
+    payload = preview.model_dump(mode="json")
+    payload["evidence"] = [item.model_dump(mode="json") for item in evidence]
+    payload["producer"] = producer
+    _derive_preview_event_ranges(payload)
+    report = AnalysisReport.model_validate(payload, strict=True)
+    validate_event_evidence(report.model_dump(mode="json"))
+    return report
 
 
 def validate_event_evidence(draft):

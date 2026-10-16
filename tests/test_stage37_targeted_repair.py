@@ -297,7 +297,7 @@ class CandidatePreviewTest(unittest.TestCase):
         source = self.independent.store.load(project).model_dump(mode="json")
         body = {key: value for key, value in self.payload.items() if key != "report"}
         body["chapter_numbers"] = [1]
-        wire = import_fixtures.selector_report(self.payload["report"])
+        wire = import_fixtures.preview_selector_report(self.payload["report"])
         wrong_source = deepcopy(wire)
         wrong_source["evidence"][0]["source_id"] = "S99_" + "0" * 20
         for second, status in (("{}", 502), (json.dumps(wrong_source), 422)):

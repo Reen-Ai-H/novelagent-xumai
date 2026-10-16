@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import json
+from hashlib import sha256
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tempfile
@@ -12,7 +13,7 @@ from app.agents.deconstruction_model import DEFAULT_PREVIEW_MAX_TOKENS, analysis
 from app.agents.llm_runtime import LLMResult, LLMRuntime, LLMRuntimeSettings, LLMUsage
 from app.core.analysis_delta import compact_index, merge_delta
 from app.core.analysis_grounding import (
-    GroundedDelta, GroundedReport, bind_selections, source_bank, source_id,
+    GroundedDelta, GroundedReport, PreviewGroundedReport, bind_selections, source_bank, source_id,
 )
 from app.core.book_analysis import BookAnalysis
 from app.core.deconstruction_service import DeconstructionService, DeconstructionServiceError
@@ -20,7 +21,7 @@ from app.core.model_budget import ModelBudgetExceeded, estimate_structured_call_
 from app.core.model_call_budget import DurableModelBudget, budgeted_structured
 from schemas.analysis_report import AnalysisImport, AnalysisReport, AnalysisRequest
 from schemas.deconstruction import DeconstructionEvidenceResponse
-from test_stage32_analysis_import import AnalysisImportTest, selector_report
+from test_stage32_analysis_import import AnalysisImportTest, selector_report, preview_selector_report
 
 
 def runtime_for(transport):
@@ -265,7 +266,7 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         project, _ = self.prepare()
         account = self.independent.store.load(project).account_id
         calls = []
-        wire = selector_report(self.payload["report"])
+        wire = preview_selector_report(self.payload["report"])
         def transport(url, headers, body, timeout):
             calls.append(body)
             return envelope(json.dumps(wire, ensure_ascii=False), known=False)
@@ -296,7 +297,7 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         project, _ = self.prepare()
         account = self.independent.store.load(project).account_id
         payload = AnalysisRequest(**{k: v for k, v in self.payload.items() if k != "report"}, chapter_numbers=[1])
-        bad = selector_report(self.payload["report"])
+        bad = preview_selector_report(self.payload["report"])
         bad["evidence"][0]["source_id"] = "S99_" + "0" * 20
         runtime = runtime_for(lambda *args: envelope(json.dumps(bad)))
         before = self.client.get(self.url).json()["result"]["document_id"]
@@ -309,13 +310,13 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
     async def test_two_projects_concurrent_previews_share_one_cap_after_restart(self):
         first_project, _ = self.prepare()
         first_payload = AnalysisRequest(**{k: v for k, v in self.payload.items() if k != "report"}, chapter_numbers=[1])
-        wire = selector_report(self.payload["report"])
+        wire = preview_selector_report(self.payload["report"])
         second_project, _ = self.prepare()
         second_payload = AnalysisRequest(**{k: v for k, v in self.payload.items() if k != "report"}, chapter_numbers=[1])
         account = self.independent.store.load(first_project).account_id
         source = self.deconstruction._source(first_project, account)
         chapters = [{"chapter_number": c.chapter_number, "title": c.title, "content": c.content} for c in source.chapters]
-        messages = [*analysis_messages(chapters), {"role": "system", "content": json.dumps(GroundedReport.model_json_schema(), ensure_ascii=False)}]
+        messages = [*analysis_messages(chapters), {"role": "system", "content": json.dumps(PreviewGroundedReport.model_json_schema(), ensure_ascii=False)}]
         # This fixture uses a nonofficial runtime; its original cap stays 12288.
         bound = estimate_structured_call_bound(messages, DEFAULT_PREVIEW_MAX_TOKENS, model="mimo-v2.6-pro", attempts=1)
         service = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
@@ -359,6 +360,19 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((job["status"], job["cursor"], job["synthesized"]), ("completed", 1, True), job["message"])
         self.assertEqual(len(calls), 2)
         self.assertTrue(all("sourcebank" in call["messages"][1]["content"] for call in calls))
+        # f7ba873's shared prompt is untouched, including the legacy Event
+        # chapter skeleton; both real book request systems still carry it.
+        prompt = (Path(__file__).resolve().parents[1] / "app/agents/deconstruction_prompt.md").read_bytes()
+        self.assertEqual(sha256(prompt).hexdigest(), "64df0abe136d33f29451455f8fedd7034ebd1ba4e2b7158d96bdc56e4ef9fbdf")
+        schema_suffix = "\n\n只返回一个 JSON 对象，严格符合以下 schema，不要 Markdown 或解释：" + json.dumps(
+            GroundedDelta.model_json_schema(), ensure_ascii=False, separators=(",", ":"))
+        for call in calls:
+            system = call["messages"][0]["content"]
+            self.assertTrue(system.endswith(prompt.decode("utf-8") + schema_suffix))
+            self.assertIn('"chapter_number":1,"chapter_end":1', system)
+            self.assertNotIn("简短可辨认的ASCII语义ID", system)
+            self.assertNotIn("PreviewEvent", system)
+            self.assertNotIn('"segments":', call["messages"][1]["content"])
         self.assertEqual(job["report"]["evidence"][0]["quote"], "😀沈禾没有开门。")
         self.assertEqual(self.deconstruction.model_budget.public(runtime.model)["calls"], 2)
         self.assertEqual(runner.public(job)["budget"]["calls"], 2)

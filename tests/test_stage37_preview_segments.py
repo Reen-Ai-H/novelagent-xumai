@@ -180,7 +180,7 @@ class PreviewSegmentsProductTest(unittest.TestCase):
             _env_file=None, api_key="synthetic-only", base_url="https://api.xiaomimimo.com/v1", model="mimo-v2.6-pro"))
         account = self.independent.store.load(project).account_id
         source = self.deconstruction._source(project, account)
-        wire = fixtures.selector_report(self.payload["report"])
+        wire = fixtures.preview_selector_report(self.payload["report"])
         calls = []
 
         def transport(url, headers, body, timeout):

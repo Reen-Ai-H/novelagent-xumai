@@ -19,6 +19,15 @@ def selector_report(report):
     return data
 
 
+def preview_selector_report(report):
+    """Author the new preview wire from this synthetic fixture, not a candidate repair."""
+    data = selector_report(report)
+    for event in data["events"]:
+        event.pop("chapter_number")
+        event.pop("chapter_end", None)
+    return data
+
+
 class AnalysisImportTest(unittest.TestCase):
     setUp = Stage31DeconstructionApiTest.setUp
     _cleanup = Stage31DeconstructionApiTest._cleanup
@@ -119,7 +128,7 @@ class AnalysisImportTest(unittest.TestCase):
     def test_model_preview_uses_source_and_does_not_replace_report(self):
         self.prepare()
         before = self.client.get(self.url).json()["result"]["document_id"]
-        runtime = SimpleNamespace(model="fake-deepseek", structured=AsyncMock(return_value=SimpleNamespace(data=selector_report(self.payload["report"]))))
+        runtime = SimpleNamespace(model="fake-deepseek", structured=AsyncMock(return_value=SimpleNamespace(data=preview_selector_report(self.payload["report"]))))
         request = {k: v for k, v in self.payload.items() if k != "report"}
         request["chapter_numbers"] = [1]
         with patch("app.deconstruction_routes.create_runtime", return_value=runtime):
@@ -135,7 +144,7 @@ class AnalysisImportTest(unittest.TestCase):
         before = self.client.get(self.url).json()["result"]["document_id"]
         bad = copy.deepcopy(self.payload["report"])
         bad["evidence"][0]["quote"] = "沈禾打开门走了出去。"
-        runtime = SimpleNamespace(model="fake", structured=AsyncMock(return_value=SimpleNamespace(data=selector_report(bad))))
+        runtime = SimpleNamespace(model="fake", structured=AsyncMock(return_value=SimpleNamespace(data=preview_selector_report(bad))))
         request = {k: v for k, v in self.payload.items() if k != "report"}
         request["chapter_numbers"] = [1]
         with patch("app.deconstruction_routes.create_runtime", return_value=runtime):

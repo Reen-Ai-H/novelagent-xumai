@@ -132,7 +132,7 @@ class PreviewThinkingBudgetTest(unittest.TestCase):
         self.prepare()
         budget = DurableModelBudget(self.deconstruction.store.base_dir / "model-budgets", budget_cny=2)
         self.deconstruction.model_budget = budget
-        wire = import_fixtures.selector_report(self.payload["report"])
+        wire = import_fixtures.preview_selector_report(self.payload["report"])
         runtime, calls = repair_fixtures.scripted([repair_fixtures.envelope("{}"), repair_fixtures.envelope(json.dumps(wire))])
         runtime.settings = replace(deconstruction_model.create_runtime(config_for("api.xiaomimimo.com")).settings,
                                    thinking="enabled")
