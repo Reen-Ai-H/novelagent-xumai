@@ -75,6 +75,7 @@ async function checkModelReport(page, context, projectId, width, layouts) {
   await page.locator('.analysis-person-page').waitFor();
   assert.equal(new Set(await page.locator('.analysis-person-page .deconstruction-evidence-link').evaluateAll(nodes => nodes.map(node => node.dataset.evidenceId))).size, 9, 'all nine references must be reachable');
   layouts.push({label: 'model-character', ...await layout(page, width, 'model-character')});
+  await page.locator('.workspace-object-page > .analysis-details > summary').click();
   await page.locator('[data-report-phrase]').click();
   await page.locator('.analysis-modal-backdrop').waitFor();
   await page.locator('.analysis-modal-backdrop .analysis-proof summary').click();
@@ -116,8 +117,8 @@ async function checkModelReport(page, context, projectId, width, layouts) {
   assert.notEqual(first.source.revision, second.source.revision);
   for (const [documentId, chapterNumber] of [[firstDoc, 1], [secondDoc, 2]]) {
     await page.goto(`${origin}/independent/${projectId}?view=deconstruction&volume=${documentId}&section=plot`);
-    await page.locator('.analysis-node').waitFor();
-    await page.locator('.analysis-node-detail .analysis-proof summary').first().click();
+    await page.locator('[data-event-index] [data-reader-open]').first().click();
+    await page.locator('.workspace-event-body .analysis-proof summary').first().click();
     const [response] = await Promise.all([
       page.waitForResponse(response => response.url().includes('/evidence/Q1')),
       page.locator('.deconstruction-evidence-link[data-evidence-id="Q1"]').first().click(),
@@ -132,10 +133,11 @@ async function checkModelReport(page, context, projectId, width, layouts) {
     await page.keyboard.press('Escape');
   }
   layouts.push({label: 'model-plot', ...await layout(page, width, 'model-plot')});
-  await page.locator('#deconstructionSubnav [data-action="deconstruction-section"][data-section="time"]').click();
-  await page.locator('[data-report-time="story"]').click();
-  assert.equal(await page.locator('[data-report-time="story"]').getAttribute('aria-pressed'), 'true');
-  await page.locator('#deconstructionSubnav [data-action="deconstruction-section"][data-section="guide"]').click();
+  await page.locator('[data-reader-back]').click();
+  await page.locator('[data-reader-order="story"]').click();
+  assert.equal(await page.locator('[data-reader-order="story"]').getAttribute('aria-pressed'), 'true');
+  await page.locator('[data-action="open-workspace-tools"]').click();
+  await page.locator('#workspaceToolsDialog [data-section="guide"]').click();
   await page.locator('.guide-node-card').first().waitFor();
   assert.equal(await page.locator('.guide-node-card').count(), 2, 'guide must include both scoped model reports');
   layouts.push({label: 'model-guide', ...await layout(page, width, 'model-guide')});
@@ -143,8 +145,8 @@ async function checkModelReport(page, context, projectId, width, layouts) {
   const replacement = authoredReport(2, ['雨停之后', '林舟', '第二章', '顾遥', '河岸', '新的线索']);
   replacement.findings[0].text = '同一章的后续解读。';
   await page.goto(`${origin}/independent/${projectId}?view=deconstruction&volume=${secondDoc}&section=plot`);
-  await page.locator('.analysis-node').waitFor();
-  await page.locator('.analysis-node-detail .analysis-proof summary').first().click();
+  await page.locator('[data-event-index] [data-reader-open]').first().click();
+  await page.locator('.workspace-event-body .analysis-proof summary').first().click();
   // Leave the old document's buttons in the DOM while replacing its report.
   await importReport(replacement);
   await page.locator('.deconstruction-evidence-link[data-evidence-id="Q1"]').first().click();
@@ -293,7 +295,7 @@ async function oneViewport(browser, width) {
       await failurePage.locator('#editorSaveState').filter({hasText: '保存失败'}).waitFor({timeout: 10000});
     });
     assert.equal(await failurePage.locator('#chapterEditor').inputValue(), unsavedAfterExpiry);
-    await failurePage.locator('.spine-link[data-action="show-deconstruction"]').click();
+    await failurePage.locator('.spine-link[data-action="show-deconstruction"][data-section="characters"]').click();
     assert.match(new URL(failurePage.url()).pathname, new RegExp(`/independent/${failureProjectId}`));
     await failurePage.goto(`${origin}/login`);
     await failurePage.locator('#emailInput').fill(failureEmail);
@@ -343,7 +345,7 @@ async function oneViewport(browser, width) {
     await page.locator('#chapterEditor').waitFor({state: 'visible'});
     assert.equal(new URL(page.url()).searchParams.get('chapter'), chapterOneId);
     assert.equal(await page.locator('#chapterEditor').inputValue(), firstChapter);
-    await page.locator('.spine-link[data-action="show-deconstruction"]').click();
+    await page.locator('.spine-link[data-action="show-deconstruction"][data-section="characters"]').click();
     await page.waitForFunction(expected => {
       const [expectedProjectId, expectedChapterId] = expected.split('|');
       return location.pathname === `/independent/${expectedProjectId}` && new URLSearchParams(location.search).get('view') === 'deconstruction' && new URLSearchParams(location.search).get('chapter') === expectedChapterId;
@@ -356,7 +358,7 @@ async function oneViewport(browser, width) {
     // Complete chapter one, then create the next chapter. The completed chapter
     // stays readable and the new chapter becomes the active URL/focus target.
     await page.locator('#completeChapterButton').click();
-    await page.locator('#completeChapterButton').filter({hasText: '新建下一章'}).waitFor({timeout: 20000});
+    await page.locator('#completeChapterButton').filter({hasText: '新建章节'}).waitFor({timeout: 20000});
     await waitForNextChapterAction(page);
     assert.equal(await page.locator('#chapterEditor').inputValue(), firstChapter);
 
@@ -385,7 +387,7 @@ async function oneViewport(browser, width) {
     const actionAfterIgnore = page.locator('#completeChapterButton');
     if (await actionAfterIgnore.getAttribute('data-next-chapter') !== 'true') {
       await actionAfterIgnore.click();
-      await page.locator('#completeChapterButton').filter({hasText: '新建下一章'}).waitFor({timeout: 20000});
+      await page.locator('#completeChapterButton').filter({hasText: '新建章节'}).waitFor({timeout: 20000});
       await waitForNextChapterAction(page);
     }
 
@@ -408,7 +410,7 @@ async function oneViewport(browser, width) {
 
     // The current chapter id survives the deconstruction surface and returns to
     // the exact editor chapter. The page is still the real app/worker path.
-    await page.locator('.spine-link[data-action="show-deconstruction"]').click();
+    await page.locator('.spine-link[data-action="show-deconstruction"][data-section="characters"]').click();
     expectedDeconstructionUrlForDebug = `${projectId}|${chapterTwoId}`;
     await page.waitForFunction(expected => {
       const [expectedProjectId, expectedChapterId] = expected.split('|');

@@ -18,7 +18,7 @@ def run() -> int:
     sys.path.insert(0, str(ROOT))
     suite = unittest.defaultTestLoader.discover(str(ROOT / "tests"))
     result = unittest.TextTestRunner(verbosity=1).run(suite)
-    if not result.wasSuccessful() or result.skipped or result.testsRun < 387:
+    if not result.wasSuccessful() or result.skipped or result.testsRun < 590:
         print(json.dumps({"gate": "tests", "passed": False, "count": result.testsRun, "skipped": len(result.skipped)}))
         return 1
 
@@ -41,6 +41,8 @@ def run() -> int:
         ["node", "--check", "frontend/rule-report.js"],
         ["node", "--check", "frontend/visual-reading.js"],
         ["node", "--check", "frontend/chapter-sections.js"],
+        ["node", "--check", "frontend/chapter-preview.js"],
+        ["node", "--check", "frontend/workspace-reader.js"],
         ["git", "diff", "--check"],
     ):
         subprocess.run(command, cwd=ROOT, check=True)

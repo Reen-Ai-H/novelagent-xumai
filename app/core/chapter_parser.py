@@ -79,6 +79,9 @@ class ParsedChapter:
     title: str
     content: str
     heading_levels: tuple[tuple[int, int], ...] = ()  # Imported style, UTF-16 position.
+    source_start: int = 0  # Code-point offsets in the decoded source.
+    source_end: int = 0
+    heading_start: int | None = None
 
 
 @dataclass(frozen=True)
@@ -213,6 +216,16 @@ def parse_document(filename: str, text: str, *, heading_levels: Mapping[int, int
         declared_levels = Counter(h.level for h in narrative if h.level)
         root_level = min((level for level, count in declared_levels.items()
                           if level < root_level and count > 1), default=root_level)
+        if not numbered and declared_levels[root_level] == 1:
+            # An immediately nested repeated layer is a structural container
+            # (book H1 -> unnumbered chapter H2). Narrative between the parent
+            # and its children instead establishes the parent as a chapter.
+            parent = next(i for i, h in enumerate(headings)
+                          if h and h.level == root_level and i not in toc_lines)
+            child = next_nonblank_lines[parent]
+            if child is not None and (heading := headings[child]):
+                if heading.level > root_level and declared_levels[heading.level] > 1:
+                    root_level = heading.level
 
     def chapter_boundary(heading: Heading) -> bool:
         if heading.kind not in {"chapter", "special", "section", "markdown"}:
@@ -228,12 +241,12 @@ def parse_document(filename: str, text: str, *, heading_levels: Mapping[int, int
                   and (h.kind != "body" or i < first_chapter or i in toc_body_markers)
                   and chapter_boundary(h)]
     fragments: list[str] = []
-    parsed: list[tuple[Heading, str, int]] = []
+    parsed: list[tuple[Heading, str, int, int | None]] = []
     if not boundaries:
         if toc_lines:
             fragments.append(normalized)
         elif normalized.strip():
-            parsed.append((Heading(Path(filename).stem or "第一章", "chapter", 1), normalized, 0))
+            parsed.append((Heading(Path(filename).stem or "第一章", "chapter", 1), normalized, 0, None))
     else:
         preamble = "".join(lines[:boundaries[0][0]])
         if preamble:
@@ -244,16 +257,17 @@ def parse_document(filename: str, text: str, *, heading_levels: Mapping[int, int
             if heading.kind in {"volume", "body", "toc"} or not body.strip():
                 fragments.append("".join(lines[start:end]))
             else:
-                parsed.append((heading, body, positions[start] + len(lines[start])))
-    numbers = [heading.number for heading, _, _ in parsed]
+                parsed.append((heading, body, positions[start] + len(lines[start]), positions[start]))
+    numbers = [heading.number for heading, _, _, _ in parsed]
     ordered = (all(n is not None and n > 0 for n in numbers)
                and all(a < b for a, b in zip(numbers, numbers[1:]))
                and not any(h.kind in {"volume", "special"} for _, h in boundaries))
     chapters = tuple(ParsedChapter(heading.number if ordered else index, heading.title, content,
                                    tuple((utf16_length(content[:position - start]), level)
                                          for position, level in (heading_levels or {}).items()
-                                         if start <= position < start + len(content)))
-                     for index, (heading, content, start) in enumerate(parsed, 1))
+                                         if start <= position < start + len(content)),
+                                   start, start + len(content), heading_start)
+                     for index, (heading, content, start, heading_start) in enumerate(parsed, 1))
     title = Path(filename).stem or (chapters[0].title if chapters else "未命名导入")
     if len(chapters) == 1:
         title = chapters[0].title

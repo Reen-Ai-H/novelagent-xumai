@@ -1,0 +1,264 @@
+/* Stage 37: one index OR one object, always scoped to a report document.
+ * View state contains no manuscript/report content and never writes a draft. */
+(() => {
+  'use strict';
+  const B = window.XumaiReportBrowser, esc = B.esc;
+  const list = value => Array.isArray(value) ? value : [];
+  const short = (text, size = 90) => window.XumaiVisualReading.short(text || '', size);
+  const statusLabels = {fact:'正文可证', reported:'人物说法', inferred:'分析推断', unknown:'尚未确定'};
+  const badge = value => `<span class="analysis-badge is-${statusLabels[value] ? value : 'unknown'}">${statusLabels[value] || statusLabels.unknown}</span>`;
+  const groups = ['主要人物', '配角', '未分级'];
+  const modelGroup = p => /^(主角|主要人物|主人公)(\s*[：:]|$)/u.test(p.role || '') ? groups[0]
+    : /^(配角|次要人物|实质配角)(\s*[：:]|$)/u.test(p.role || '') ? groups[1] : groups[2];
+  const chapterLabel = e => e.chapter_end && e.chapter_end !== e.chapter_number ? `第 ${e.chapter_number}–${e.chapter_end} 章` : `第 ${e.chapter_number} 章`;
+  const details = (title, body) => `<details class="analysis-details"><summary>${esc(title)}</summary><div class="analysis-details-body">${body}</div></details>`;
+  let graphSerial=0;
+  // Geometry is shared by SVG lines and HTML hit targets; no window listeners
+  // or scale-dependent text. A page bounds work, never the source collection.
+  const personSlots=count=>Array.from({length:count},(_,i)=>({x:i%2?88:12,y:count<=2?50:count<=4?30+40*Math.floor(i/2):16+34*Math.floor(i/2)}));
+  const plotSlots=count=>Array.from({length:count},(_,i)=>({x:15+35*(Math.floor(i/3)%2?2-i%3:i%3),y:80+190*Math.floor(i/3)}));
+  const arrow=id=>`<defs><marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9" fill="none" stroke="currentColor" stroke-width="1.5"/></marker></defs>`;
+
+  function mountModel(root, report, options) {
+    const evidence = options.evidence, claim = options.claim;
+    const people = list(report.characters).map(p => ({...p, title:p.name, group:modelGroup(p), subtitle:p.identity?.text || '', status:p.identity?.status,
+      search:[p.name, ...list(p.aliases), p.identity?.text, p.portrait?.text, p.change?.text].join(' ')}));
+    const peopleById = new Map(people.map(p => [p.id,p]));
+    const events = list(report.events).map(e => ({...e, label:chapterLabel(e), chapters:Array.from({length:Math.max(1,(e.chapter_end || e.chapter_number)-e.chapter_number+1)},(_,i)=>e.chapter_number+i), summary:e.action?.text || '', status:e.action?.status,
+      search:[e.title,e.action?.text,e.consequence?.text,...list(e.actor_ids).map(id=>peopleById.get(id)?.name),...list(e.sub_events).map(s=>s.title+' '+s.text)].join(' ')}));
+    const eventById = new Map(events.map(e=>[e.id,e]));
+    // Only the optional semantic contract supplies relationships. Co-actors
+    // are intentionally not converted into edges here.
+    const relations = list(report.character_relations).filter(r=>peopleById.has(r.from_id) && peopleById.has(r.to_id));
+    const kinds = {causes:'促成',enables:'提供条件',reveals:'揭示',foreshadow_payoff:'线索回收',follows:'先后'};
+    return mount(root, {
+      people,events,storyOrder:list(report.story_order),
+      eventEdges:list(report.relations).map(r=>({from:r.from_id,to:r.to_id,label:kinds[r.kind] || '待核对',kind:r.kind,status:r.status,body:()=>claim(r)})),
+      personRelations:p=>relations.filter(r=>r.from_id===p.id || r.to_id===p.id).map(r=>({from:r.from_id,to:r.to_id,label:r.label || r.text || '',status:r.status,body:()=>claim(r)})),
+      personExperiences:p=>events.filter(e=>list(e.actor_ids).includes(p.id)),
+      personAnalysis:p=>`<section><h3>身份与处境</h3>${claim(p.identity)}</section><section><h3>性格与为人</h3>${claim(p.portrait || p.identity)}</section><section><h3>动机</h3>${claim(p.motivation)}</section><section><h3>关键经历与变化</h3>${claim(p.change)}</section><div class="analysis-phrase-row">${list(p.insights).map((i,n)=>`<button class="analysis-phrase" type="button" data-report-phrase="${esc(p.id)}~${n}">${esc(i.title)}</button>`).join('')}</div>`,
+      openInsight:(id,index)=>{const p=peopleById.get(id),insight=list(p?.insights)[Number(index)];if(insight)options.openModal({eyebrow:p.name,title:insight.title,body:claim(insight)});},
+      eventBody:e=>`<section><h3>事件经过</h3>${claim(e.action)}</section><section><h3>结果与后续</h3>${claim(e.consequence)}</section>`,
+      subEvents:e=>list(e.sub_events).map((s,i)=>({id:String(i),title:s.title,body:()=>claim(s)})),
+      peopleForEvent:e=>list(e.actor_ids).map(id=>peopleById.get(id)).filter(Boolean),
+      extras:()=>list(report.open_questions).length + list(report.contradictions).length ? details(`疑问与矛盾 · ${list(report.open_questions).length + list(report.contradictions).length}`, `<div data-reader-questions></div>`) : '',
+      bindExtras:node=>B.mount(node.querySelector('[data-reader-questions]'),{label:'疑问与矛盾',items:[...list(report.open_questions).map(text=>({text})),...list(report.contradictions)],renderItem:q=>q.title?`<h3>${esc(q.title)}</h3>${claim(q)}`:`<p>${esc(q.text)}</p>`}),
+    }, options);
+  }
+
+  function mountRule(root, report, raw, options) {
+    const rawPeople = new Map(list(raw.characters?.characters).map(p=>[p.item_id,p]));
+    const sourcePeople=list(report.characters.characters), sourceEvents=list(report.plot.events);
+    const chapter = item => list(item.chapterIds).map(id=>report.chapters.find(c=>c.id===id)?.number).filter(n=>n!=null).map(n=>`第 ${n} 章`).join('、');
+    const evidence = item => options.evidence(item, report);
+    const people = sourcePeople.map(p=>({...p,title:p.name,group:({main:groups[0],supporting:groups[1]})[rawPeople.get(p.id)?.importance] || groups[2],
+      subtitle:rawPeople.get(p.id)?.summary || p.conclusion || '',search:[p.name,...list(p.aliases),p.role,p.conclusion].join(' ')}));
+    const byPerson=new Map(people.map(p=>[p.id,p]));
+    const events=sourceEvents.map(e=>({...e,title:e.action,label:chapter(e),chapters:list(e.chapterIds).map(id=>report.chapters.find(c=>c.id===id)?.number).filter(n=>n!=null),summary:e.consequence || e.conclusion,search:[e.action,e.conclusion,e.consequence,...list(e.characterIds).map(id=>byPerson.get(id)?.name)].join(' ')}));
+    const claim=item=>`<p>${esc(item.conclusion || item.explanation || '')}</p>${details('原文依据',evidence(item))}`;
+    return mount(root,{
+      people,events,storyOrder:[],
+      eventEdges:list(report.plot.relations).map(r=>({from:r.start.id,to:r.end.id,label:options.relationLabel(r.relationType),kind:'clue',body:()=>claim(r)})),
+      personRelations:()=>[],
+      personExperiences:p=>events.filter(e=>list(e.characterIds).includes(p.id)),
+      personAnalysis:p=>`<section><h3>原文记录</h3>${claim(p)}</section>${list(report.characters.states).filter(s=>s.characterId===p.id).map(s=>details(chapter(s),claim(s))).join('')}${list(report.characters.relations).filter(r=>r.start.id===p.id || r.end.id===p.id).map(r=>details('规则关联记录',`<p>${esc(byPerson.get(r.start.id)?.name)} → ${esc(byPerson.get(r.end.id)?.name)} · ${esc(options.relationLabel(r.relationType))}</p>${badge('unknown')}${claim(r)}`)).join('')}`,
+      eventBody:e=>`<section><h3>事件经过</h3><p>${esc(e.action)}</p>${claim(e)}</section>${e.consequence?`<section><h3>结果</h3><p>${esc(e.consequence)}</p></section>`:''}`,
+      subEvents:()=>[],peopleForEvent:e=>list(e.characterIds).map(id=>byPerson.get(id)).filter(Boolean),
+      extras:()=>'',
+    },options);
+  }
+
+  function mount(root, data, options) {
+    const people=new Map(data.people.map(p=>[String(p.id),p])), events=new Map(data.events.map(e=>[String(e.id),e]));
+    const key=`xumai-reader:${options.projectId}:${options.documentId}`;
+    let saved={};
+    try { saved=JSON.parse(sessionStorage.getItem(key) || '{}'); } catch { /* Storage is optional; the URL remains authoritative. */ }
+    const fresh=()=>({query:'',page:1,filters:{},selected:'',order:'narrative'});
+    const browsing={characters:{...fresh(),...saved.characters},plot:{...fresh(),...saved.plot}};
+    let section=options.section==='characters'?'characters':'plot', object=null, pane='relations', edgeChoices=[];
+    const params=new URLSearchParams(location.search);
+    const validScope=params.get('volume')===options.documentId;
+    if(validScope) {
+      object=params.get(section==='characters'?'character':'event');pane=params.get('pane')==='experiences'?'experiences':'relations';
+      const state=browsing[section];
+      if(params.has('q'))state.query=params.get('q');
+      if(params.has('page'))state.page=Math.max(1,Number(params.get('page')) || 1);
+      if(params.has('group'))state.filters={group:params.get('group')};
+      if(params.has('inChapter'))state.filters={...state.filters,chapter:params.get('inChapter')};
+      if(params.has('selected'))state.selected=params.get('selected');
+      if(params.has('order'))state.order=params.get('order')==='story'?'story':'narrative';
+    } else if(params.has('character') || params.has('event')) {
+      root.innerHTML='<p role="alert">此链接缺少报告来源。请从人物或剧情索引重新打开。</p>';return {select:()=>{}};
+    }
+    if (!data.storyOrder.length) browsing.plot.order='narrative';
+    const state=()=>browsing[section];
+    const persist=()=>{try{sessionStorage.setItem(key,JSON.stringify(browsing));}catch{/* In-memory and URL state continue to work. */}};
+    function urlFor(targetSection=section,id=object,targetPane=pane) {
+      const url=new URL(location.href),s=browsing[targetSection];
+      for(const name of ['character','event','pane','focus','q','page','group','inChapter','order','selected'])url.searchParams.delete(name);
+      url.searchParams.set('view','deconstruction');url.searchParams.set('volume',options.documentId);url.searchParams.set('section',targetSection);
+      if(id)url.searchParams.set(targetSection==='characters'?'character':'event',id);
+      if(id && targetSection==='characters' && targetPane==='experiences')url.searchParams.set('pane','experiences');
+      if(s.query)url.searchParams.set('q',s.query);
+      if(s.page>1)url.searchParams.set('page',s.page);
+      if(s.filters?.group)url.searchParams.set('group',s.filters.group);
+      if(s.filters?.chapter)url.searchParams.set('inChapter',s.filters.chapter);
+      if(s.selected)url.searchParams.set('selected',s.selected);
+      if(targetSection==='plot')url.searchParams.set('order',s.order);
+      return url;
+    }
+    function sync(push=false) {
+      persist();const url=urlFor();
+      if(url.href!==location.href)history[push?'pushState':'replaceState'](push?{}:history.state,'',url);
+      options.onSection?.(section,object);
+    }
+    function rememberIndexReturn(restore) {
+      // A remembered selection alone must not scroll a fresh primary entry.
+      const entry={...history.state};
+      if(restore)entry.xumaiReaderReturn={key,section};
+      else delete entry.xumaiReaderReturn;
+      history.replaceState(entry,'',location.href);
+    }
+    function link(targetSection,id,text,cls='quiet-link') {
+      return `<a class="${cls}" href="${esc(urlFor(targetSection,id))}" data-reader-open="${esc(id)}" data-reader-section="${targetSection}">${esc(text)}</a>`;
+    }
+    function navigate(targetSection,id=null,targetPane='relations',restoreIndex=false) {
+      if(id && !object && targetSection===section){
+        state().selected=id;sync(false);rememberIndexReturn(true);
+      }
+      section=targetSection;object=id;pane=targetPane;sync(true);
+      if(!object)rememberIndexReturn(restoreIndex);
+      draw(restoreIndex?'restore':'top');
+    }
+    function orderEvents() {
+      if(state().order!=='story')return data.events;
+      const ordered=data.storyOrder.map(id=>events.get(String(id))).filter(Boolean),seen=new Set(ordered.map(e=>e.id));
+      return [...ordered,...data.events.filter(e=>!seen.has(e.id))];
+    }
+    function mountCollection(node,config) {
+      return B.mount(node,{...config,state:state(),onState:()=>sync(false)});
+    }
+    function personIndex() {
+      const items=[...data.people].sort((a,b)=>groups.indexOf(a.group)-groups.indexOf(b.group));
+      root.innerHTML='<div class="workspace-reader-index" data-reader-index="characters"><div data-person-index></div></div>';
+      mountCollection(root.querySelector('[data-person-index]'),{label:'人物',items,pageSize:12,className:'workspace-person-index',text:p=>p.search,
+        filters:[{name:'group',label:'人物分组',options:[{value:'',label:'全部人物'},...groups.map(g=>({value:g,label:`${g} · ${items.filter(p=>p.group===g).length}`}))],match:(p,g)=>p.group===g}],
+        renderItem:p=>`<article class="workspace-person-row" data-person-id="${esc(p.id)}"><span class="person-initial" aria-hidden="true">${esc(Array.from(p.name || '人')[0])}</span><div><span class="workspace-person-group">${esc(p.group)}</span><h2>${link('characters',p.id,p.name,'analysis-person-link')}</h2><p>${p.status?badge(p.status):''}${esc(short(p.subtitle,65))}</p></div><span aria-hidden="true" class="object-open-arrow">↗</span></article>`});
+    }
+    function plotIndex() {
+      root.innerHTML=`<div class="workspace-reader-index" data-reader-index="plot"><div class="workspace-order" role="group" aria-label="事件顺序"><button data-reader-order="narrative" aria-pressed="${state().order==='narrative'}">叙述顺序</button><button data-reader-order="story" aria-pressed="${state().order==='story'}" ${data.storyOrder.length?'':'disabled title="本报告未提供故事顺序"'}>故事顺序</button></div><div data-event-index></div></div>`;
+      const chapters=[...new Set(data.events.flatMap(e=>e.chapters))].sort((a,b)=>a-b);
+      mountCollection(root.querySelector('[data-event-index]'),{label:'剧情',items:orderEvents(),pageSize:8,className:'workspace-plot-diagram',text:e=>e.search,
+        filters:[{name:'chapter',label:'章节',options:[{value:'',label:'全部章节'},...chapters.map(n=>({value:String(n),label:`第 ${n} 章`}))],match:(e,n)=>e.chapters.includes(Number(n))}],
+        renderItem:()=>'',afterRender:(node,visible)=>drawPlot(node,visible)});
+      root.querySelector('[data-reader-index]').insertAdjacentHTML('beforeend','<section data-edge-basis hidden></section>');
+    }
+    function drawPlot(node,visible) {
+      edgeChoices=[];
+      const basis=root.querySelector('[data-edge-basis]');if(basis)basis.hidden=true;
+      if(!visible.length){node.innerHTML='<p class="workspace-empty">没有符合条件的事件</p>';return;}
+      if(!visible.some(e=>e.id===state().selected))state().selected=visible[0].id;
+      const slots=plotSlots(visible.length), height=190*Math.ceil(visible.length/3)+30;
+      const positions=new Map(visible.map((e,i)=>[String(e.id),{...slots[i],i}]));
+      const marker=`plotArrow${++graphSerial}`;
+      edgeChoices=data.eventEdges.filter(r=>positions.has(String(r.from)) && positions.has(String(r.to)));
+      const grouped=new Map();
+      edgeChoices.forEach((r,i)=>{const key=JSON.stringify([r.from,r.to]);if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(i);});
+      const track=slots.map((p,i)=>`${i?'L':'M'} ${p.x*10} ${p.y}`).join(' ');
+      const edges=[...grouped.values()].map(indices=>{
+        const r=edgeChoices[indices[0]],a=positions.get(String(r.from)),b=positions.get(String(r.to));
+        const same=a.y===b.y,dir=a.x<b.x?1:-1;
+        const start=same?[a.x*10+dir*137,a.y]:[a.x*10,a.y+(a.y<b.y?62:-62)];
+        const end=same?[b.x*10-dir*137,b.y]:[b.x*10,b.y+(a.y<b.y?-62:62)];
+        const bend=same?a.y+85:(a.y+b.y)/2;
+        const d=same?`M${start} C${start[0]},${bend} ${end[0]},${bend} ${end}`:`M${start} C${start[0]},${bend} ${end[0]},${bend} ${end}`;
+        const label=indices.map(i=>edgeChoices[i].label).join(' / '),name=`${visible[a.i].title} → ${label} → ${visible[b.i].title}`;
+        return `<g class="plot-semantic-edge" data-edge-from="${esc(r.from)}" data-edge-to="${esc(r.to)}"><path d="${d}" marker-end="url(#${marker})"/><g role="button" tabindex="0" data-reader-edges="${indices.join(',')}" aria-label="${esc(name)}"><title>${esc(name)}</title><path class="edge-hit" d="${d}"/></g></g>`;
+      }).join('');
+      node.innerHTML=`<div class="plot-legend"><span class="plot-order-key">${state().order==='story'?'故事位置':'叙述位置'}</span><span class="plot-edge-key">事件联系 · ${edgeChoices.length}</span></div><div class="plot-canvas" style="height:${height}px"><svg class="workspace-graph-lines" viewBox="0 0 1000 ${height}" preserveAspectRatio="none">${arrow(marker)}<path class="plot-order-track" d="${track}"/>${edges}</svg>${visible.map((e,i)=>`<article class="plot-node" style="--node-x:${slots[i].x}%;--node-y:${slots[i].y}px" data-event-id="${esc(e.id)}"><div class="plot-node-meta"><span class="event-position">${String((state().page-1)*8+i+1).padStart(2,'0')}</span><span class="eyebrow">${esc(e.label)}</span>${e.status?badge(e.status):''}</div><h2>${link('plot',e.id,e.title,'workspace-event-link')}</h2><p>${esc(short(e.summary,48))}</p></article>`).join('')}</div><div class="plot-focus-links" aria-label="当前事件联系"></div>`;
+      updatePlotFocus();
+    }
+    function updatePlotFocus() {
+      root.querySelectorAll('[data-event-id]').forEach(node=>{const active=node.dataset.eventId===state().selected;node.classList.toggle('is-selected',active);node.querySelector('[data-reader-open]')?.setAttribute('aria-current',active?'true':'false');});
+      root.querySelectorAll('.plot-semantic-edge').forEach(node=>node.classList.toggle('is-focused',node.dataset.edgeFrom===state().selected || node.dataset.edgeTo===state().selected));
+      const choices=root.querySelector('.plot-focus-links');
+      const grouped=new Map();edgeChoices.forEach((r,i)=>{if(String(r.from)!==state().selected && String(r.to)!==state().selected)return;const key=JSON.stringify([r.from,r.to]);if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(i);});
+      if(choices)choices.innerHTML=[...grouped.values()].map(indices=>{const r=edgeChoices[indices[0]];return `<button type="button" data-reader-edges="${indices.join(',')}">${esc(short(events.get(String(r.from))?.title,18))}<span> → ${esc(indices.length>1?`${indices.length} 项联系`:r.label)} → </span>${esc(short(events.get(String(r.to))?.title,18))}${indices.length===1?badge(r.status):''}</button>`;}).join('');
+    }
+    function relationshipPage(person) {
+      const relations=data.personRelations(person);
+      const region=root.querySelector('[data-person-body]');
+      region.innerHTML=relations.length?`<div data-relationship-index class="${relations.length<=6?'is-compact':''}"></div>`:'<p class="workspace-empty">暂无已记录的关系</p>';
+      if(relations.length)B.mount(region.querySelector('[data-relationship-index]'),{label:'关系',items:relations,pageSize:6,className:'workspace-relationships',
+        text:r=>`${people.get(String(r.from))?.name} ${r.label} ${people.get(String(r.to))?.name}`,
+        renderItem:()=>'',afterRender:(node,visible)=>{
+          edgeChoices=visible;
+          const basis=root.querySelector('[data-edge-basis]');if(basis)basis.hidden=true;
+          if(!visible.length){node.innerHTML='<p class="workspace-empty">没有符合条件的关系</p>';return;}
+          const neighbors=[...new Set(visible.map(r=>String(r.from)===String(person.id)?String(r.to):String(r.from)))], slots=personSlots(neighbors.length),marker=`personArrow${++graphSerial}`;
+          const multiplicity=Math.max(1,...neighbors.map(id=>visible.filter(r=>String(r.from)===id || String(r.to)===id).length));
+          const height=Math.max(neighbors.length<=2?230:380,multiplicity*100+40);
+          const edges=visible.map(r=>{const other=String(r.from)===String(person.id)?String(r.to):String(r.from),p=slots[neighbors.indexOf(other)],outgoing=String(r.from)===String(person.id),left=p.x<50;
+            const from=[left?410:590,height/2],to=[left?210:790,p.y*height/100];
+            return `<path d="M${from[0]},${from[1]} C${left?340:660},${height/2} ${left?340:660},${to[1]} ${to[0]},${to[1]}" ${outgoing?'marker-end':'marker-start'}="url(#${marker})" data-relation-from="${esc(r.from)}" data-relation-to="${esc(r.to)}"/>`;
+          }).join('');
+          node.innerHTML=`<div class="person-graph" style="height:${height}px"><svg class="workspace-graph-lines" viewBox="0 0 1000 ${height}" preserveAspectRatio="none" aria-hidden="true">${arrow(marker)}${edges}</svg><div class="person-graph-center"><span class="person-initial" aria-hidden="true">${esc(Array.from(person.name)[0])}</span><strong>${esc(person.name)}</strong></div>${neighbors.map((id,i)=>{const p=slots[i],rs=visible.map((r,j)=>({r,j})).filter(({r})=>String(r.from)===id || String(r.to)===id);return `<div class="person-graph-neighbor" style="--node-x:${p.x}%;--node-y:${p.y}%">${link('characters',id,people.get(id)?.name || '未命名人物','person-graph-link')}</div><div class="person-graph-labels" style="--node-x:${p.x<50?31:69}%;--node-y:${p.y}%">${rs.map(({r,j})=>`<button type="button" data-reader-edges="${j}" aria-label="${esc(people.get(String(r.from))?.name)} → ${esc(r.label)} → ${esc(people.get(String(r.to))?.name)}"><span class="relation-short-label"><span class="relation-graph-direction">${(String(r.from)===String(person.id))===(p.x>50)?'':'← '}</span>${esc(short(r.label,12))}<span class="relation-graph-direction">${(String(r.from)===String(person.id))===(p.x>50)?' →':''}</span></span>${badge(r.status)}<span class="relation-mobile-route">${esc(people.get(String(r.from))?.name)} → ${esc(people.get(String(r.to))?.name)}</span></button>`).join('')}</div>`;}).join('')}</div>`;
+        }});
+      region.insertAdjacentHTML('beforeend','<section data-edge-basis hidden></section>');
+    }
+    function personPage(person) {
+      root.innerHTML=`<article class="workspace-object-page analysis-person-page" data-reader-detail="characters"><a href="${esc(urlFor(section,null))}" class="quiet-link workspace-back" data-reader-back>← 人物索引</a><header class="workspace-object-heading"><span class="eyebrow">${esc(person.group)}</span><h2 tabindex="-1">${esc(person.name)}</h2><p>${person.status?badge(person.status):''}${esc(short(person.subtitle,160))}</p></header><nav class="workspace-object-tabs" aria-label="人物详情"><button data-reader-pane="relations" aria-pressed="${pane==='relations'}">关系</button><button data-reader-pane="experiences" aria-pressed="${pane==='experiences'}">经历</button></nav><section data-person-body></section>${details('人物分析与原文',data.personAnalysis(person))}</article>`;
+      if(pane==='relations')relationshipPage(person);
+      else B.mount(root.querySelector('[data-person-body]'),{label:'经历',items:data.personExperiences(person),pageSize:8,className:'workspace-event-path',text:e=>e.search,
+        renderItem:e=>`<article class="workspace-event-stop"><div><span class="eyebrow">${esc(e.label)}</span><h3>${link('plot',e.id,e.title)}</h3><p>${esc(short(e.summary,130))}</p><div class="workspace-participants">${data.peopleForEvent(e).map(p=>link('characters',p.id,p.name)).join('')}</div></div></article>`});
+    }
+    function eventPage(event) {
+      root.innerHTML=`<article class="workspace-object-page" data-reader-detail="plot"><a href="${esc(urlFor(section,null))}" class="quiet-link workspace-back" data-reader-back>← 剧情路径</a><header class="workspace-object-heading"><span class="eyebrow">${esc(event.label)}</span><h2 tabindex="-1">${esc(event.title)}</h2><div class="workspace-participants">${data.peopleForEvent(event).map(p=>link('characters',p.id,p.name)).join('')}</div></header><div class="workspace-event-body">${data.eventBody(event)}</div>${details('事件联系', '<div data-event-relations></div>')}${details('展开细节','<div data-event-beats></div>')}</article>`;
+      const relations=data.eventEdges.filter(r=>String(r.from)===String(event.id)||String(r.to)===String(event.id));
+      B.mount(root.querySelector('[data-event-relations]'),{label:'事件联系',items:relations,pageSize:6,renderItem:r=>`<article><div class="relationship-route">${link('plot',r.from,events.get(String(r.from))?.title || '未命名事件')}<span class="relationship-edge">${esc(r.label)}</span>${link('plot',r.to,events.get(String(r.to))?.title || '未命名事件')}</div>${r.body()}</article>`});
+      B.mount(root.querySelector('[data-event-beats]'),{label:'事件细节',items:data.subEvents(event),pageSize:8,renderItem:s=>`<article><h3>${esc(s.title)}</h3>${s.body()}</article>`});
+    }
+    function draw(entry='preserve') {
+      edgeChoices=[];
+      root.classList.add('workspace-reader');
+      const item=(section==='characters'?people:events).get(String(object));
+      if(object && !item)root.innerHTML=`<section class="workspace-empty" role="alert"><p>此报告中找不到该${section==='characters'?'人物':'事件'}。</p><a class="quiet-link" href="${esc(urlFor(section,null))}" data-reader-back>返回索引</a></section>`;
+      else if(item) {if(section==='characters')personPage(item);else eventPage(item);}
+      else if(section==='characters')personIndex();else plotIndex();
+      if(!object && data.extras){const extra=document.createElement('div');extra.className='workspace-reader-extras';extra.innerHTML=data.extras();root.append(extra);data.bindExtras?.(extra);}
+      if(entry==='restore' || (entry==='top' && object)) {
+        const target=object?root.querySelector('h2[tabindex]'):Array.from(root.querySelectorAll('[data-reader-open]')).find(n=>n.dataset.readerOpen===state().selected);
+        target?.focus({preventScroll:true});
+        if(!object)target?.scrollIntoView({block:'center',behavior:'instant'});
+      }
+      if(entry==='top')window.scrollTo({top:0,behavior:'instant'});
+    }
+    root.addEventListener('click',event=>{
+      const edge=event.target.closest('[data-reader-edges]');
+      if(edge){const chosen=edge.dataset.readerEdges.split(',').map(i=>edgeChoices[Number(i)]).filter(Boolean),basis=root.querySelector('[data-edge-basis]');
+        if(basis){const objects=section==='characters'?people:events;basis.innerHTML=`<button class="quiet-link" type="button" data-close-basis>收起依据</button><div data-basis-items class="${chosen.length<=6?'is-compact':''}"></div>`;B.mount(basis.querySelector('[data-basis-items]'),{label:'联系依据',items:chosen,pageSize:6,renderItem:r=>`<article><h3>${esc(objects.get(String(r.from))?.name || objects.get(String(r.from))?.title)} → ${esc(r.label)} → ${esc(objects.get(String(r.to))?.name || objects.get(String(r.to))?.title)}</h3>${r.status?'':badge('unknown')}${r.body()}</article>`});basis.hidden=false;basis.tabIndex=-1;basis.focus();basis.scrollIntoView({block:'nearest'});basis._opener=edge;}return;}
+      if(event.target.closest('[data-close-basis]')){const basis=root.querySelector('[data-edge-basis]');basis.hidden=true;basis._opener?.focus();return;}
+      const insight=event.target.closest('[data-report-phrase]');if(insight){const [id,index]=insight.dataset.reportPhrase.split('~');data.openInsight?.(id,index);return;}
+      const open=event.target.closest('[data-reader-open]');
+      if(open && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey){event.preventDefault();navigate(open.dataset.readerSection,open.dataset.readerOpen);return;}
+      if(event.target.closest('[data-reader-back]')){event.preventDefault();navigate(section,null,'relations',true);return;}
+      const tab=event.target.closest('[data-reader-pane]');if(tab){pane=tab.dataset.readerPane;sync(true);draw();root.querySelector(`[data-reader-pane="${pane}"]`).focus();return;}
+      const order=event.target.closest('[data-reader-order]');if(order){state().order=order.dataset.readerOrder;
+        const matches=orderEvents().filter(e=>(!state().query || e.search.toLocaleLowerCase().includes(state().query.trim().toLocaleLowerCase())) && (!state().filters.chapter || e.chapters.includes(Number(state().filters.chapter))));
+        const index=matches.findIndex(e=>e.id===state().selected);if(index>=0)state().page=Math.floor(index/8)+1;
+        sync(false);draw();root.querySelector(`[data-reader-order="${state().order}"]`).focus();}
+    });
+    root.addEventListener('keydown',event=>{
+      if(event.target.matches('g[data-reader-edges]') && ['Enter',' '].includes(event.key)){event.preventDefault();event.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));return;}
+      if(object || !event.target.matches('[data-reader-open]') || !['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+      const links=Array.from(root.querySelectorAll('[data-reader-open]')),i=links.indexOf(event.target);
+      const next=event.key==='Home'?0:event.key==='End'?links.length-1:(i+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1)+links.length)%links.length;
+      event.preventDefault();state().selected=links[next].dataset.readerOpen;sync(false);links[next].focus();
+    });
+    root.addEventListener('focusin',event=>{if(!object && section==='plot' && event.target.matches('[data-reader-open]')){state().selected=event.target.dataset.readerOpen;sync(false);updatePlotFocus();}});
+    const returning=history.state?.xumaiReaderReturn;
+    sync(false);draw(!object && returning?.key===key && returning.section===section?'restore':'top');
+    return {select(next){navigate(next==='characters'?'characters':'plot');}};
+  }
+  window.XumaiWorkspaceReader=Object.freeze({mountModel,mountRule,personSlots,plotSlots});
+})();

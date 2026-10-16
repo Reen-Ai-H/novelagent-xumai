@@ -47,7 +47,7 @@ git diff --check
 
 ## GitHub 阶段工作流
 
-当前叠加阶段例外（2026-10-16）：阶段34–36仍为Draft PR，最新已验证进度在 `codex/stage-36-visual-reading`。网页端接续开发应从该分支最新远端提交创建下一阶段分支，不能直接从旧 `main` 开始；不因此自动合并既有PR。详见 [网页端交接](CODEX_WEB_HANDOFF.md)。下列“从main创建”适用于前置阶段已合并的常规流程。
+当前叠加阶段例外（2026-10-17）：阶段34–37仍为Draft PR，最新候选在 `codex/stage-37-usable-workspace`；工程、真实内容及独立复核状态分别见PROGRESS，候选不自动等于已验收。网页端接续应从该分支最新远端提交创建下一阶段分支，不能直接从旧 `main` 开始；不因此自动合并既有PR。详见 [网页端交接](CODEX_WEB_HANDOFF.md)。下列“从main创建”适用于前置阶段已合并的常规流程。
 
 1. 从最新 `main` 创建 `codex/stage-<编号>-<主题>` 分支；一个阶段只承载一个可验收目标。
 2. 开工时记录基线，完成后运行与改动匹配的测试、静态检查和安全检查，并把真实结果写入 `PROGRESS.md`。
@@ -100,7 +100,9 @@ GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified�
 
 官方配置和计价依据为 [MiMo 首次调用](https://mimo.mi.com/docs/zh-CN/quick-start/summary/first-api-call) 与 [按量定价](https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go)。模型价格按精确名称选取并持久化版本，不能用历史 DeepSeek 价格估算 MiMo。
 
-真实验收使用 `scripts/live_deconstruction.py`，必须显式传入 `--authorized-live`，并提供本机来源、章节数和 `.codex` 内输出目录。默认总预算 10 元，所有尝试计入账本，失败的未知用量保留预留金额；脚本不在 CI 运行。验收正文、完整报告、引文与费用现场不加入 Git。`scripts/review_server.py` 可在独立本地数据目录导入已验证结果供页面检查，不覆盖作者现有数据。
+`scripts/live_deconstruction.py` 是旧阶段独立研究入口，默认10元不是当前授权；不得用它的默认值推导用户许可。阶段37必须从产品 `analyze-preview` / 全文接口验证来源绑定，以同一个 `DeconstructionService(model_budget_cny=2.0, model_budget_scope=...)` 和同一持久数据目录执行本轮授权样本，失败与重试也计入2元。不得更换 scope、重置账本或启动默认10元路径绕过上限。自动化测试断网并用 fake runtime，真实接口运行单独记录。
+
+真实验收前独立复核预算与来源安全。验收正文、完整报告、引文、账本和现场仅留忽略目录；不得提交或复制密钥。`scripts/review_server.py` 旧研究入口不能代替产品生成成功证据，也不能覆盖作者现有数据。同一轮使用量未知时保留保守占用，预算不足先停止，不通过删除失败记录释放余额。
 
 API 规则在 `app/agents/deconstruction_prompt.md`，继承 v0.5 细读规则并加入真实验收发现的对话归属、借体主体、动作先后和连线方向检查。选择章节试拆后先预览，采用通过已有来源/引文校验接口。调试自动化使用 fake runtime，不读取真实配置；真实请求仅在用户授权的手工试拆或后台全文任务中运行。
 

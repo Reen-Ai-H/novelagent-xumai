@@ -307,7 +307,10 @@ class Stage31BDeconstructionArchitectureTest(unittest.TestCase):
         historical = self.deconstruction.evidence(project_id, self._account_id(), old_evidence_id)
         self.assertFalse(historical["source_matches_current"])
         self.assertTrue(historical["historical"])
-        self.assertFalse(historical["chapter"]["source_available"])
+        self.assertTrue(historical["chapter"]["source_available"])
+        self.assertEqual(historical["chapter"]["content"], content)
+        self.assertEqual(historical["chapter"]["source_version_id"], item["source_version_id"])
+        self.assertNotIn("新的回声出现", historical["chapter"]["content"])
 
     def test_canonical_status_hides_completed_result_while_author_changes_are_pending(self) -> None:
         project_id = self._project("统一状态")

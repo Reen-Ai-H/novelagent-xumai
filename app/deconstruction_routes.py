@@ -22,6 +22,12 @@ independent_routes.independent_service.deconstruction_service = deconstruction_s
 book_analysis = BookAnalysis(deconstruction_service)
 
 
+@router.get("/projects/{project_id}/deconstruction/model-budget")
+async def read_model_budget(project_id: str, request: Request):
+    _current_independent_account(request, project_id)
+    return {"budget": _service().model_budget.public(create_runtime().model)}
+
+
 @router.get("/projects/{project_id}/deconstruction/book")
 async def read_book_analysis(project_id: str, request: Request):
     account = _current_independent_account(request, project_id)
@@ -91,6 +97,9 @@ def _service() -> DeconstructionService:
     if deconstruction_service.independent is not current:
         deconstruction_service.independent = current
         current.deconstruction_service = deconstruction_service
+    # A private instance must share one durable budget between both routes.
+    if book_analysis.service is not deconstruction_service:
+        book_analysis.service = deconstruction_service
     return deconstruction_service
 
 

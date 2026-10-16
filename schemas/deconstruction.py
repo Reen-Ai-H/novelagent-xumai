@@ -14,7 +14,7 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from schemas.analysis_report import AnalysisReport
 
 
@@ -76,7 +76,9 @@ class EvidenceRef(BaseModel):
     start_offset: int = Field(default=0, ge=0)
     end_offset: int = Field(default=0, ge=0)
     offset_unit: Literal["utf16_code_unit"] = "utf16_code_unit"
-    excerpt: str = Field(default="", max_length=180)
+    # Source quotes are coordinates, not display labels. In particular a CR
+    # before LF is part of the UTF-16 span and must survive every projection.
+    excerpt: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(default="", max_length=180)
     label: str = Field(default="正文证据", max_length=120)
     target_path: str | None = Field(default=None, max_length=500)
 
@@ -1082,15 +1084,17 @@ class DeconstructionHistoryItem(BaseModel):
 
 
 class DeconstructionEvidenceChapter(BaseModel):
-    """证据回链公开的稳定章节定位，不包含正文或内部字段。"""
+    """Stable locator; verified historical sources may include read-only exact text."""
 
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
 
     chapter_id: str
     chapter_number: int = Field(..., ge=1)
     title: str = Field(default="", max_length=200)
     read_only: Literal[True] = True
     source_available: bool = False
+    source_version_id: str | None = None
+    content: str | None = None
 
 
 class DeconstructionState(BaseModel):
@@ -1271,6 +1275,19 @@ class DeconstructionEvidenceResponse(BaseModel):
 
     @model_validator(mode="after")
     def validate_depth_evidence(self) -> "DeconstructionEvidenceResponse":
+        if (self.chapter.chapter_id != self.evidence.chapter_id
+                or self.chapter.chapter_number != self.evidence.chapter_number):
+            raise ValueError("evidence chapter source mismatch")
+        if self.chapter.content is not None:
+            if (not self.chapter.source_available
+                    or self.chapter.source_version_id != self.evidence.source_version_id):
+                raise ValueError("historical content requires a verified version source")
+            if getattr(self.evidence, "granularity", "span") != "chapter":
+                raw = self.chapter.content.encode("utf-16-le")
+                start, end = self.evidence.start_offset, self.evidence.end_offset
+                if (start is None or end is None or not 0 <= start < end <= len(raw) // 2
+                        or raw[start * 2:end * 2] != self.evidence.excerpt.encode("utf-16-le")):
+                    raise ValueError("historical evidence does not match exact source text")
         if isinstance(self.evidence, DepthEvidence):
             if (self.project_id != self.evidence.project_id
                     or self.chapter.chapter_id != self.evidence.chapter_id

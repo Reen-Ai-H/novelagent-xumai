@@ -11,6 +11,7 @@ import binascii
 import difflib
 import hashlib
 import io
+import json
 import logging
 import re
 import zipfile
@@ -25,7 +26,8 @@ from uuid import uuid4
 from xml.etree import ElementTree
 
 from app.core.independent_store import IndependentStore
-from app.core.chapter_parser import heading_number, parse_document, recognize_heading
+from app.core.chapter_parser import heading_number, parse_document, recognize_heading, utf16_length
+from app.core.chapter_segmentation import partition_text, suggest_boundaries
 from app.core.chapter_outline import chapter_sections, content_digest
 from app.core.person_recognition import discover_person_names
 from app.core.project_lock import ProjectLockStore, ProjectLockError
@@ -35,6 +37,9 @@ from schemas.independent import (
     AnalysisTask,
     ArchiveSnapshot,
     ChapterDocument,
+    ChapterPartitionItem,
+    ChapterPartitionPreview,
+    ChapterPartitionRecord,
     ChangeDecision,
     ChangeSummary,
     DeconstructionOutboxItem,
@@ -373,6 +378,7 @@ class IndependentWorkspaceService:
             "title": record.title,
             "active_version_id": record.active_version_id,
             "active_version": active,
+            "chapter_source": self._chapter_source_state(record),
             # Derived solely from the current draft returned in this response.
             # Never assign this navigation projection to a stored record.
             "chapter_sections": {chapter.chapter_id: self._chapter_sections(chapter.chapter_id, chapter)
@@ -399,6 +405,273 @@ class IndependentWorkspaceService:
             "total_word_count": sum(chapter.word_count for chapter in version.chapters),
             "latest_chapter_number": version.archive.latest_chapter_number,
         }
+
+    @staticmethod
+    def _version_source(version: ManuscriptVersion) -> dict[str, Any]:
+        """Canonical formal source, identical to DeconstructionService._source.
+
+        Empty drafting slots do not enter the analysis hash; the separate CAS
+        revision map still includes every slot, so adding one invalidates a
+        partition preview even when the analysis hash is unchanged.
+        """
+        chapters = [dict(chapter_id=c.chapter_id, chapter_number=c.chapter_number,
+                         title=c.formal_title or c.title, content=c.formal_content or "",
+                         server_revision=c.server_revision)
+                    for c in sorted(version.chapters, key=lambda c: c.chapter_number)]
+        formal = [c for c in chapters if c["content"].strip()]
+        payload = dict(version_id=version.version_id,
+                       chapters=[{k: c[k] for k in ("chapter_id", "chapter_number", "title", "content")}
+                                 for c in formal])
+        digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                                           separators=(",", ":")).encode("utf-8")).hexdigest()
+        return dict(source_version_id=version.version_id, source_hash=digest,
+                    source_revision=max((c["server_revision"] for c in formal), default=0), chapters=chapters)
+
+    def _partition_blocker(self, record: IndependentProjectRecord, version: ManuscriptVersion) -> str | None:
+        if record.pending_changes is not None:
+            return "pending_changes_confirmation_required"
+        if any(c.content != c.formal_content or c.title != (c.formal_title or c.title)
+               or not c.formal_content.strip() for c in version.chapters):
+            return "chapter_drafts_pending"
+        if any(t.status in {"queued", "running"} for t in record.tasks):
+            return "chapter_transaction_pending"
+        coordinator = self.transaction_coordinator
+        if coordinator is not None and any(
+            j.project_id == record.project_id and j.account_id == record.account_id
+            and j.state in {"prepared", "committed"} for j in coordinator.store.list_journals()
+        ):
+            return "chapter_transaction_pending"
+        return None
+
+    def _chapter_source_state(self, record: IndependentProjectRecord) -> dict[str, Any]:
+        version = next((v for v in record.versions if v.version_id == record.active_version_id), None)
+        if version is None:
+            return dict(version_id=None, source_hash=None, chapter_revisions={},
+                        can_resegment=False, blocked_reason="workspace_not_started")
+        source = self._version_source(version)
+        blocker = self._partition_blocker(record, version)
+        return dict(version_id=version.version_id, source_hash=source["source_hash"],
+                    chapter_revisions={c.chapter_id: c.server_revision for c in version.chapters},
+                    can_resegment=blocker is None, blocked_reason=blocker)
+
+    def read_source_snapshot(self, project_id: str, account_id: str, version_id: str,
+                             chapter_id: str | None = None) -> dict[str, Any]:
+        """Authenticated, formal-only source; historical IDs never map to live IDs.
+
+        Recovery expiry is deliberately irrelevant to evidence reads. Archived
+        partition sources have no expiry and are never edited by this method.
+        """
+        record = self._load(project_id, account_id)
+        version = next((v for v in record.versions if v.version_id == version_id), None)
+        if version is None:
+            raise IndependentServiceError("version_missing", "稿本版本不存在。", status_code=404)
+        source = self._version_source(version)
+        if chapter_id is not None:
+            source["chapters"] = [c for c in source["chapters"] if c["chapter_id"] == chapter_id]
+            if not source["chapters"]:
+                raise IndependentServiceError("chapter_missing", "该来源版本中没有此章。", status_code=404)
+        for chapter in source["chapters"]:
+            chapter.update(utf16_length=utf16_length(chapter["content"]),
+                           content_hash=self._hash_text(chapter["content"]))
+        return dict(project_id=project_id, read_only=True,
+                    historical=version_id != record.active_version_id, **source)
+
+    @staticmethod
+    def _public_partition(preview: ChapterPartitionRecord) -> ChapterPartitionPreview:
+        return ChapterPartitionPreview.model_validate(preview.model_dump(exclude={"source_text_hash", "heading_levels"}))
+
+    @staticmethod
+    def _partition(text: str, boundaries: list[dict]) -> tuple[list[dict], list[str]]:
+        try:
+            return partition_text(text, boundaries)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise IndependentServiceError("chapter_boundaries_invalid", str(exc), status_code=422) from None
+
+    def _new_partition(self, record: IndependentProjectRecord, *, kind: str, text: str,
+                       boundaries: list[dict], source_hash: str, source_version_id: str | None = None,
+                       source_chapters: list[dict] | None = None,
+                       heading_levels: dict[int, int] | None = None) -> ChapterPartitionPreview:
+        items, _ = self._partition(text, boundaries)
+        now = self._now()
+        preview = ChapterPartitionRecord(
+            preview_id=uuid4().hex, kind=kind, source_text=text, source_length=utf16_length(text),
+            source_hash=source_hash, source_text_hash=self._hash_text(text),
+            source_version_id=source_version_id, source_chapters=source_chapters or [],
+            heading_levels=heading_levels or {}, chapters=items, created_at=now,
+            expires_at=now + timedelta(hours=24),
+            warnings=["原文标题行和空白保留在正文中；章号独立于标题，请核对候选分界。"],
+        )
+        # Never evict unfinished previews or legacy pending imports implicitly.
+        record.chapter_previews.append(preview)
+        record.updated_at = now
+        self.store.save(record)
+        return self._public_partition(preview)
+
+    @_author_write_method
+    def preview_chapter_import(self, project_id: str, account_id: str, *, filename: str,
+                               content_base64: str) -> ChapterPartitionPreview:
+        record = self._ensure_record(project_id, account_id)
+        if record.active_version_id:
+            raise IndependentServiceError("import_already_confirmed", "已有正式稿，请使用重新分章。", status_code=409)
+        suffix = Path(filename).suffix.lower()
+        try:
+            if suffix not in {".txt", ".md", ".docx"}:
+                raise ValueError("仅支持TXT、MD、DOCX。")
+            if len(content_base64) > 4 * ((MAX_IMPORT_BYTES + 2) // 3):
+                raise ValueError("文件超过5 MB限制。")
+            content = base64.b64decode(content_base64, validate=True)
+            if len(content) > MAX_IMPORT_BYTES:
+                raise ValueError("文件超过5 MB限制。")
+            levels = {}
+            if suffix == ".docx":
+                with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                    if sum(i.file_size for i in archive.infolist()) > MAX_IMPORT_BYTES * 4:
+                        raise ValueError("DOCX展开后超过安全大小限制。")
+                text, levels = self._decode_docx_structure(content)
+            elif content.startswith((b"\xff\xfe", b"\xfe\xff")):
+                text = content.decode("utf-16")
+            else:
+                try:
+                    text = content.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    text = content.decode("gb18030")
+        except (ValueError, binascii.Error, zipfile.BadZipFile, RuntimeError) as exc:
+            raise IndependentServiceError("import_invalid", "文件格式、编码或大小不受支持，请检查原文件。", status_code=422) from exc
+        if not text.strip() or not parse_document(filename, text, heading_levels=levels).chapters:
+            raise IndependentServiceError("import_empty", "没有可分章的正文。", status_code=422)
+        boundaries = suggest_boundaries(text, Path(filename).stem, heading_levels=levels)
+        return self._new_partition(record, kind="import", text=text, boundaries=boundaries,
+                                   source_hash=self._hash_text(text),
+                                   heading_levels={utf16_length(text[:p]): level for p, level in levels.items()})
+
+    def _check_partition_source(self, record: IndependentProjectRecord, expected_version_id: str,
+                                expected_source_hash: str, revisions: dict[str, int] | None = None) -> ManuscriptVersion:
+        state = self._chapter_source_state(record)
+        if (state["version_id"] != expected_version_id or state["source_hash"] != expected_source_hash
+                or (revisions is not None and state["chapter_revisions"] != revisions)):
+            raise IndependentServiceError("chapter_source_conflict", "正文来源已改变，请重新生成分章预览。",
+                                          status_code=409, data={"chapter_source": state})
+        blocker = state["blocked_reason"]
+        if blocker:
+            messages = {"pending_changes_confirmation_required": "请先处理未确认的正文修改。",
+                        "chapter_drafts_pending": "请先处理草稿或空白章节，再重新分章。",
+                        "chapter_transaction_pending": "正文任务尚未结束，请稍后重新分章。"}
+            raise IndependentServiceError(blocker, messages.get(blocker, "当前正文暂不可重新分章。"), status_code=409)
+        return self._active(record)
+
+    @_author_write_method
+    def preview_chapter_resegment(self, project_id: str, account_id: str, *, expected_version_id: str,
+                                  expected_source_hash: str) -> ChapterPartitionPreview:
+        record = self._load(project_id, account_id)
+        version = self._check_partition_source(record, expected_version_id, expected_source_hash)
+        parts, boundaries, spans, styles = [], [], [], {}
+        offset = 0
+        for chapter in sorted(version.chapters, key=lambda c: c.chapter_number):
+            text = chapter.formal_content
+            title = chapter.formal_title or chapter.title
+            style = chapter.imported_heading_style
+            levels = style.heading_levels if style and style.content_hash == content_digest(text) else {}
+            cp_levels, cp, units = {}, 0, 0
+            for line in text.splitlines(keepends=True):
+                if units in levels:
+                    cp_levels[cp] = levels[units]
+                    styles[offset + units] = levels[units]
+                cp += len(line)
+                units += utf16_length(line)
+            cuts = suggest_boundaries(text, title, heading_levels=cp_levels, preserve_opening=True)
+            # The existing first title is metadata and may no longer occur in
+            # the body. Keep it verbatim; never recreate removed heading text.
+            cuts[0]["title"] = title
+            boundaries.extend(dict(c, start=c["start"] + offset) for c in cuts)
+            end = offset + utf16_length(text)
+            spans.append(dict(chapter_id=chapter.chapter_id, title=title, start=offset,
+                              end=end, server_revision=chapter.server_revision))
+            parts.append(text)
+            offset = end
+        text = "".join(parts)  # no invented separator between original chapters
+        return self._new_partition(record, kind="resegment", text=text, boundaries=boundaries,
+                                   source_hash=expected_source_hash, source_version_id=version.version_id,
+                                   source_chapters=spans, heading_levels=styles)
+
+    def _find_partition(self, record: IndependentProjectRecord, preview_id: str) -> ChapterPartitionRecord:
+        preview = next((p for p in record.chapter_previews if p.preview_id == preview_id), None)
+        if preview is None:
+            raise IndependentServiceError("chapter_preview_missing", "分章预览不存在。", status_code=404)
+        return preview
+
+    def read_chapter_preview(self, project_id: str, account_id: str, preview_id: str) -> ChapterPartitionPreview:
+        return self._public_partition(self._find_partition(self._load(project_id, account_id), preview_id))
+
+    def _check_partition(self, record: IndependentProjectRecord, preview: ChapterPartitionRecord,
+                         expected_revision: int) -> None:
+        if preview.status != "pending":
+            raise IndependentServiceError("chapter_preview_confirmed", "该预览已经确认，请刷新作品。", status_code=409)
+        if preview.expires_at <= self._now():
+            raise IndependentServiceError("chapter_preview_expired", "分章预览已过期，请重新生成。", status_code=409)
+        if preview.revision != expected_revision:
+            raise IndependentServiceError("chapter_preview_conflict", "预览已在别处修改，请重新读取。", status_code=409)
+        if preview.kind == "import":
+            if record.active_version_id:
+                raise IndependentServiceError("import_already_confirmed", "已有正式稿，不能用导入覆盖。", status_code=409)
+        else:
+            self._check_partition_source(record, preview.source_version_id, preview.source_hash,
+                                         {c.chapter_id: c.server_revision for c in preview.source_chapters})
+        if self._hash_text(preview.source_text) != preview.source_text_hash:
+            raise IndependentServiceError("chapter_source_conflict", "预览原文校验失败，请重新生成。", status_code=409)
+
+    @_author_write_method
+    def correct_chapter_preview(self, project_id: str, account_id: str, preview_id: str, *,
+                                expected_revision: int, boundaries: list[dict]) -> ChapterPartitionPreview:
+        record = self._load(project_id, account_id)
+        preview = self._find_partition(record, preview_id)
+        self._check_partition(record, preview, expected_revision)
+        items, _ = self._partition(preview.source_text, boundaries)
+        preview.chapters = [ChapterPartitionItem.model_validate(item) for item in items]
+        preview.revision += 1
+        record.updated_at = self._now()
+        self.store.save(record)
+        return self._public_partition(preview)
+
+    @_author_write_method
+    def confirm_chapter_preview(self, project_id: str, account_id: str, preview_id: str, *,
+                                expected_revision: int) -> dict[str, Any]:
+        record = self._load(project_id, account_id)
+        preview = self._find_partition(record, preview_id)
+        self._check_partition(record, preview, expected_revision)
+        items, chunks = self._partition(preview.source_text, [c.model_dump() for c in preview.chapters])
+        now = self._now()
+        chapters = []
+        for item, content in zip(items, chunks):
+            levels = {p-item["start"]: level for p, level in preview.heading_levels.items()
+                      if item["start"] <= p < item["end"]}
+            chapters.append(ChapterDocument(
+                chapter_id=uuid4().hex, chapter_number=item["chapter_number"], title=item["title"],
+                formal_title=item["title"], content=content, formal_content=content,
+                server_revision=1, word_count=item["word_count"], formal_word_count=item["word_count"],
+                status="ready", updated_at=now, last_completed_hash=self._hash_text(content),
+                imported_heading_style=ImportedHeadingStyle(content_hash=content_digest(content), heading_levels=levels)
+                if levels else None,
+            ))
+        previous = record.active_version_id
+        if previous:
+            old = self._active(record)
+            # This is a permanent evidence source, NOT a 30-day recovery item.
+            # All old chapter IDs, formal text, revisions and archive stay intact.
+            old.status = "archived"
+            old.recoverable_until = None
+        version = ManuscriptVersion(version_id=uuid4().hex, label=f"稿本 {len(record.versions)+1} · 章节确认",
+                                    created_at=now, updated_at=now, source_version_id=previous,
+                                    chapter_preview_id=preview.preview_id, chapters=chapters,
+                                    archive=StoryArchive(analysis_label=ANALYSIS_LABEL))
+        record.versions.append(version)
+        record.active_version_id = version.version_id
+        preview.status = "confirmed"
+        preview.confirmed_version_id = version.version_id
+        record.updated_at = now
+        # One atomic record write. No automatic model calls or outbox event.
+        self.store.save(record)
+        return dict(workspace=self.workspace(project_id, account_id), version_id=version.version_id,
+                    previous_version_id=previous, preview_id=preview_id)
 
     @staticmethod
     def _chapter_sections(chapter_id: str, chapter) -> list[dict]:
@@ -1283,7 +1556,8 @@ class IndependentWorkspaceService:
         record = self.store.load(project_id)
         if record is None or record.account_id != account_id:
             return
-        pending = [task.task_id for task in record.tasks if task.status in {"queued", "running"}]
+        pending = [task.task_id for task in record.tasks if task.status in {"queued", "running"}
+                   and task.version_id == record.active_version_id]
         for task_id in pending:
             self.run_task(project_id, account_id, task_id)
 
@@ -1460,6 +1734,8 @@ class IndependentWorkspaceService:
         task = self._find_task(record, task_id)
         if task.status in {"completed", "cancelled"}:
             return task
+        if task.version_id != record.active_version_id:
+            raise IndependentServiceError("version_read_only", "历史来源只读，不能重新执行旧稿本任务。", status_code=409)
         task.status = "running"
         task.updated_at = self._now()
         self.store.save(record)
@@ -1493,6 +1769,8 @@ class IndependentWorkspaceService:
         task = self._find_task(record, task_id)
         if task.status != "failed":
             raise IndependentServiceError("task_not_retryable", "只有失败任务可以重试。", status_code=409)
+        if task.version_id != record.active_version_id:
+            raise IndependentServiceError("version_read_only", "历史来源只读，不能重试旧稿本任务。", status_code=409)
         version = next((item for item in record.versions if item.version_id == task.version_id), None)
         if version is None:
             raise IndependentServiceError("version_missing", "重试所需的稿本不存在。", status_code=500)
