@@ -1,5 +1,13 @@
 # 当前任务进度
 
+## 2026-10-16 · GitHub同步与网页端交接
+
+- 用户要求将当前进度推送GitHub，准备在网页Codex继续研发。本轮只补交接文档，不实现下一阶段功能，不合并、不部署。
+- 远端回读：`codex/stage-36-visual-reading` 与本地同为 `728bd2c2012b484b11574d96f6d8afdfbede43a1`；`main` 仍为 `ec2f31a71f5f7839d9f34f03832afa89ced31d4e`。728bd2c的Ubuntu/Windows、push/PR四项CI均SUCCESS（[push](https://github.com/Reen-Ai-H/novelagent-xumai/actions/runs/38738955640)、[PR](https://github.com/Reen-Ai-H/novelagent-xumai/actions/runs/38738963320)）。
+- 接手入口新增 [CODEX_WEB_HANDOFF](docs/CODEX_WEB_HANDOFF.md)，并由AGENTS、文档索引和开发手册互相链接。保持 [Draft PR #13](https://github.com/Reen-Ai-H/novelagent-xumai/pull/13) → #12 → #11 的既有依赖；网页版必须从阶段36最新远端提交接手。
+- 原阶段34工作区7项已跟踪修改、5项未跟踪成果保持原样，不混入本轮已验证交付。正文、密钥、报告和本机验收现场均未上传；云端新任务不继承本机服务或付费授权。
+- 本轮实际执行 `scripts/verify_offline.py`：387 tests，0 failures/errors/skipped，12.942s；五份交接相关文档38个本地链接缺失0，`git diff --check`通过。本轮仅修改文档，未重跑浏览器；既有浏览器结果仍归属下方阶段36代码验证，不冒称为本轮新跑。
+
 ## 2026-10-15 · 阶段36自测与独立复核闭合
 
 - 分支 `codex/stage-36-visual-reading`，代码候选 `6221150ab2e6ad03115a67aaf242eed1497e5231` 已推送 [Draft PR #13](https://github.com/Reen-Ai-H/novelagent-xumai/pull/13)，保持阶段35基线，不合并、不部署、不切换作者原目录。前端/后端与独立审计冻结版本逐字diff为空；该提交只在a6fdf5b上提升测试数量门禁为387。

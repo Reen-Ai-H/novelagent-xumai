@@ -11,6 +11,7 @@
 - 架构：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 开发与运维：[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 - 文档索引：[docs/README.md](docs/README.md)
+- 网页端接手：[docs/CODEX_WEB_HANDOFF.md](docs/CODEX_WEB_HANDOFF.md)（当前未合并阶段须从阶段36分支继续）
 - 长期路线：[docs/ROADMAP.md](docs/ROADMAP.md)
 - 当前阶段任务书：[docs/goals/STAGE_36_VISUAL_READING.md](docs/goals/STAGE_36_VISUAL_READING.md)
 - 阶段状态：[PROGRESS.md](PROGRESS.md)、[BLOCKED.md](BLOCKED.md)
