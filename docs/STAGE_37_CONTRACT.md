@@ -34,3 +34,7 @@ preview含preview_id、kind(import/resegment)、status、revision、source_versi
 `model.1`报告可选 `character_relations`，缺失时默认为空，不推导关系。条目为 `{from_id,to_id,label,text,status,evidence_ids}`。端点必须为报告人物ID且不自连；label是短关系标签，text为判断，status为fact/reported/inferred/unknown，证据沿用严格引用。语义方向是from到to，反向查看不能倒置称谓。事件参与独立放在经历视图。
 
 试拆/增量的来源编号、模型内部修复和总预算实现由模型worker负责；主Agent只在完成免费验证、确认持久化总额限制后启用本轮授权试跑。任何旧结果或手工改写报告不能代替本轮产品结果。
+
+## 格式定点修复（10/17补充）
+
+拆解模型配置显式启用有界候选修复，默认运行时保持原行为。完整且不超过65,536字符的失败输出可作为标注的不可信user数据进入唯一一次格式修复，不能进入system；空、截断、超限候选不截取回传。修复输入连同全部schema必须计入原持久账本请求前预留，预算不足或来源变化仍拒绝发起。输出重新走全部严格校验，不在代码中删除多余字段或补写JSON。候选未通过时现有报告不变，原始文本不进入默认日志。
