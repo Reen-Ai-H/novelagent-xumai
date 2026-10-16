@@ -92,6 +92,17 @@ class PromptContractTest(unittest.TestCase):
         self.require("findings每项必须有id",
                      "contradictions、人物insights、事件sub_events每项只含title/text/status/evidence_ids，不含id")
 
+    def test_ids_and_relationship_keys_cannot_duplicate_semantics(self):
+        self.require("全报告唯一的ASCII ID", "(from_id,to_id,label)精确键唯一",
+                     "同一语义不靠反向或近义词重复堆边")
+
+    def test_time_anchors_actor_ids_and_knowledge_ownership_are_cross_checked(self):
+        self.require("明确年龄、日期和相对时间锚点", "细日期未知不能推翻已知年龄先后",
+                     "后文已明确实际执行的行动，也不能仍写成只有约定",
+                     "两端事件各自存在不证明连接机制", "因果依据须对应节点中的实际行动",
+                     "多层亲属称谓逐层核对，不上提代际", "谁说、谁想、谁知道、谁要求",
+                     "按本报告ID与姓名对应表回读actor_ids和关系端点", "同场不代表同职责")
+
 
 class EventWireRegressionTest(unittest.IsolatedAsyncioTestCase):
     """Synthetic structural counterexamples; never load or repair private candidates."""
@@ -165,6 +176,23 @@ class EventWireRegressionTest(unittest.IsolatedAsyncioTestCase):
         bad = deepcopy(self.wire)
         del bad["findings"][0]["id"]
         self.assertEqual(self.error_set(bad), {(("findings", 0, "id"), "missing")})
+
+    def test_binding_rejects_duplicate_ids_and_exact_relationship_keys(self):
+        for group in ("findings", "events", "evidence"):
+            with self.subTest(group=group):
+                bad = deepcopy(self.wire)
+                bad[group][0]["id"] = "C1"
+                with self.assertRaisesRegex(ValidationError, "分析 ID 重复"):
+                    bind_selections(bad, self.bank, {1: self.text}, producer="offline")
+        bad = deepcopy(self.wire)
+        bad["characters"].append({**deepcopy(bad["characters"][0]), "id": "C2", "name": "值夜人"})
+        edge = {"from_id": "C1", "to_id": "C2", "label": "同伴", "text": "合成关系判断。",
+                "status": "inferred", "evidence_ids": ["Q1"]}
+        bad["character_relations"] = [edge, deepcopy(edge)]
+        # Wire shape alone is not the final source/reference acceptance gate.
+        GroundedReport.model_validate(bad, strict=True)
+        with self.assertRaisesRegex(ValidationError, "人物关系键重复"):
+            bind_selections(bad, self.bank, {1: self.text}, producer="offline")
 
     async def run_responses(self, responses, *, valid):
         originals = deepcopy(responses)

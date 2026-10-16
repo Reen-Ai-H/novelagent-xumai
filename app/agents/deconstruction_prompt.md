@@ -8,9 +8,9 @@
 
 区分“现在回忆/讲述”与“回忆中发生的事”。节点若分析过去的行动，story_time标过去时段，action/consequence只写该时段的行动及后果；若分析现在讲述带来的变化，就以现在为时间，不把被讲述的前史当作刚发生。sub_events只能补充该事件内部的必要步骤，不收纳另一个年代的独立情节。复核事件内动作的前后顺序，不把未遂、再次行动和接话压成相反顺序。人物change也不能把叙述中先后出现的职务写成实际升迁。
 
-先核对行动前提、执行、后果及后续获知，再填写story_time、story_order、time_note和relations，并与findings/人物字段交叉检查。后来得知的解释不能回填为人物事前已经知情；局部知情不等于预知全局。事后通知、追责或补偿不能反过来促成此前的出发或行动。安排、计划、命令、请求及未遂不等于完成，不能把拟任职、拟赴任或拟开战写成已执行。保留使行动成立的关键前因、公开由头与实际动机，区分责任归属与事后补偿，不用一句“获赏”抹掉承担代价的过程。关键行动者可在事件中点明，不强制全部建人物卡。
+先核对行动前提、执行、后果及后续获知，再填写story_time、story_order、time_note和relations，并与findings/人物字段交叉检查。以明确年龄、日期和相对时间锚点核对三处时间表述；细日期未知不能推翻已知年龄先后。后来得知的解释不能回填为人物事前已经知情；局部知情不等于预知全局。事后通知、追责或补偿不能反过来促成此前的出发或行动。安排、计划、命令、请求及未遂不等于完成，不能把拟任职、拟赴任或拟开战写成已执行；后文已明确实际执行的行动，也不能仍写成只有约定。保留使行动成立的关键前因、公开由头与实际动机，区分责任归属与事后补偿，不用一句“获赏”抹掉承担代价的过程。关键行动者可在事件中点明，不强制全部建人物卡。
 
-events按正文揭示顺序；story_order按可证的故事顺序包含全部事件各一次。仅知局部先后、重叠或同时进行时，不强定整段场景的先后。无法定序的事件仍须列入story_order，在不违背已证先后的前提下可暂按揭示顺序展示，并在time_note点明相关事件ID的相对先后未定，展示位置不代表事实排序。relations只连接已有事件；causes/enables须说明from如何促成to，且前因不能晚于其结果。follows 表示后件紧随前件，但follows只表示有据的故事先后，不把叙述转场当作过去事件晚于现在发生。揭示、呼应也不自动证明因果；无依据宁可不连边，不能为连成路径编造关系。
+events按正文揭示顺序；story_order按可证的故事顺序包含全部事件各一次。仅知局部先后、重叠或同时进行时，不强定整段场景的先后。无法定序的事件仍须列入story_order，在不违背已证先后的前提下可暂按揭示顺序展示，并在time_note点明相关事件ID的相对先后未定，展示位置不代表事实排序。relations只连接已有事件；causes/enables须说明from如何促成to，且前因不能晚于其结果。两端事件各自存在不证明连接机制，因果依据须对应节点中的实际行动，不能拿同场另一行动代替。follows 表示后件紧随前件，但follows只表示有据的故事先后，不把叙述转场当作过去事件晚于现在发生。揭示、呼应也不自动证明因果；无依据宁可不连边，不能为连成路径编造关系。
 
 ## 2. 核对人物身份与关系方向，保留必要主干
 
@@ -18,9 +18,9 @@ events按正文揭示顺序；story_order按可证的故事顺序包含全部事
 
 不同段落可能切换第一人称，同一稿也可跨章切换第一人称；每段对白先核对说话者和被指对象，回忆与引述也分别核对，不默认所有“我”属于一人。“我”“他”不独立建卡，“大道”等概念不因拟人变成人物。未具名叙述者可留在事件；父母、师父等称谓若明确指向有实质作用的个人则可建卡，不能把不同同称谓者自动归并。核对完整姓名边界，保留复姓，不并入动作或否定词；不同姓名只有明确同一人依据才合并，aliases/entity_key不能替代这一依据。转生、附身区分意识与身体原主；借体、冒名另核对被借名者、在场行动者与尸体。伤亡数量须区分家族成员、仆人及其他在场者，不能错置群体。连续语境已建立指代时可以综合判断，不因同句没有姓名就悬置身份；确认是谁不等于确认其爱情、动机或全部知情。
 
-亲历、经手、局部知情、配合与策划逐级区分，不能从经手或知情推成主谋。护送或保护不等于长期抚养，收徒不等于收养，被救不证明双亲亡故；家族、机构、官职与权力范围不能拼接错置。身份标签、动作对象和说话者都要核对，不把他人的愿望写成本人目标。否定行动不否定人物存在，玩笑、猜想不改写成实际行动。
+亲历、经手、局部知情、配合与策划逐级区分，不能从经手或知情推成主谋。护送或保护不等于长期抚养，收徒不等于收养，被救不证明双亲亡故；多层亲属称谓逐层核对，不上提代际；家族、机构、官职与权力范围不能拼接错置。身份标签、动作对象和说话者都要核对，不把他人的愿望写成本人目标。逐项区分谁说、谁想、谁知道、谁要求，不能在切换视角时共享知识或转移意图。否定行动不否定人物存在，玩笑、猜想不改写成实际行动。
 
-character_relations每项固定为from_id/to_id/label/text/status/evidence_ids，只连已有不同人物ID。label描述from_id相对于to_id的关系或动作，text须明写两端。逐边回读“from是to的什么/from对to做什么”，确保端点、label、text、证据同向。例如A是B的养母，from_id=A、to_id=B、label=养母；A教B，from=A、to=B、label=老师或教导。反向必须相应改为子女、学生等角色，不因选中to而反转标签；不可拿to的称谓标在from上，也不从性别机械推角色。有据的对称关系可用中性关系词，但不能靠换词掩盖无据关系。
+character_relations每项固定为from_id/to_id/label/text/status/evidence_ids，只连已有不同人物ID；(from_id,to_id,label)精确键唯一，同一语义不靠反向或近义词重复堆边。按本报告ID与姓名对应表回读actor_ids和关系端点，确保ID人物与text主体一致；同场不代表同职责。label描述from_id相对于to_id的关系或动作，text须明写两端。逐边回读“from是to的什么/from对to做什么”，确保端点、label、text、证据同向。例如A是B的养母，from_id=A、to_id=B、label=养母；A教B，from=A、to=B、label=老师或教导。反向必须相应改为子女、学生等角色，不因选中to而反转标签；不可拿to的称谓标在from上，也不从性别机械推角色。有据的对称关系可用中性关系词，但不能靠换词掩盖无据关系。
 
 逐一核对已选重要人物与核心人物之间明确的养亲、亲属、师徒、照护、友伴或职能关系，不只列醒目的情感边而漏掉关系主干。仅有共同参与事件不能推成亲属、敌友、师徒或同盟，同场放在经历中；无据时允许无边，不为图连通补关系，不设边数目标。传闻里的兄妹、婚配等保留reported/inferred，标签本身不能暗示已证实为fact；单方爱慕不证明双方恋情。
 
@@ -42,7 +42,7 @@ contradictions只记叙述事实真正不能对齐的冲突，附两端依据；
 
 只输出一个完整的无缩进紧凑JSON，不加Markdown、解释、自检报告或额外字段；不换行美化，不输出思考过程。事件短标题配简短行动和后果，不写章节梗概式长段落。先删可选的重复观察与附带分句，不靠删除必要人物、关键前因或主事件压缩篇幅。允许省略无内容的可选字段；必填字段、已声明对象的引用和story_order必须完整，不截断JSON凑通过。
 
-遵守本次schema。完整报告chapter_numbers恰好覆盖提供章节，不声称读完全书；events、relations、story_order、time_note、evidence、open_questions与characters同级。identity/motivation/change/portrait/action/consequence是{"text":"简短判断","status":"inferred","evidence_ids":["Q1"]}对象，不能写成字符串。findings每项必须有id；contradictions、人物insights、事件sub_events每项只含title/text/status/evidence_ids，不含id。evidence每项只输出{"id":"Q1","source_id":"来源库编号"}，由服务端装配原文，不输出quote、章号或偏移。只选sourcebank提供的编号；库外正文仍须阅读，但不可冒充可引用来源。所有引用存在，人物、事件、发现与证据使用互不冲突的ASCII ID；producer由服务端填写。
+遵守本次schema。完整报告chapter_numbers恰好覆盖提供章节，不声称读完全书；events、relations、story_order、time_note、evidence、open_questions与characters同级。identity/motivation/change/portrait/action/consequence是{"text":"简短判断","status":"inferred","evidence_ids":["Q1"]}对象，不能写成字符串。findings每项必须有id；contradictions、人物insights、事件sub_events每项只含title/text/status/evidence_ids，不含id。evidence每项只输出{"id":"Q1","source_id":"来源库编号"}，由服务端装配原文，不输出quote、章号或偏移。只选sourcebank提供的编号；库外正文仍须阅读，但不可冒充可引用来源。所有引用存在，人物、事件、发现与证据使用全报告唯一的ASCII ID；producer由服务端填写。
 
 每个事件内action、consequence、sub_events必须同级；action/consequence各自只含必填的text/status/evidence_ids，不能把后果或子事件嵌入action。事件同级骨架（占位值须替换为本轮有据内容）：`{"id":"E1","title":"事件短标题","chapter_number":1,"chapter_end":1,"story_time":"有据时段","actor_ids":["C1"],"action":{"text":"简短行动","status":"fact","evidence_ids":["Q1"]},"consequence":{"text":"简短后果","status":"fact","evidence_ids":["Q2"]},"sub_events":[]}`。
 

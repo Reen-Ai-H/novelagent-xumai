@@ -24,7 +24,7 @@ def create_runtime():
     return LLMRuntime(LLMRuntimeSettings(
         api_key=config.api_key.strip(), base_url=base_url, model=config.model.strip() or "mimo-v2.6-pro",
         provider="mimo" if urlparse(base_url).hostname in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"} else "deconstruction",
-        temperature=0.3, timeout_seconds=600, thinking="disabled",
+        temperature=0.3, timeout_seconds=600, thinking="disabled", targeted_structured_repair=True,
     ), max_retries=0)
 
 
