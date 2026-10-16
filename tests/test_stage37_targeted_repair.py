@@ -112,6 +112,40 @@ class CandidateRepairTest(unittest.IsolatedAsyncioTestCase):
         await runtime.structured(**request())
         self.assertEqual(json.loads(candidate_messages(calls[1])[0]["content"])["untrusted_previous_output"], candidate)
 
+    async def test_candidate_preserves_leading_and_trailing_whitespace_verbatim(self):
+        candidate = '\r\n \t{"answer":7}\r\n\t '
+        runtime, calls = scripted([envelope(candidate), envelope('{"answer":"ok"}')])
+        await runtime.structured(**request())
+        self.assertEqual(json.loads(candidate_messages(calls[1])[0]["content"])["untrusted_previous_output"], candidate)
+
+    async def test_original_size_includes_whitespace_before_decode_strips_it(self):
+        body = '{"answer":7}'
+        for size in (65536, 65537):
+            with self.subTest(size=size):
+                candidate = " " * (size - len(body) - 1) + body + "\n"
+                self.assertEqual(len(candidate), size)
+                self.assertLess(len(candidate.strip()), 65536)
+                runtime, calls = scripted([envelope(candidate), envelope('{"answer":"ok"}')])
+                await runtime.structured(**request())
+                captured = candidate_messages(calls[1])
+                self.assertEqual(len(captured), int(size == 65536))
+                if captured:
+                    self.assertTrue(json.loads(captured[0]["content"])["untrusted_previous_output"] == candidate)
+                self.assertEqual(len(calls), 2)
+
+    async def test_only_targeted_structured_mode_changes_content_preservation(self):
+        wire = ' \n{"answer":"ok"}\t '
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                runtime, calls = scripted([envelope(wire)], enabled=enabled)
+                result = await runtime.structured(**request())
+                self.assertEqual(result.data, {"answer": "ok"})
+                self.assertEqual(result.text, wire if enabled else wire.strip())
+                self.assertEqual(len(calls), 1)
+                runtime, _ = scripted([envelope(" \nok\t ")], enabled=enabled)
+                result = await runtime.complete(call_id="legacy", messages=[])
+                self.assertEqual(result.text, "ok")
+
     async def test_size_limit_is_inclusive_characters_and_never_slices(self):
         self.assertEqual(STRUCTURED_REPAIR_MAX_CHARS, 65536)
         prefix, suffix = '{"answer":7,"padding":"', '"}'

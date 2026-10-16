@@ -307,7 +307,7 @@ class LLMRuntime:
         return f"{(self.settings.base_url or '').rstrip('/')}/chat/completions"
 
     @staticmethod
-    def _content_from_response(payload: Mapping[str, Any]) -> str:
+    def _content_from_response(payload: Mapping[str, Any], *, preserve: bool = False) -> str:
         choices = payload.get("choices")
         if not isinstance(choices, list) or len(choices) != 1:
             raise LLMRuntimeError(
@@ -340,7 +340,7 @@ class LLMRuntime:
                 "模型服务没有返回可用内容，请重试。",
                 retryable=True,
             )
-        return content.strip()
+        return content if preserve else content.strip()
 
     @staticmethod
     def _text_content_from_response(payload: Mapping[str, Any]) -> str:
@@ -635,7 +635,8 @@ class LLMRuntime:
                 text = (
                     self._text_content_from_response(payload)
                     if content_mode == "text"
-                    else self._content_from_response(payload)
+                    else self._content_from_response(payload, preserve=(
+                        content_mode == "structured" and self.settings.targeted_structured_repair is True))
                 )
             except LLMRuntimeError as exc:
                 raise LLMRuntimeError(
