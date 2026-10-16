@@ -99,6 +99,7 @@ class PreviewProviderBudgetTest(unittest.TestCase):
                 starting_spent = budget.public(MODEL)["accounted_spent_cny"]
                 official = deconstruction_model.create_runtime(deconstruction_model.DeconstructionModelSettings(
                     _env_file=None, api_key="synthetic-only", base_url="https://api.xiaomimimo.com/v1", model=MODEL))
+                official.settings = replace(official.settings, thinking="enabled")
                 official._transport = runtime._transport
                 refused = self.send(official, payload)
                 self.assertEqual(refused.status_code, 409, refused.text)

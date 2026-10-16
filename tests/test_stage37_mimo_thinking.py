@@ -1,4 +1,5 @@
 """Official analysis thinking parameters and full-usage accounting, offline only."""
+from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
@@ -47,7 +48,9 @@ class ThinkingFactoryTest(unittest.TestCase):
                 with patch.object(deconstruction_model, "DeconstructionModelSettings", side_effect=AssertionError("Unexpected config read")):
                     injected = deconstruction_model.create_runtime(config)
                 self.assertEqual(default.settings, injected.settings)
-                self.assertEqual(injected.settings.thinking, "enabled" if host in OFFICIAL else "disabled")
+                # Stage37 trial-4 decision restores the factory's disabled default.
+                self.assertEqual(injected.settings.thinking, "disabled")
+                self.assertEqual(deconstruction_model.preview_max_tokens(injected), 12288)
                 self.assertTrue(injected.settings.targeted_structured_repair)
                 self.assertEqual(injected.settings.temperature, 0.3)
         self.assertIsNone(LLMRuntimeSettings().thinking)
@@ -94,7 +97,7 @@ class ThinkingWireTest(unittest.IsolatedAsyncioTestCase):
                     return 200, raw
 
                 configured = deconstruction_model.create_runtime(config_for("api.xiaomimimo.com"))
-                runtime = LLMRuntime(configured.settings, transport=transport, max_retries=0)
+                runtime = LLMRuntime(replace(configured.settings, thinking="enabled"), transport=transport, max_retries=0)
                 request = repair_fixtures.request()
                 request["max_tokens"] = deconstruction_model.PREVIEW_MAX_TOKENS
                 result = await budgeted_structured(runtime, budget, check_source=lambda: None, **request)
@@ -131,7 +134,8 @@ class PreviewThinkingBudgetTest(unittest.TestCase):
         self.deconstruction.model_budget = budget
         wire = import_fixtures.selector_report(self.payload["report"])
         runtime, calls = repair_fixtures.scripted([repair_fixtures.envelope("{}"), repair_fixtures.envelope(json.dumps(wire))])
-        runtime.settings = deconstruction_model.create_runtime(config_for("api.xiaomimimo.com")).settings
+        runtime.settings = replace(deconstruction_model.create_runtime(config_for("api.xiaomimimo.com")).settings,
+                                   thinking="enabled")
         body = {key: value for key, value in self.payload.items() if key != "report"}
         body["chapter_numbers"] = [1]
         with patch.object(deconstruction_routes, "create_runtime", return_value=runtime), \
@@ -159,7 +163,7 @@ class PreviewThinkingBudgetTest(unittest.TestCase):
         def transport(*args):
             self.fail("Insufficient full-output budget must prevent transport")
 
-        runtime = LLMRuntime(configured.settings, transport=transport, max_retries=0)
+        runtime = LLMRuntime(replace(configured.settings, thinking="enabled"), transport=transport, max_retries=0)
         body = {key: value for key, value in self.payload.items() if key != "report"}
         body["chapter_numbers"] = [1]
         with patch.object(deconstruction_routes, "create_runtime", return_value=runtime):
