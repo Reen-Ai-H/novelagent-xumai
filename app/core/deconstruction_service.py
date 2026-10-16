@@ -885,7 +885,20 @@ class DeconstructionService:
                 if scope_hash is None:
                     raise DeconstructionServiceError("report_scope_invalid", "拆解范围的章节在当前稿本中不完整。", status_code=422)
                 digest = hashlib.sha256(report.model_dump_json().encode("utf-8")).hexdigest()
-                document_id = self._slug(f"analysis-scope:{project_id}:{scope_start}-{scope_end}:{scope_hash}:{digest}")
+                record = self._record(project_id, account_id) or DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
+                # Equal text in a new manuscript version has different chapter/evidence bindings.
+                document_id = self._slug(f"analysis-scope:{project_id}:{source.version_id}:{scope_start}-{scope_end}:{scope_hash}:{digest}")
+                legacy_id = self._slug(f"analysis-scope:{project_id}:{scope_start}-{scope_end}:{scope_hash}:{digest}")
+                legacy = self._document(record, legacy_id)
+                # Keep already-persisted IDs stable for exact same-version retries only.
+                # Never migrate an old document or replace its frozen evidence bindings.
+                if (legacy is not None and legacy.analysis_contract_version == "model.1"
+                        and legacy.status == "completed"
+                        and legacy.project_id == project_id and legacy.account_id == account_id
+                        and legacy.source_version_id == source.version_id
+                        and legacy.scope_start == scope_start and legacy.scope_end == scope_end
+                        and legacy.scope_hash == scope_hash and legacy.report == report):
+                    document_id = legacy_id
                 evidence = []
                 for item in report.evidence:
                     chapter = chapters[item.chapter_number]
@@ -901,7 +914,6 @@ class DeconstructionService:
                         end_offset=len(chapter.content[:start + len(item.quote)].encode("utf-16-le")) // 2,
                         excerpt=item.quote, label="拆解依据",
                     ))
-                record = self._record(project_id, account_id) or DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
                 if self._document(record, document_id) is None:
                     now = self._now()
                     record.documents.append(DeconstructionDocument(
