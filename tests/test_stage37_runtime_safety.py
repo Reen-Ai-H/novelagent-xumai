@@ -18,7 +18,7 @@ from app.agents.llm_runtime import LLMResult, LLMRuntime, LLMRuntimeError, LLMRu
 from app.core.analysis_grounding import GroundedDelta
 from app.core.book_analysis import BookAnalysis
 from app.core.deconstruction_service import DeconstructionService
-from app.core.model_budget import BudgetLedger, MIMO_PRO_PRICING
+from app.core.model_budget import BudgetLedger, MIMO_PRO_PRICING, estimate_structured_call_bound
 from app.core.model_call_budget import DurableModelBudget, budgeted_structured
 from test_stage32_analysis_import import AnalysisImportTest, selector_report
 
@@ -230,9 +230,18 @@ class PreviewUsageSafetyTest(unittest.TestCase):
         self.assertEqual(self.independent.store.load(project).model_dump(mode="json"), old_source)
         count = len(calls)
         self.assertGreaterEqual(count, 3)
-        second, _ = self.prepare()
+        # A preview refusal alone does not imply that a smaller book request
+        # cannot fit: its output cap is 8192 rather than 12288, and prompt edits
+        # change the remaining balance. Establish the no-fit precondition with
+        # a larger synthetic source instead of relying on incidental rounding.
+        second = self._project()
+        book_text = "林舟站在石桥边，" + "晚风从河面吹来，" * 2400 + "他记下了今日的天气。"
+        chapter = self._start_and_save(second, book_text)
+        self._complete_and_process(second, chapter)
         restored = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
                                         model_budget_scope="validation", model_budget_cny=2)
+        lower_bound = estimate_structured_call_bound([{"content": book_text}], 8192, model=MODEL, attempts=1)
+        self.assertGreater(lower_bound, restored.model_budget.public(MODEL)["remaining_cny"])
 
         async def run_book():
             runner = BookAnalysis(restored, lambda: rt)
