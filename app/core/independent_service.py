@@ -26,6 +26,7 @@ from xml.etree import ElementTree
 
 from app.core.independent_store import IndependentStore
 from app.core.chapter_parser import heading_number, parse_document, recognize_heading
+from app.core.chapter_outline import chapter_sections, content_digest
 from app.core.person_recognition import discover_person_names
 from app.core.project_lock import ProjectLockStore, ProjectLockError
 from app.core.project_store import ProjectStore, project_store
@@ -41,6 +42,8 @@ from schemas.independent import (
     ImportChapterPreview,
     ImportPreview,
     ImportPreviewRecord,
+    ImportPreviewProjection,
+    ImportedHeadingStyle,
     IndependentProjectRecord,
     ManuscriptVersion,
     NotificationRecord,
@@ -370,6 +373,10 @@ class IndependentWorkspaceService:
             "title": record.title,
             "active_version_id": record.active_version_id,
             "active_version": active,
+            # Derived solely from the current draft returned in this response.
+            # Never assign this navigation projection to a stored record.
+            "chapter_sections": {chapter.chapter_id: self._chapter_sections(chapter.chapter_id, chapter)
+                                 for chapter in active.chapters} if active is not None else {},
             "versions": [self._version_summary(version) for version in record.versions],
             "pending_imports": [self._public_import(item) for item in record.pending_imports[-MAX_IMPORT_PREVIEWS:]],
             "pending_changes": record.pending_changes,
@@ -394,9 +401,17 @@ class IndependentWorkspaceService:
         }
 
     @staticmethod
-    def _public_import(item: ImportPreviewRecord) -> ImportPreview:
+    def _chapter_sections(chapter_id: str, chapter) -> list[dict]:
+        style = chapter.imported_heading_style
+        levels = style.heading_levels if style and style.content_hash == content_digest(chapter.content) else None
+        return chapter_sections(chapter_id, chapter.content, heading_levels=levels)
+
+    @classmethod
+    def _public_import(cls, item: ImportPreviewRecord) -> ImportPreview:
         payload = item.model_dump(exclude={"raw_text"})
-        return ImportPreview.model_validate(payload)
+        payload["chapter_sections"] = {chapter.chapter_number: cls._chapter_sections(f"{item.preview_id}:{chapter.chapter_number}", chapter)
+                                       for chapter in item.chapters}
+        return ImportPreviewProjection.model_validate(payload)
 
     def _set_failure(
         self,
@@ -429,9 +444,14 @@ class IndependentWorkspaceService:
 
     @staticmethod
     def _decode_docx(content: bytes) -> str:
+        return IndependentWorkspaceService._decode_docx_structure(content)[0]
+
+    @staticmethod
+    def _decode_docx_structure(content: bytes) -> tuple[str, dict[int, int]]:
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as archive:
                 xml = archive.read("word/document.xml")
+                styles_xml = archive.read("word/styles.xml") if "word/styles.xml" in archive.namelist() else None
         except (KeyError, zipfile.BadZipFile) as exc:
             raise ValueError("DOCX 文件结构无法读取，请确认文件没有损坏。") from exc
 
@@ -442,6 +462,36 @@ class IndependentWorkspaceService:
 
         namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
         paragraphs: list[str] = []
+        levels: dict[int, int] = {}
+        styles = {}
+        if styles_xml:
+            try:
+                styles_root = ElementTree.fromstring(styles_xml)
+            except ElementTree.ParseError as exc:
+                raise ValueError("DOCX 标题样式无法解析，请重新导出文件。") from exc
+            styles = {node.get(f"{namespace}styleId"): node for node in styles_root.findall(f"{namespace}style")}
+
+        def value(node, child):
+            element = node.find(child) if node is not None else None
+            return element.get(f"{namespace}val") if element is not None else None
+
+        def outline_value(raw):
+            return int(raw) + 1 if raw is not None and raw.isdigit() and 0 <= int(raw) < 9 else None
+
+        def style_level(style_id):
+            seen = set()
+            while style_id and style_id not in seen:
+                seen.add(style_id)
+                style = styles.get(style_id)
+                raw = value(style, f"{namespace}pPr/{namespace}outlineLvl")
+                if raw is not None:
+                    return outline_value(raw)
+                label = value(style, f"{namespace}name") or style_id
+                match = re.fullmatch(r"(?:heading|标题)\s*([1-9])", label, re.I)
+                if match:
+                    return int(match.group(1))
+                style_id = value(style, f"{namespace}basedOn")
+            return None
 
         def visit(node: ElementTree.Element, parts: list[str] | None = None) -> None:
             if node.tag == f"{namespace}p":
@@ -452,6 +502,10 @@ class IndependentWorkspaceService:
                 for child in node:
                     visit(child, own_parts)
                 paragraphs[slot] = "".join(own_parts)
+                raw = value(node, f"{namespace}pPr/{namespace}outlineLvl")
+                level = outline_value(raw) if raw is not None else style_level(value(node, f"{namespace}pPr/{namespace}pStyle"))
+                if level and "\n" not in paragraphs[slot] and "\r" not in paragraphs[slot]:
+                    levels[slot] = level
             elif parts is not None and node.tag in {f"{namespace}t", f"{namespace}tab", f"{namespace}br", f"{namespace}cr"}:
                 parts.append((node.text or "") if node.tag == f"{namespace}t" else
                              "\t" if node.tag == f"{namespace}tab" else "\n")
@@ -460,7 +514,13 @@ class IndependentWorkspaceService:
                     visit(child, parts)
 
         visit(root)
-        return "\n".join(paragraphs)
+        heading_positions = {}
+        position = 0
+        for index, paragraph in enumerate(paragraphs):
+            if index in levels:
+                heading_positions[position] = levels[index]
+            position += len(paragraph) + 1
+        return "\n".join(paragraphs), heading_positions
 
     @staticmethod
     def _chinese_number(value: str) -> int | None:
@@ -472,10 +532,12 @@ class IndependentWorkspaceService:
         return heading.number if heading and heading.kind == "chapter" else None
 
     @classmethod
-    def _parse_text(cls, filename: str, text: str) -> tuple[str, list[ImportChapterPreview], list[str]]:
-        parsed = parse_document(filename, text)
+    def _parse_text(cls, filename: str, text: str, *, heading_levels: dict[int, int] | None = None) -> tuple[str, list[ImportChapterPreview], list[str]]:
+        parsed = parse_document(filename, text, heading_levels=heading_levels)
         chapters = [ImportChapterPreview(chapter_number=item.chapter_number, title=item.title,
-                                          content=item.content, word_count=cls._word_count(item.content))
+                                          content=item.content, word_count=cls._word_count(item.content),
+                                          imported_heading_style=ImportedHeadingStyle(content_hash=content_digest(item.content), heading_levels=dict(item.heading_levels))
+                                          if item.heading_levels else None)
                     for item in parsed.chapters]
         return parsed.title, chapters, list(parsed.fragments)
 
@@ -524,7 +586,7 @@ class IndependentWorkspaceService:
             )
 
         try:
-            text = self._decode_docx(content) if suffix == "docx" else raw_text
+            text, heading_levels = self._decode_docx_structure(content) if suffix == "docx" else (raw_text, {})
             if not text.strip():
                 return self._set_failure(
                     record,
@@ -534,7 +596,7 @@ class IndependentWorkspaceService:
                     raw_text=text,
                     error_message="文件中没有可识别的正文或有效章节，原始输入已保留，请补充正文后重新上传。",
                 )
-            title, chapters, fragments = self._parse_text(filename, text)
+            title, chapters, fragments = self._parse_text(filename, text, heading_levels=heading_levels)
             if not chapters:
                 return self._set_failure(
                     record,
@@ -598,6 +660,7 @@ class IndependentWorkspaceService:
                 formal_title=item.title,
                 content=item.content,
                 formal_content=item.content,
+                imported_heading_style=item.imported_heading_style,
                 server_revision=1,
                 word_count=item.word_count,
                 formal_word_count=item.word_count,

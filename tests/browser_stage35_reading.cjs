@@ -101,6 +101,8 @@ async function capture(page,width,label,firstSelector) {
 }
 async function verify(browser,fixture,width) {
   const context=await browser.newContext({storageState:fixture.storageState,viewport:{width,height:900},reducedMotion:'reduce'});
+  // Full-list regression; default diagrams have their own stage36 browser suite.
+  await context.addInitScript(()=>sessionStorage.setItem('xumai-reading-view','list'));
   const page=await context.newPage();const errors=[],metrics=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(['warning','error'].includes(m.type()))errors.push(m.text());});
   page.on('request',r=>{assert.equal(new URL(r.url()).origin,origin);assert.ok(!r.url().endsWith('/book/start'));});

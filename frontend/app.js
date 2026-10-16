@@ -18,6 +18,7 @@
     editorLoadToken: 0,
     editorMode: "independent",
     activeChapterId: null,
+    sectionNavigation: false,
     editorBuffer: "",
     editorTitleBuffer: "",
     editorRevision: 0,
@@ -900,13 +901,17 @@
     const region = $("#importPreviewRegion");
     if (!region) return;
     const failure = preview.status === "failed";
+    const sectionOutline = chapter => {
+      const sections=window.XumaiChapterSections?.read(preview.chapter_sections,chapter.chapter_number,chapter.content) || [];
+      return sections.length ? `<div class="import-section-outline"><span>章内小节 · ${sections.length}（不拆分章节）</span><ol>${sections.map(s=>`<li><strong>${escapeHtml(s.title)}</strong><small>${escapeHtml(window.XumaiChapterSections.labels[s.kind])}</small></li>`).join('')}</ol></div>` : '';
+    };
     region.innerHTML = `
       <div class="import-preview-card ${failure ? "is-failed" : ""}">
         <div class="import-preview-head"><div><span class="eyebrow">${failure ? "导入失败，输入已保留" : "导入预览"}</span><strong>${escapeHtml(preview.filename)}</strong></div><span class="mono">${escapeHtml(preview.format || "未知格式")}</span></div>
         ${failure ? `<p class="import-error-text">${escapeHtml(preview.error_message || "文件无法识别，请重新选择。")}</p>` : `
           <div class="import-facts"><span><strong>${preview.chapter_count}</strong> 章</span><span><strong>${Number(preview.total_word_count || 0).toLocaleString("zh-CN")}</strong> 字</span><span><strong>${preview.unrecognized_fragments?.length || 0}</strong> 段待确认</span></div>
           <p class="import-review-note">展开章节核对正文。未归类片段不会进入正式正文；如需保留，请在原文件中补上章节标题，再重新选择文件。</p>
-          <div class="import-chapter-list">${(preview.chapters || []).map((chapter) => `<details class="import-chapter-preview"><summary><span class="mono">第 ${chapter.chapter_number} 章</span><strong>${escapeHtml(chapter.title)}</strong><span>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字</span></summary><div class="import-chapter-body" tabindex="0" aria-label="${escapeHtml(chapter.title)}的导入正文">${escapeHtml(chapter.content)}</div></details>`).join("")}</div>
+          <div class="import-chapter-list">${(preview.chapters || []).map((chapter) => `<details class="import-chapter-preview"><summary><span class="mono">第 ${chapter.chapter_number} 章</span><strong>${escapeHtml(chapter.title)}</strong><span>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字</span></summary>${sectionOutline(chapter)}<div class="import-chapter-body" tabindex="0" aria-label="${escapeHtml(chapter.title)}的导入正文">${escapeHtml(chapter.content)}</div></details>`).join("")}</div>
           ${(preview.unrecognized_fragments || []).length ? `<details class="unrecognized-fragments" open><summary>未归类片段 · ${preview.unrecognized_fragments.length}</summary>${preview.unrecognized_fragments.map((fragment) => `<p>${escapeHtml(fragment)}</p>`).join("")}</details>` : ""}
           <label class="book-import-choice"><input id="analyzeWholeImport" type="checkbox" /> 导入后查看基础索引（免费，无模型）</label><div class="import-confirm-actions"><button class="button button-outline" type="button" data-action="open-import">重新选择文件</button><button class="button button-primary" type="button" data-action="confirm-import" data-preview-id="${escapeHtml(preview.preview_id)}">确认预览并写入正式正文 <span aria-hidden="true">→</span></button></div>`}
       </div>`;
@@ -1000,6 +1005,7 @@
         }).catch(() => { if (state.workspace === workspace) { state.editorAnalysis = null; renderArchiveSummary(workspace.archive); } });
       }
       state.editorMode = workspace.mode || state.editorMode || "independent";
+      setEditorEntryMode(state.editorMode);
       document.querySelector('[data-action="show-archive"]').classList.toggle("is-hidden", state.editorMode !== "ai_assisted");
       state.activeArchive = workspace.archive;
       if (!state.editorDirty) state.editorConflict = null;
@@ -1029,10 +1035,56 @@
   }
 
   function renderChapterList(version) {
-    elements.chapterList.innerHTML = version.chapters.map((chapter) => `
+    elements.chapterList.innerHTML = version.chapters.map((chapter) => {
+      const sections=window.XumaiChapterSections?.read(state.workspace?.chapter_sections,chapter.chapter_id,chapter.content) || [];
+      return `<div class="chapter-directory-entry">
       <button class="chapter-list-item ${chapter.chapter_id === state.activeChapterId ? "is-active" : ""} ${chapter.status === "failed" ? "is-failed" : ""}" type="button" data-action="select-chapter" data-chapter-id="${escapeHtml(chapter.chapter_id)}" ${chapter.chapter_id === state.activeChapterId ? 'aria-current="page"' : ""}>
         <span class="chapter-list-number mono">${String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapter.status === "ready" ? "已分析" : chapter.status === "analyzing" ? "分析中" : chapter.status === "failed" ? "分析失败" : "写作中")}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
-      </button>`).join("");
+      </button>${sections.length ? `<details class="chapter-section-list" ${chapter.chapter_id===state.activeChapterId?'open':''}><summary>章内小节 · ${sections.length}</summary><ol>${sections.map(s=>`<li><button type="button" data-action="select-section" data-chapter-id="${escapeHtml(chapter.chapter_id)}" data-section-id="${escapeHtml(s.section_id)}"><span>${escapeHtml(s.title)}</span><small>${escapeHtml(window.XumaiChapterSections.labels[s.kind])}</small></button></li>`).join('')}</ol></details>` : ''}</div>`;
+    }).join("");
+    const status=document.createElement('p');status.className='chapter-section-status';status.setAttribute('role','status');status.id='chapterSectionStatus';elements.chapterList.append(status);
+    updateSectionStatus();
+  }
+
+  function setEditorEntryMode(mode) {
+    const independent=mode!=='ai_assisted';
+    elements.independentScreen.dataset.editorMode=independent?'independent':'ai_assisted';
+    document.querySelectorAll('[data-action="open-version-history"],#openVersionButton').forEach(button=>button.classList.toggle('is-hidden',independent));
+    $('#openVersionButton').closest('.chapter-column-foot')?.classList.toggle('is-hidden',independent);
+  }
+
+  function updateSectionStatus(message) {
+    const status=$('#chapterSectionStatus');if(!status)return;
+    status.textContent=message ?? (state.editorDirty || state.editorSaving ? '正文有修改。点击小节将先保存，再更新目录定位。' : '小节只定位正文，不新建章节。');
+    elements.chapterList.querySelectorAll('[data-action="select-section"]').forEach(button=>button.disabled=state.sectionNavigation);
+  }
+
+  async function selectEditorSection(chapterId,sectionId) {
+    if(state.sectionNavigation)return;
+    state.sectionNavigation=true;updateSectionStatus('正在保存并核对小节位置…');
+    try {
+      const needsRefresh=state.editorDirty || state.editorSaving;
+      if(!(await flushPendingSave()) || state.editorDirty || state.editorConflict || state.editorSaveFailed) {
+        updateSectionStatus('尚未保存成功，未使用旧位置。请处理保存状态后再定位。');return;
+      }
+      if(needsRefresh) {
+        await loadIndependentWorkspace(state.editorProjectId);
+        if(state.editorDirty || state.editorSaving){updateSectionStatus('正文再次变化，请保存后重新选择小节。');return;}
+      }
+      await selectEditorChapter(chapterId);
+      if(state.activeChapterId!==chapterId || state.editorDirty)return;
+      const chapter=activeEditorVersion()?.chapters.find(c=>c.chapter_id===chapterId);
+      const section=window.XumaiChapterSections?.read(state.workspace?.chapter_sections,chapterId,chapter?.content).find(s=>s.section_id===sectionId);
+      if(!section || !window.XumaiChapterSections.locate(elements.chapterEditor,section,chapter.content,{caret:true})) {
+        updateSectionStatus('小节位置已变化。请从更新后的目录重新选择。');return;
+      }
+      updateSectionStatus(`已定位：${section.title}`);
+    } catch(error) {
+      updateSectionStatus(error.message || '目录暂时读不到，请重试；未使用旧位置。');
+    } finally {
+      state.sectionNavigation=false;
+      elements.chapterList.querySelectorAll('[data-action="select-section"]').forEach(button=>button.disabled=false);
+    }
   }
 
   function renderArchiveSummary(archive, selectedChapterNumber = null) {
@@ -1077,6 +1129,7 @@
     elements.editorWorkspaceContent.classList.remove("is-hidden");
     elements.editorProjectTitle.textContent = workspace.title || "—";
     const aiEditor = workspace.mode === "ai_assisted" || state.editorMode === "ai_assisted";
+    setEditorEntryMode(aiEditor?'ai_assisted':'independent');
     elements.editorModeLabel.textContent = aiEditor ? "AI 辅助写作" : "独立创作";
     elements.writingModeNote.textContent = aiEditor ? "AI 辅助写作 · 唯一正式正文" : "独立创作 · 正式正文";
     const selectedByLocation = chooseActiveChapter(version);
@@ -1139,6 +1192,7 @@
     state.editorBuffer = elements.chapterEditor.value;
     state.editorTitleBuffer = elements.chapterTitleInput.value;
     state.editorDirty = true; if (state.workspace?.mode !== "ai_assisted") { state.editorAnalysis = null; renderArchiveSummary(state.activeArchive); }
+    updateSectionStatus();
     state.editorChangeToken += 1;
     state.editorConflict = null;
     state.editorSaveFailed = false;
@@ -1159,6 +1213,9 @@
 
   async function flushPendingSave({ keepalive = false } = {}) {
     window.clearTimeout(state.saveTimer);
+    // A background lifecycle event cannot resolve a failed save or conflict.
+    // Keep the visible buffer and let the author explicitly retry instead.
+    if (keepalive && (state.editorSaveFailed || state.editorConflict)) return false;
     while (state.editorDirty || state.editorSaving) {
       if (state.savePromise) {
         const completed = await state.savePromise;
@@ -3342,7 +3399,7 @@
     state.editorConflict = null;
     syncActiveChapterUrl(chapter.chapter_id);
     renderEditorWorkspace();
-    const content = elements.chapterEditor.value || "";
+    const content = chapter.content || "";
     const validStart = sourceStillMatches
       && evidence.offsetUnit === DECONSTRUCTION_OFFSET_UNIT
       && evidence.charStart !== null
@@ -3351,8 +3408,12 @@
     const validEnd = validStart && evidence.charEnd !== null && evidence.charEnd >= evidence.charStart && evidence.charEnd <= content.length;
     const excerptMatches = validEnd && deconstructionEvidenceExcerptMatches(evidence, content);
     if (excerptMatches) {
-      elements.chapterEditor.focus({ preventScroll: true });
-      elements.chapterEditor.setSelectionRange(evidence.charStart, evidence.charEnd);
+      if (window.XumaiChapterSections) {
+        window.XumaiChapterSections.locate(elements.chapterEditor,{start:evidence.charStart,end:evidence.charEnd},content);
+      } else if (elements.chapterEditor.value === content) {
+        elements.chapterEditor.focus({ preventScroll: true });
+        elements.chapterEditor.setSelectionRange(evidence.charStart, evidence.charEnd);
+      }
     } else {
       elements.chapterEditor.focus({ preventScroll: true });
     }
@@ -3854,6 +3915,7 @@
     if (action === "open-import") elements.importFileInput?.click();
     if (action === "confirm-import") confirmImport(actionNode.dataset.previewId);
     if (action === "select-chapter") selectEditorChapter(actionNode.dataset.chapterId);
+    if (action === "select-section") void selectEditorSection(actionNode.dataset.chapterId,actionNode.dataset.sectionId);
     if (action === "save-editor") {
       if (state.workspace?.initialized && !state.editorReadOnly && await flushPendingSave()) showToast("正文已保存。");
     }

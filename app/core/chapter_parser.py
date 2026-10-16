@@ -6,7 +6,9 @@ in the title. Bare numbered prose is deliberately not a chapter signal.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
+from collections.abc import Mapping
 from pathlib import Path
 import re
 
@@ -14,6 +16,26 @@ import re
 _DIGITS = dict(zip("零〇一二两三四五六七八九", (0, 0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9)))
 _UNITS = {"十": 10, "百": 100, "千": 1000}
 _NUM = r"[0-9０-９零〇一二两三四五六七八九十百千]+"
+
+
+def utf16_length(text: str) -> int:
+    return sum(2 if ord(char) > 0xffff else 1 for char in text)
+
+
+def scan_code_fence(line: str, active: tuple[str, int] | None) -> tuple[tuple[str, int] | None, bool]:
+    """Shared fence state for imports and navigation; bool includes delimiters.
+
+    Opening info strings are allowed. Only a same-character marker at least
+    as long as the opener, followed entirely by whitespace, closes the block.
+    """
+    marker = re.match(r"^\s*(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
+    if active is not None:
+        if marker and marker[1][0] == active[0] and len(marker[1]) >= active[1] and not marker[2].strip():
+            return None, True
+        return active, True
+    if marker and not (marker[1][0] == "`" and "`" in marker[2]):
+        return (marker[1][0], len(marker[1])), True
+    return None, False
 
 
 def heading_number(value: str) -> int | None:
@@ -56,6 +78,7 @@ class ParsedChapter:
     chapter_number: int
     title: str
     content: str
+    heading_levels: tuple[tuple[int, int], ...] = ()  # Imported style, UTF-16 position.
 
 
 @dataclass(frozen=True)
@@ -70,6 +93,7 @@ def recognize_heading(line: str) -> Heading | None:
     markdown = re.match(r"^#{1,6}\s+(.+?)\s*#*\s*$", cleaned)
     if markdown:
         cleaned = markdown.group(1).strip()
+    level = len(line.strip().split()[0]) if markdown else 0
     if re.fullmatch(r"目录|目次|contents|table of contents|正文", cleaned, re.I):
         return Heading(cleaned, "body" if cleaned == "正文" else "toc")
     # A prose sentence mentioning 第X章/回 must not consume the whole line.
@@ -85,12 +109,13 @@ def recognize_heading(line: str) -> Heading | None:
         # Punctuation belongs to the title; sentence continuation is decided
         # by grammar after the chapter marker, not by a punctuation blacklist.
         if number is not None and number > 0 and not prose_tail:
-            return Heading(cleaned, "volume" if match.group(2) == "卷" else "chapter", number)
+            kind = {"卷": "volume", "节": "section"}.get(match.group(2), "chapter")
+            return Heading(cleaned, kind, number, level)
     match = re.match(rf"^(chapter|volume|book)\s+({_NUM})(?=$|[\s:：.\-])", cleaned, re.I)
     if match:
         number = heading_number(match.group(2))
         if number is not None and number > 0:
-            return Heading(cleaned, "chapter" if match.group(1).lower() == "chapter" else "volume", number)
+            return Heading(cleaned, "chapter" if match.group(1).lower() == "chapter" else "volume", number, level)
     match = re.match(rf"^卷\s*({_NUM})(.*)$", cleaned)
     if match and (number := heading_number(match.group(1))):
         return Heading(cleaned, "volume", number)
@@ -99,9 +124,9 @@ def recognize_heading(line: str) -> Heading | None:
         tail = special.group(2)
         continuation = re.match(r"^(?:还|已经|正在|没有|并未|尚未|不再|渐渐|传来|响起|里|中|的)", tail)
         if not continuation:
-            return Heading(cleaned, "special")
+            return Heading(cleaned, "special", level=level)
     if re.match(r"^(prologue|epilogue)(?=$|[\s:：\-])", cleaned, re.I):
-        return Heading(cleaned, "special")
+        return Heading(cleaned, "special", level=level)
     if markdown:
         match = re.match(rf"^({_NUM})[、.．:：]?\s+", cleaned)
         number = heading_number(match.group(1)) if match else None
@@ -110,10 +135,25 @@ def recognize_heading(line: str) -> Heading | None:
     return None
 
 
-def parse_document(filename: str, text: str) -> ParsedDocument:
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+def parse_document(filename: str, text: str, *, heading_levels: Mapping[int, int] | None = None) -> ParsedDocument:
+    # Newlines are source content, including CRLF. DOCX hints use code-point
+    # positions in the decoded source and never insert Markdown into the text.
+    normalized = text
     lines = normalized.splitlines(keepends=True)
     headings = [recognize_heading(line) for line in lines]
+    positions = []
+    offset = 0
+    fence = None
+    for i, line in enumerate(lines):
+        positions.append(offset)
+        fence, in_code = scan_code_fence(line, fence)
+        if in_code:
+            headings[i] = None
+        if heading_levels and offset in heading_levels and line.strip():
+            heading = headings[i]
+            headings[i] = Heading(line.rstrip("\r\n"), heading.kind if heading else "markdown",
+                                  heading.number if heading else None, heading_levels[offset])
+        offset += len(line)
     next_nonblank_lines: list[int | None] = [None] * len(lines)
     following = None
     for i in range(len(lines) - 1, -1, -1):
@@ -160,22 +200,40 @@ def parse_document(filename: str, text: str) -> ParsedDocument:
             in_toc = False
 
     first_chapter = next((i for i, h in enumerate(headings)
-                          if h and h.kind in {"chapter", "special", "markdown"} and i not in toc_lines), len(lines))
-    structured = any(h and h.kind in {"chapter", "special"} and i not in toc_lines
-                     for i, h in enumerate(headings))
-    markdown_level = min((h.level for i, h in enumerate(headings)
-                          if h and h.kind == "markdown" and i not in toc_lines), default=0)
+                          if h and h.kind in {"chapter", "section", "special", "markdown"} and i not in toc_lines), len(lines))
+    narrative = [h for i, h in enumerate(headings)
+                 if h and h.kind in {"chapter", "special", "section", "markdown"} and i not in toc_lines]
+    numbered = [h for h in narrative if h.kind in {"chapter", "special"}]
+    # Numbered chapters anchor the chapter layer (e.g. H2 under a book H1).
+    # Repeated shallower declared headings establish an outer chapter layer;
+    # numbered descendants then stay inside those chapters. A lone shallower
+    # heading remains a book wrapper rather than displacing the chapter layer.
+    root_level = min((h.level for h in numbered), default=min((h.level for h in narrative if h.level), default=0))
+    if root_level:
+        declared_levels = Counter(h.level for h in narrative if h.level)
+        root_level = min((level for level, count in declared_levels.items()
+                          if level < root_level and count > 1), default=root_level)
+
+    def chapter_boundary(heading: Heading) -> bool:
+        if heading.kind not in {"chapter", "special", "section", "markdown"}:
+            return True
+        if root_level:
+            return heading.level == root_level
+        if numbered:
+            return heading.kind in {"chapter", "special"}
+        return heading.level == 0
+
     boundaries = [(i, h) for i, h in enumerate(headings)
                   if h and (i not in toc_lines or h.kind == "toc")
                   and (h.kind != "body" or i < first_chapter or i in toc_body_markers)
-                  and (h.kind != "markdown" or (not structured and h.level == markdown_level))]
+                  and chapter_boundary(h)]
     fragments: list[str] = []
-    parsed: list[tuple[Heading, str]] = []
+    parsed: list[tuple[Heading, str, int]] = []
     if not boundaries:
         if toc_lines:
             fragments.append(normalized)
         elif normalized.strip():
-            parsed.append((Heading(Path(filename).stem or "第一章", "chapter", 1), normalized))
+            parsed.append((Heading(Path(filename).stem or "第一章", "chapter", 1), normalized, 0))
     else:
         preamble = "".join(lines[:boundaries[0][0]])
         if preamble:
@@ -186,13 +244,16 @@ def parse_document(filename: str, text: str) -> ParsedDocument:
             if heading.kind in {"volume", "body", "toc"} or not body.strip():
                 fragments.append("".join(lines[start:end]))
             else:
-                parsed.append((heading, body))
-    numbers = [heading.number for heading, _ in parsed]
+                parsed.append((heading, body, positions[start] + len(lines[start])))
+    numbers = [heading.number for heading, _, _ in parsed]
     ordered = (all(n is not None and n > 0 for n in numbers)
                and all(a < b for a, b in zip(numbers, numbers[1:]))
                and not any(h.kind in {"volume", "special"} for _, h in boundaries))
-    chapters = tuple(ParsedChapter(heading.number if ordered else index, heading.title, content)
-                     for index, (heading, content) in enumerate(parsed, 1))
+    chapters = tuple(ParsedChapter(heading.number if ordered else index, heading.title, content,
+                                   tuple((utf16_length(content[:position - start]), level)
+                                         for position, level in (heading_levels or {}).items()
+                                         if start <= position < start + len(content)))
+                     for index, (heading, content, start) in enumerate(parsed, 1))
     title = Path(filename).stem or (chapters[0].title if chapters else "未命名导入")
     if len(chapters) == 1:
         title = chapters[0].title

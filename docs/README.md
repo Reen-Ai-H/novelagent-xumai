@@ -1,14 +1,16 @@
 # 叙脉文档索引
 
-> 当前实施更新为 [阶段 35 · 独立创作体验与识别优化](goals/STAGE_35_INDEPENDENT_EXPERIENCE.md)。用户确认的管理方式、范围与协作见 DECISIONS 顶部；阶段 34 保留为继承基线，真实内容未通过的结论仍待验证。
+2026-10-16 网页端接手见 [CODEX_WEB_HANDOFF](CODEX_WEB_HANDOFF.md)：当前最新进度在阶段36分支，尚未合并到 `main`；含基线、环境、验证及本机私有材料边界。
+
+> 当前实施为 [阶段 36 · 工作台减法与结构化阅读](goals/STAGE_36_VISUAL_READING.md)，落实Notion验收反馈：人物/剧情图形阅读、章内目录、隐藏历史恢复入口。阶段35是继承基线；用户认可主配区分，不代表界面和导入已验收。研究依据见[图形阅读设计](research/STAGE_36_VISUAL_READING_2026-10-13.md)。
 
 阶段 35 的外部机制参考、真实问题与受控试跑口径见 [识别与阅读组织](research/STAGE_35_RECOGNITION_AND_READING_2026-10-13.md)。
 
-> 当前实施为 [阶段 34 · MiMo 与独立创作](goals/STAGE_34_MIMO_INDEPENDENT.md)。用户已授权真实研发及前 10 章样本验证；进度与实际门禁见 [PROGRESS](../PROGRESS.md) 和 [BLOCKED](../BLOCKED.md)。下方阶段 32 数字是历史基线，不是阶段 34 验收结果。
+模型接入的未完成目标继续见 [阶段34](goals/STAGE_34_MIMO_INDEPENDENT.md)；当前进度与实际门禁统一见 [PROGRESS](../PROGRESS.md) 和 [BLOCKED](../BLOCKED.md)。
 
 2026-09-23 新增 [完整平台演进与架构评估](research/PLATFORM_EVOLUTION_ASSESSMENT_2026-09-23.md)：区分最新主线与未合并拆解候选，含竞品研究复核、隔离测试、定向重构建议与完整平台交付路线。该报告不是新的产品决策或功能验收结论；其中标明本页旧状态与远端实际状态的差异。
 
-> 2026-09-13 最新目标：保持轻量，复用已有拆解与平台，先做同源内容样例，再最小集成和成本试跑，最后整书收口。主要人物、大剧情、主要明暗线与必要节奏说明质量达标即可；地点先辅助剧情，不照搬竞品功能，不要求六视角全部建齐。见 [现役阶段任务](goals/STAGE_32_DECONSTRUCTION_DEPTH.md)、[路线图](ROADMAP.md)和[机制调研](research/NOVEL_GENERATION_PRODUCT_RESEARCH_2026-09-13.md)。
+轻量范围沿用2026-09-13决定：优先主要人物、大剧情、主要明暗线与必要节奏，不照搬竞品、不要求六视角全部建齐。来源见 [阶段32目标](goals/STAGE_32_DECONSTRUCTION_DEPTH.md)和[机制调研](research/NOVEL_GENERATION_PRODUCT_RESEARCH_2026-09-13.md)。
 
 这里保存跨会话仍然有效的产品知识。聊天记录、临时计划和历史 README 不再作为现役产品事实来源。
 
@@ -46,16 +48,15 @@
 
 ## 当前状态
 
-- 文档收口日期：2026-09-05；阶段 32 深度作品拆解独立审计 P0/P1/P2/P3 均为 0。
-- GitHub `main` 是当前 V1 开发基线；阶段 32 候选为 204 tests、0 failed、0 skipped，Windows/Ubuntu CI 已通过。
-- 当前 OpenAPI 为 58 paths / 61 operations，旧 `/novel` 为 16 paths / 19 operations；真实 DeepSeek 三章链路已验证。
-- 独立作品拆解已接入总览与人物、剧情、伏笔、章节节奏、读者体验、文笔技法六视角，支持七种 canonical 状态、服务端后台恢复、当前/历史证据回链和账户隔离。
+- 2026-10-15：阶段36图形阅读与章内目录已完成自测和独立复核，Notion同步完成，保持 [Draft PR #13](https://github.com/Reen-Ai-H/novelagent-xumai/pull/13)。本地可编辑验收副本不覆盖原运行目录；未合并、未部署。
+- 代码、运行态、规则与文档状态见 [交付矩阵](CLOSEOUT_MATRIX.md)；准确测试数字与 SHA 只在 [PROGRESS](../PROGRESS.md) 维护，不能沿用旧阶段数字。
+- 独立作品拆解保留来源校验、后台恢复、证据回链和账户隔离，新增图形阅读与只读章内目录；图不编造关系，目录不改正式章。
 - 项目外离线质量门 Q2 已验证：36 例脱敏黄金集、宏 F1=1.000、semantic-needed 覆盖率 1.000、14 项测试通过、外部请求/Token/费用为 0。真实生成质量增益、产品集成和 Q3 仍 pending。
 - 文学质量阶段 23B 为 C；本开发版未部署生产，也不提供正式支付、管理员或云同步。
 - A、B、C 共 21 张探索图保留；A 是现役实现基准，B/C 只作后续灵感参考。
 - Windows 迁移步骤见 `WINDOWS_MIGRATION.md`；CI 覆盖 Ubuntu/Windows、Python 3.12 和 Node LTS。
 - 后续每个阶段必须在独立 `codex/stage-<编号>-<主题>` 分支提交并推送；需复核的阶段保持 Draft PR，通过后再合并主线。
-- 下一阶段及长期顺序以 `ROADMAP.md` 为唯一入口；阶段 32 合并后进入阶段 33“独立创作体验收口”，不得仅凭聊天记录推断范围。
+- 下一步及长期顺序以 `ROADMAP.md` 为唯一入口，不沿用历史阶段的默认排期。
 
 ## 给新智能体的最短入口
 

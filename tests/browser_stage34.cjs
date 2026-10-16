@@ -161,6 +161,7 @@ async function checkModelReport(page, context, projectId, width, layouts) {
 
 async function oneViewport(browser, width) {
   const context = await browser.newContext({viewport: {width, height: 900}, reducedMotion: 'reduce'});
+  await context.addInitScript(()=>sessionStorage.setItem('xumai-reading-view','list'));
   const page = await context.newPage();
   const rawDiagnostics = [];
   const observedHttpResponses = [];
@@ -269,7 +270,12 @@ async function oneViewport(browser, width) {
     const failureProjectId = new URL(failurePage.url()).pathname.split('/').pop();
     await failurePage.locator('[data-action="start-blank"]').click();
     await failurePage.locator('#chapterEditor').waitFor({state: 'visible'});
+    await failurePage.waitForLoadState('networkidle');
     const failureChapterId = new URL(failurePage.url()).searchParams.get('chapter');
+    let expiredDraftRequests=0;
+    failurePage.on('request',request=>{
+      if(request.method()==='PUT' && request.url().endsWith(`/chapters/${failureChapterId}/draft`))expiredDraftRequests++;
+    });
     await failurePage.evaluate(async () => {
       const response = await fetch('/api/auth/logout', {method: 'POST', credentials: 'same-origin'});
       if (!response.ok) throw new Error(`logout failed: ${response.status}`);
@@ -293,9 +299,14 @@ async function oneViewport(browser, width) {
     await failurePage.locator('#emailInput').fill(failureEmail);
     await failurePage.locator('#emailSubmitButton').click();
     await failurePage.waitForURL('**/library');
+    await failurePage.waitForLoadState('networkidle');
     await failurePage.goto(`${origin}/independent/${failureProjectId}?chapter=${failureChapterId}`);
     await failurePage.locator('#chapterEditor').waitFor({state: 'visible'});
+    // Workspace rendering also starts the real notification read. Finish it
+    // before closing the tab so the test does not abort its own HTTP request.
+    await failurePage.waitForLoadState('networkidle');
     assert.notEqual(await failurePage.locator('#chapterEditor').inputValue(), unsavedAfterExpiry);
+    assert.equal(expiredDraftRequests,1,'Leaving a failed save must not silently retry it in the background');
     await failureContext.close();
 
     // A second real browser tab advances the server revision. The stale first
@@ -423,7 +434,10 @@ async function oneViewport(browser, width) {
     // 保存失败 remains a visible save-state boundary when a real worker rejects a draft.
     let versionCount = 0;
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      if (!(await page.locator('#versionHistoryDialog[open]').count())) await page.locator('#openVersionButton').click();
+      // Stage36 removes this ordinary independent entry. Exercise the retained
+      // compatibility controller/API explicitly, not as a visible product flow.
+      assert.equal(await page.locator('#openVersionButton').isVisible(),false);
+      if (!(await page.locator('#versionHistoryDialog[open]').count())) await page.locator('#openVersionButton').evaluate(button=>button.click());
       versionCount = await page.locator('.version-history-item').count();
       if (versionCount >= 2) break;
       await page.locator('#closeVersionHistoryButton').click();
@@ -432,6 +446,12 @@ async function oneViewport(browser, width) {
       await page.locator('#chapterEditor').waitFor({state: 'visible'});
     }
     assert.ok(versionCount >= 2, `rebuild did not create history: ${versionCount}`);
+    const preservedVersionId=await page.locator('.version-history-item:not(.is-active) [data-action="preview-version"]').first().getAttribute('data-version-id');
+    const preservedPreview=await context.request.get(`${origin}/api/independent/projects/${projectId}/versions/${preservedVersionId}/preview`);
+    assert.equal(preservedPreview.status(),200);const preservedHistory=await preservedPreview.json();
+    assert.equal(preservedHistory.read_only,true,'Hidden ordinary entry must not remove read-only history API');
+    assert.ok(preservedHistory.version.chapters.length>=2);
+    assert.equal(preservedHistory.version.chapters[0].content,firstChapter,'Historical source remains byte-for-byte unchanged');
     await page.locator('.version-history-item:not(.is-active) [data-action="preview-version"]').first().click();
     await page.locator('#versionPreviewTitle').waitFor({state: 'visible'});
     assert.ok(await page.locator('.version-preview-chapter').count() >= 2);
@@ -460,6 +480,9 @@ async function oneViewport(browser, width) {
     await page.locator('#chapterEditor').waitFor({state: 'visible'});
     page.off('request', restoreRequestListener);
     assert.equal(restoreRequests, 1, `rapid restore confirmation must create one request, got ${restoreRequests}`);
+    const retained=await context.request.get(`${origin}/api/independent/projects/${projectId}/versions/${preservedVersionId}/preview`);
+    assert.equal(retained.status(),200);const retainedHistory=await retained.json();
+    assert.equal(retainedHistory.read_only,true);assert.deepEqual(retainedHistory.version,preservedHistory.version,'Restore creates a new current version, never overwrites the historical source');
     assert.equal(await page.locator('#restoreVersionDialog').getAttribute('open'), null);
     assert.ok(new URL(page.url()).searchParams.get('chapter'));
     layouts.push({label: 'restored', ...await layout(page, width, 'restored')});
