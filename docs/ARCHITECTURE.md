@@ -74,7 +74,7 @@ MiMo 通过唯一运行时接入，官方主机使用 `max_completion_tokens` �
 
 `analysis_grounding.py` 根据正式章节建立原句来源库。模型在 `GroundedReport` / `GroundedDelta` 中选择来源 ID，服务器逐字绑定唯一原文后，再运行完整报告与章节范围校验。适用于章节试拆、全文分段和综合；没有手工补造引文或宽松模糊匹配。`model.1` 新增可选 `character_relations`，旧报告默认空列表；语义边保留来源、方向及事实/传闻/推断状态，共同经历单独展示。
 
-章节试拆与全文分析共用 `PersistentModelBudget`，账本位于拆解数据目录的 `model-budgets/<scope>.json`。每次真实请求和格式修复均先持久预留；未知、缺项、非法或不一致的 usage 不释放占用。重启、跨作品、失败和并发共享同一轮上限。模型格式错误仅以 schema 白名单路径和固定错误类别进入系统修复指令，模型可控键值不得提升为系统指令。
+章节试拆与全文分析共用 `DurableModelBudget`，账本位于拆解数据目录的 `model-budgets/<scope>.json`。每次真实请求和格式修复均先持久预留；未知、缺项、非法或不一致的 usage 不释放占用。重启、跨作品、失败和并发共享同一轮上限。模型格式错误仅以 schema 白名单路径和固定错误类别进入系统修复指令，模型可控键值不得提升为系统指令。
 
 ## AI 状态与记忆边界
 
