@@ -186,14 +186,28 @@ def _claims(report):
 def bind_checked_preview(data, frozen, bank, read_text, *, producer):
     checked = PreviewCheckedReport.model_validate(data, strict=True)
     facts = PreviewFacts.model_validate_json(frozen, strict=True)
+    validate_checked_core(checked, {person.id: person for person in facts.characters},
+                          {atom.id: atom for atom in facts.atoms}, {cue.id: cue for cue in facts.cues},
+                          chapter_numbers=facts.chapter_numbers)
+    return bind_preview_selections(checked.report.model_dump(mode="json"), bank, read_text, producer=producer)
+
+
+def validate_checked_core(checked, people, atoms, cues, *, chapter_numbers,
+                          entity_for=None, visible_ids=None, support_people=None):
+    """Shared strict graph checks. Legacy callers retain identity/all-visible defaults.
+
+    A chapter adapter must validate its complete mapping before supplying it;
+    atoms themselves are never rewritten, including null endpoints or phases.
+    """
+    def resolve(key):
+        return key if entity_for is None or key is None else entity_for[key]
+
+    visible = set(people) if visible_ids is None else set(visible_ids)
     report = checked.report
-    people = {person.id: person for person in facts.characters}
-    atoms = {atom.id: atom for atom in facts.atoms}
-    cues = {cue.id: cue for cue in facts.cues}
-    all_facts = {**people, **atoms, **cues}
-    if set(report.chapter_numbers) != set(facts.chapter_numbers):
+    all_facts = {**(people if support_people is None else support_people), **atoms, **cues}
+    if set(report.chapter_numbers) != set(chapter_numbers):
         raise ValueError("报告章节偏离事实包")
-    if {person.id for person in report.characters} != set(people):
+    if {person.id for person in report.characters} != visible:
         raise ValueError("报告人物偏离事实包")
     for person in report.characters:
         fact = people[person.id]
@@ -208,10 +222,15 @@ def bind_checked_preview(data, frozen, bank, read_text, *, producer):
         _unique(binding.atom_ids, "事件动作映射重复")
         if not event_atoms[binding.event_id] <= atoms.keys():
             raise ValueError("事件映射了不存在的动作")
-        participants = {key for atom_id in binding.atom_ids for key in
+        participants = {resolve(key) for atom_id in binding.atom_ids for key in
                         (atoms[atom_id].subject_id, atoms[atom_id].object_id) if key is not None}
-        if not set(events[binding.event_id].actor_ids) <= participants:
+        if not set(events[binding.event_id].actor_ids) <= participants & visible:
             raise ValueError("事件人物不在映射动作中")
+        if visible_ids is not None:
+            required = {resolve(atoms[key].subject_id) for key in binding.atom_ids
+                        if atoms[key].kind == "action" and atoms[key].subject_id is not None} & visible
+            if not required <= set(events[binding.event_id].actor_ids):
+                raise ValueError("事件已显示行动主体缺漏")
     _unique([item.key for item in checked.supports], "字段映射重复")
     supports = {item.key: item.fact_ids for item in checked.supports}
     claims = list(_claims(report))
@@ -244,16 +263,21 @@ def bind_checked_preview(data, frozen, bank, read_text, *, producer):
                 if isinstance(fact, FactPerson) or (isinstance(fact, FactCue)
                         and not {fact.from_atom_id, fact.to_atom_id} <= event_atoms[owner]):
                     raise ValueError("事件字段借用了其他对象来源")
-            if key == f"{owner}.action" and not {atom.subject_id for atom in mapped_atoms
-                    if atom.subject_id is not None} <= set(events[owner].actor_ids):
+            subjects = {resolve(atom.subject_id) for atom in mapped_atoms if atom.subject_id is not None}
+            if visible_ids is not None:
+                subjects &= visible
+            if key == f"{owner}.action" and not subjects <= set(events[owner].actor_ids):
                 raise ValueError("事件行动主体缺漏")
         if owner in people:
             for fact_id in ids:
                 fact = all_facts[fact_id]
-                if isinstance(fact, FactPerson) and fact.id != owner:
+                if isinstance(fact, FactPerson) and resolve(fact.id) != owner:
                     raise ValueError("人物字段串用其他身份")
-                if isinstance(fact, FactAtom) and owner not in (fact.subject_id, fact.object_id):
+                if isinstance(fact, FactAtom) and owner not in (resolve(fact.subject_id), resolve(fact.object_id)):
                     raise ValueError("人物判断的主体与映射不一致")
+                if (entity_for is not None and isinstance(fact, FactAtom) and fact.kind in {"knowledge", "feeling"}
+                        and resolve(fact.subject_id) != owner):
+                    raise ValueError("知情或情感只能属于冻结持有者")
                 if isinstance(fact, FactCue):
                     raise ValueError("人物判断须映射自身身份或主体事实")
         if claim.status == "fact" and any(getattr(all_facts[fact_id], "status", "fact") != "fact" for fact_id in ids):
@@ -276,7 +300,7 @@ def bind_checked_preview(data, frozen, bank, read_text, *, producer):
         if key.startswith("cr"):
             edge = report.character_relations[int(key[2:])]
             atom = atoms[cue.from_atom_id]
-            if cue.kind != "character" or (edge.from_id, edge.to_id) != (atom.subject_id, atom.object_id):
+            if cue.kind != "character" or (edge.from_id, edge.to_id) != (resolve(atom.subject_id), resolve(atom.object_id)):
                 raise ValueError("人物关系身份或方向与事实不一致")
         else:
             edge = report.relations[int(key[1:])]
@@ -316,7 +340,7 @@ def bind_checked_preview(data, frozen, bank, read_text, *, producer):
     # actions need not become separate visible report events.
     positions = {event_id: index for index, event_id in enumerate(report.story_order)}
     dependencies = []
-    for cue in facts.cues:
+    for cue in cues.values():
         if not _actual_dependency(cue, atoms):
             continue
         for start, first in event_atoms.items():
@@ -326,4 +350,3 @@ def bind_checked_preview(data, frozen, bank, read_text, *, producer):
     _assert_dag(events, dependencies)
     if any(positions.get(start, -1) >= positions.get(end, -1) for start, end in dependencies):
         raise ValueError("报告故事顺序倒置已知依赖")
-    return bind_preview_selections(report.model_dump(mode="json"), bank, read_text, producer=producer)

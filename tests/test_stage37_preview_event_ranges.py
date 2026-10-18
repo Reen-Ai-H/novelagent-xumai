@@ -12,7 +12,7 @@ from app import deconstruction_routes
 from app.agents import deconstruction_model
 from app.core import analysis_grounding as grounding
 from app.core.model_call_budget import DurableModelBudget
-from app.core.preview_analysis import PreviewCheckedReport
+from app.core.chapter_preview import ChapterOutcome
 from schemas.analysis_report import AnalysisReport, Event
 import test_stage32_analysis_import as fixtures
 
@@ -259,7 +259,7 @@ class PreviewRangeApiTest(unittest.TestCase):
         self.assertEqual(DurableModelBudget(budget.directory, scope=budget.scope, budget_cny=2).public(self.runtime.model), state)
         system = self.calls[1]["messages"][0]["content"]
         schema = json.loads(system.split("严格符合以下 schema，不要 Markdown 或解释：", 1)[1])
-        self.assertEqual(schema, PreviewCheckedReport.model_json_schema())
+        self.assertEqual(schema, ChapterOutcome.model_json_schema())
         self.assertEqual(set(schema["$defs"]["PreviewEvent"]["properties"]), set(grounding.PreviewEvent.model_fields))
         self.assertIn("简短可辨认的ASCII语义ID", system)
         self.assertNotIn('"chapter_number":1', system)

@@ -199,8 +199,9 @@ class PreviewSegmentsProductTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         call = calls[0]
         self.assertEqual(call["thinking"], {"type": "disabled"})
-        # Explicit contract change: official pro disabled preview now has 24576.
-        self.assertEqual(call["max_completion_tokens"], 24576)
+        # Chapter extraction now has 12288; only the final report uses helper.
+        self.assertEqual(call["max_completion_tokens"], 12288)
+        self.assertEqual(calls[1]["max_completion_tokens"], 24576)
         self.assertEqual(call["temperature"], 0.3)
         self.assertEqual(reserve.call_args.args[2], 24576)
         sent = material(call["messages"])
@@ -210,7 +211,7 @@ class PreviewSegmentsProductTest(unittest.TestCase):
         self.assertEqual(self.deconstruction.model_budget.public(runtime.model)["calls"], 2)
         second = material(calls[1]["messages"])
         self.assertEqual(second["chapters"], sent["chapters"])
-        self.assertIn("facts", second)
+        self.assertIn("chapter_facts", second)
 
     def test_invalid_bank_fails_before_reservation_transport_or_adoption(self):
         project, _ = self.prepare()

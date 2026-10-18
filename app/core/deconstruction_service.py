@@ -815,10 +815,13 @@ class DeconstructionService:
         }
     async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
         """Read a bounded source snapshot; model failure never replaces the current result."""
-        from app.agents.deconstruction_model import preview_fact_messages, preview_checked_messages, preview_max_tokens
+        from app.agents.deconstruction_model import chapter_fact_messages, chapter_checked_messages, preview_max_tokens
         from app.agents.llm_runtime import LLMRuntimeError
         from app.core.analysis_grounding import source_bank
-        from app.core.preview_analysis import PreviewFacts, PreviewCheckedReport, freeze_preview_facts, bind_checked_preview
+        from app.core.chapter_preview import (
+            ChapterFacts, ChapterOutcome, ChapterBlocked, CHAPTER_MAX_TOKENS,
+            freeze_chapter, chapter_index, bind_chapter_outcome,
+        )
         from app.core.model_call_budget import budgeted_structured
         from app.core.model_budget import ModelBudgetExceeded
         source = self._source(project_id, account_id)
@@ -846,17 +849,24 @@ class DeconstructionService:
         material = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters]
         call_id = f"deconstruction:{project_id}:{source.source_hash}"
         try:
-            first = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
-                call_id=call_id + ":facts", messages=preview_fact_messages(material, bank),
-                response_model=PreviewFacts, max_tokens=preview_max_tokens(runtime), temperature=0.3)
+            frozen = ()
+            for chapter in material:
+                number = chapter["chapter_number"]
+                chapter_bank = {key: passage for key, passage in bank.items() if passage.chapter_number == number}
+                first = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
+                    call_id=call_id + f":chapter-{number}:facts", messages=chapter_fact_messages(chapter, chapter_bank),
+                    response_model=ChapterFacts, max_tokens=CHAPTER_MAX_TOKENS, temperature=0.3)
+                check_source()
+                try:
+                    packet = freeze_chapter(first.data, chapter_bank, {number: read_text[number]})
+                    frozen = (*frozen, packet)
+                    chapter_index(frozen)
+                except ValueError:
+                    raise DeconstructionServiceError("report_facts_invalid", "模型章级事实、身份或来源未通过校验，现有结果已保留。", status_code=422) from None
             check_source()
-            try:
-                frozen = freeze_preview_facts(first.data, bank, read_text)
-            except ValueError:
-                raise DeconstructionServiceError("report_facts_invalid", "模型事实、身份或来源未通过校验，现有结果已保留。", status_code=422) from None
             result = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
-                call_id=call_id + ":checked", messages=preview_checked_messages(material, bank, frozen),
-                response_model=PreviewCheckedReport, max_tokens=preview_max_tokens(runtime), temperature=0.3)
+                call_id=call_id + ":checked", messages=chapter_checked_messages(material, bank, frozen),
+                response_model=ChapterOutcome, max_tokens=preview_max_tokens(runtime), temperature=0.3)
         except ModelBudgetExceeded:
             raise DeconstructionServiceError("model_budget_exceeded", "已达到本轮模型总预算上限，现有结果已保留。", status_code=409,
                                             data={"budget": self.model_budget.public(runtime.model)}) from None
@@ -867,9 +877,14 @@ class DeconstructionService:
         except (OSError, ValueError):
             raise DeconstructionServiceError("model_budget_unavailable", "模型预算账暂不可用，未采用本次结果。", status_code=503) from None
         try:
-            report = bind_checked_preview(result.data, frozen, bank, read_text, producer=runtime.model)
+            check_source()
+            report = bind_chapter_outcome(result.data, frozen, bank, read_text, producer=runtime.model)
         except ValueError:
             raise DeconstructionServiceError("report_evidence_invalid", "模型来源编号、引用或结构未通过校验，现有结果已保留。", status_code=422) from None
+        if isinstance(report, ChapterBlocked):
+            check_source()
+            raise DeconstructionServiceError("report_source_blocked", "冻结章包存在有源问题，本轮未生成可采用报告；现有结果已保留。", status_code=422,
+                                            data={"issues": [issue.model_dump(mode="json") for issue in report.issues]})
         if set(report.chapter_numbers) != requested:
             raise DeconstructionServiceError("report_scope_invalid", "模型返回的章节范围不一致，现有结果已保留。", status_code=422)
         check_source()

@@ -12,6 +12,7 @@ from app.core.analysis_grounding import source_bank
 from app.core.model_budget import estimate_structured_call_bound
 from app.core.model_call_budget import DurableModelBudget
 from app.core.preview_analysis import PreviewFacts, freeze_preview_facts
+from app.core.chapter_preview import ChapterOutcome, freeze_chapter
 import test_stage37_fact_prompt_revision as fact_fixtures
 import test_stage37_two_pass_preview as two_pass
 
@@ -85,8 +86,8 @@ class OfficialDisabledPreviewCapacityTest(unittest.TestCase):
                 self.assertEqual([r["stage"].split(":")[-1] for r in records],
                                  ["facts", "format-repair", "checked", "format-repair"])
                 self.assertGreater(holds[3]["reserved_cny"], holds[2]["reserved_cny"])
-                for call, record in zip(calls, records, strict=True):
-                    self.assertEqual(call["max_completion_tokens"], 24576)
+                for index, (call, record) in enumerate(zip(calls, records, strict=True)):
+                    self.assertEqual(call["max_completion_tokens"], 12288 if index < 2 else 24576)
                     self.assertNotIn("max_tokens", call)
                     self.assertEqual(call["thinking"], {"type": "disabled"})
                     self.assertEqual(call["temperature"], 0.3)
@@ -98,18 +99,27 @@ class OfficialDisabledPreviewCapacityTest(unittest.TestCase):
         source = self.deconstruction._source(project, account)
         chapters = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in source.chapters]
         bank = source_bank({c.chapter_number: c.content for c in source.chapters})
-        messages = [*deconstruction_model.preview_fact_messages(chapters, bank),
-                    {"role": "system", "content": json.dumps(PreviewFacts.model_json_schema(), ensure_ascii=False)}]
+        facts, checked = two_pass.fixtures.preview_pair(two_pass.fixtures.preview_selector_report(self.payload["report"]))
+        frozen = freeze_chapter(facts, bank, {c.chapter_number: c.content for c in source.chapters})
+        messages = [*deconstruction_model.chapter_checked_messages(chapters, bank, (frozen,)),
+                    {"role": "system", "content": json.dumps(ChapterOutcome.model_json_schema(), ensure_ascii=False)}]
         old = estimate_structured_call_bound(messages, 12288, model=MODEL, attempts=1)
         new = estimate_structured_call_bound(messages, 24576, model=MODEL, attempts=1)
-        cap = (old + new) / 2
-        self.assertLess(old, cap)
-        self.assertGreater(new, cap)
+        first_cost = 0.00042
+        cap = first_cost + (old + new) / 2
+        self.assertLess(old, cap - first_cost)
+        self.assertGreater(new, cap - first_cost)
         budget = DurableModelBudget(self.deconstruction.store.base_dir / "strict-cap", budget_cny=cap)
         self.deconstruction.model_budget = budget
         runtime = deconstruction_model.create_runtime(deconstruction_model.DeconstructionModelSettings(
             _env_file=None, api_key="synthetic-only", model=MODEL, base_url="https://api.xiaomimimo.com/v1"))
-        runtime._transport = lambda *args: self.fail("New output bound cannot fit; no HTTP is permitted")
+        calls = []
+        def transport(*args):
+            calls.append(json.loads(args[2]))
+            self.assertEqual(len(calls), 1, "The 24576 final report must be refused before HTTP")
+            return 200, json.dumps({"choices": [{"message": {"content": json.dumps(facts)}, "finish_reason": "stop"}],
+                                   "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}}).encode()
+        runtime._transport = transport
         body = {key: value for key, value in self.payload.items() if key != "report"}
         body["chapter_numbers"] = [1]
         before = self.deconstruction.store.load(project).model_dump(mode="json")
@@ -118,7 +128,8 @@ class OfficialDisabledPreviewCapacityTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(response.json()["detail"]["code"], "model_budget_exceeded")
         state = budget.public(MODEL)
-        self.assertEqual((state["calls"], state["reserved_cny"], state["accounted_spent_cny"]), (0, 0, 0))
+        self.assertEqual((state["calls"], state["reserved_cny"], state["accounted_spent_cny"]), (1, 0, first_cost))
+        self.assertEqual(calls[0]["max_completion_tokens"], 12288)
         self.assertEqual(self.deconstruction.store.load(project).model_dump(mode="json"), before)
 
     def test_second_stage_exhaustion_does_not_send_or_lower_output_cap(self):
@@ -130,7 +141,7 @@ class OfficialDisabledPreviewCapacityTest(unittest.TestCase):
         response, calls, _, budget = self.run_preview(lambda f, c: [f, c], host="api.xiaomimimo.com", hook=drain)
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["max_completion_tokens"], 24576)
+        self.assertEqual(calls[0]["max_completion_tokens"], 12288)
         state = budget.public(MODEL)
         self.assertEqual((state["calls"], state["reserved_cny"]), (1, 0))
         self.assertEqual(DurableModelBudget(budget.directory, budget_cny=10).public(MODEL), state)
@@ -146,7 +157,7 @@ class OfficialDisabledPreviewCapacityTest(unittest.TestCase):
         response, calls, _, budget = self.run_preview(packets, host="api.xiaomimimo.com", hook=drain)
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(len(calls), 2)
-        self.assertTrue(all(call["max_completion_tokens"] == 24576 for call in calls))
+        self.assertEqual([call["max_completion_tokens"] for call in calls], [12288, 24576])
         self.assertEqual((budget.public(MODEL)["calls"], budget.public(MODEL)["reserved_cny"]), (2, 0))
 
     def test_source_change_before_report_or_report_repair_still_stops_http(self):
@@ -162,4 +173,4 @@ class OfficialDisabledPreviewCapacityTest(unittest.TestCase):
                 response, calls, _, _ = self.run_preview(lambda f, c: [f, {}], host="api.xiaomimimo.com", hook=change)
                 self.assertEqual(response.status_code, 409, response.text)
                 self.assertEqual(len(calls), change_at)
-                self.assertTrue(all(call["max_completion_tokens"] == 24576 for call in calls))
+                self.assertEqual([call["max_completion_tokens"] for call in calls], [12288, 24576][:change_at])

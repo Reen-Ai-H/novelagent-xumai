@@ -1,4 +1,4 @@
-"""Author two-stage synthetic replies; production has no legacy-preview bypass."""
+"""Author chapter/unified synthetic replies; production has no legacy bypass."""
 from copy import deepcopy
 
 
@@ -38,4 +38,18 @@ def preview_pair(wire):
     # tests author their atomic witnesses explicitly instead of guessing here.
     if wire["relations"] or wire.get("character_relations"):
         raise AssertionError("Author relationship witnesses explicitly in this fixture")
-    return facts, checked
+    if len(wire["chapter_numbers"]) != 1:
+        raise AssertionError("Author multi-chapter facts explicitly")
+    number = wire["chapter_numbers"][0]
+    chapter = {"chapter_number": number, "characters": facts["characters"], "atoms": facts["atoms"]}
+    prefix = lambda key: f"H{number}_{key}"
+    checked.update(outcome="success", cues=[], questions=[], entities=[{
+        "id": person["id"], "members": [prefix(person["id"])], "name": person["name"],
+        "aliases": person["aliases"], "role": "support", "basis": "合成片段中有据的参与者。",
+        "source_ids": person["source_ids"],
+    } for person in facts["characters"]])
+    for support in checked["supports"]:
+        support["fact_ids"] = [prefix(key) for key in support["fact_ids"]]
+    for binding in checked["event_bindings"]:
+        binding["atom_ids"] = [prefix(key) for key in binding["atom_ids"]]
+    return chapter, checked

@@ -9,7 +9,7 @@ from app import deconstruction_routes
 from app.agents import deconstruction_model
 from app.agents.llm_runtime import LLMResult, LLMUsage
 from app.core.analysis_grounding import source_bank
-from app.core.preview_analysis import PreviewFacts, PreviewCheckedReport
+from app.core.chapter_preview import ChapterFacts, ChapterOutcome, freeze_chapter
 from app.core.model_call_budget import DurableModelBudget
 import test_stage32_analysis_import as fixtures
 
@@ -40,7 +40,7 @@ class PreviewProviderBudgetTest(unittest.TestCase):
         def transport(url, headers, body, timeout):
             calls.append(json.loads(body))
             material = json.loads(calls[-1]["messages"][1]["content"].split("\n", 1)[1])
-            packet = checked if "facts" in material else facts
+            packet = checked if "chapter_facts" in material else facts
             return 200, json.dumps({"choices": [{"message": {"content": json.dumps(packet)}, "finish_reason": "stop"}],
                                     "usage": {"prompt_tokens": 100, "completion_tokens": 3000, "total_tokens": 3100,
                                               "completion_tokens_details": {"reasoning_tokens": 2500}}}).encode()
@@ -70,9 +70,10 @@ class PreviewProviderBudgetTest(unittest.TestCase):
                     self.assertEqual(self.independent.store.load(project).model_dump(mode="json"), before)
                     self.assertEqual(len(calls), 2)
                     self.assertEqual(reserve.call_count, 2)
-                    for call, reservation in zip(calls, reserve.call_args_list, strict=True):
-                        self.assertEqual(call["max_completion_tokens" if host in OFFICIAL else "max_tokens"], expected)
-                        self.assertEqual(reservation.args[2], expected)
+                    for index, (call, reservation) in enumerate(zip(calls, reserve.call_args_list, strict=True)):
+                        step_limit = 12288 if index == 0 else expected
+                        self.assertEqual(call["max_completion_tokens" if host in OFFICIAL else "max_tokens"], step_limit)
+                        self.assertEqual(reservation.args[2], step_limit)
                         self.assertEqual(reservation.kwargs["attempts"], 1)
                         if host in OFFICIAL and thinking == "enabled":
                             self.assertNotIn("temperature", call)
@@ -94,15 +95,16 @@ class PreviewProviderBudgetTest(unittest.TestCase):
                 chapters = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in source.chapters]
                 bank = source_bank({c["chapter_number"]: c["content"] for c in chapters})
                 facts, _ = fixtures.preview_pair(wire)
-                messages = deconstruction_model.preview_fact_messages(chapters, bank)
-                messages.append({"role": "system", "content": json.dumps(PreviewFacts.model_json_schema(), ensure_ascii=False)})
-                second = deconstruction_model.preview_checked_messages(chapters, bank, json.dumps(facts))
-                second.append({"role": "system", "content": json.dumps(PreviewCheckedReport.model_json_schema(), ensure_ascii=False)})
+                messages = deconstruction_model.chapter_fact_messages(chapters[0], bank)
+                messages.append({"role": "system", "content": json.dumps(ChapterFacts.model_json_schema(), ensure_ascii=False)})
+                frozen = freeze_chapter(facts, bank, {c["chapter_number"]: c["content"] for c in chapters})
+                second = deconstruction_model.chapter_checked_messages(chapters, bank, (frozen,))
+                second.append({"role": "system", "content": json.dumps(ChapterOutcome.model_json_schema(), ensure_ascii=False)})
                 # Independent arithmetic reproduces the old-fit/new-refused boundary.
                 input_bound = (sum(len(m["content"].encode("utf-8")) for m in messages) + 8192) * 3 / 1_000_000
                 second_input = (sum(len(m["content"].encode("utf-8")) for m in second) + 8192) * 3 / 1_000_000
                 old_bound = max(input_bound + 12288 * 6 / 1_000_000, 0.0183 + second_input + 12288 * 6 / 1_000_000)
-                new_bound = max(input_bound + 24576 * 6 / 1_000_000, 0.0183 + second_input + 24576 * 6 / 1_000_000)
+                new_bound = max(input_bound + 12288 * 6 / 1_000_000, 0.0183 + second_input + 24576 * 6 / 1_000_000)
                 remaining = (old_bound + new_bound) / 2
                 self.assertLess(old_bound, remaining)
                 self.assertGreater(new_bound, remaining)
@@ -118,7 +120,7 @@ class PreviewProviderBudgetTest(unittest.TestCase):
                 self.assertEqual(refused.status_code, 409, refused.text)
                 # With two stages an enabled fact request may fit even when
                 # its report request cannot. That refused HTTP is never sent.
-                refused_prefix = int(input_bound + 24576 * 6 / 1_000_000 <= remaining)
+                refused_prefix = int(input_bound + 12288 * 6 / 1_000_000 <= remaining)
                 self.assertEqual(len(calls), refused_prefix)
                 self.assertEqual(budget.public(MODEL)["calls"], refused_prefix)
                 self.assertEqual(budget.public(MODEL)["pending_attempts"], {})

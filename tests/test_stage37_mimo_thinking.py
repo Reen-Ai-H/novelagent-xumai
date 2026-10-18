@@ -146,15 +146,16 @@ class PreviewThinkingBudgetTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(len(calls), 3)
         records = json.loads(budget.path.read_text())["records"]
-        for call, reservation, record in zip(calls, reserve.call_args_list, records, strict=True):
-            self.assertEqual(call["max_completion_tokens"], 24576)
+        for index, (call, reservation, record) in enumerate(zip(calls, reserve.call_args_list, records, strict=True)):
+            step_limit = 12288 if index < 2 else 24576
+            self.assertEqual(call["max_completion_tokens"], step_limit)
             self.assertEqual(call["thinking"], {"type": "enabled"})
             self.assertNotIn("temperature", call)
             model, messages, max_tokens = reservation.args
-            self.assertEqual(max_tokens, 24576)
+            self.assertEqual(max_tokens, step_limit)
             expected = estimate_structured_call_bound(messages, max_tokens, model=model, attempts=1)
             self.assertAlmostEqual(record["reserved_cny"], expected, places=12)
-            self.assertGreater(record["reserved_cny"], MIMO_PRO_PRICING.cost(output_tokens=24576))
+            self.assertGreater(record["reserved_cny"], MIMO_PRO_PRICING.cost(output_tokens=step_limit))
 
     def test_cap_below_full_output_reservation_refuses_before_transport(self):
         self.prepare()

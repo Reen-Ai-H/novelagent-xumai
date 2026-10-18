@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from app.agents.deconstruction_model import DEFAULT_PREVIEW_MAX_TOKENS, analysis_messages, preview_fact_messages, preview_checked_messages
 from app.core.preview_analysis import PreviewFacts, PreviewCheckedReport
+from app.core.chapter_preview import ChapterFacts, ChapterOutcome, freeze_chapter
 from preview_fixtures import preview_pair
 from app.agents.llm_runtime import LLMResult, LLMRuntime, LLMRuntimeSettings, LLMUsage
 from app.core.analysis_delta import compact_index, merge_delta
@@ -348,12 +349,15 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         source = self.deconstruction._source(first_project, account)
         chapters = [{"chapter_number": c.chapter_number, "title": c.title, "content": c.content} for c in source.chapters]
         facts, checked = preview_pair(wire)
-        messages = [*preview_fact_messages(chapters, source_bank({c["chapter_number"]: c["content"] for c in chapters})),
-                    {"role": "system", "content": json.dumps(PreviewFacts.model_json_schema(), ensure_ascii=False)}]
+        from app.agents.deconstruction_model import chapter_fact_messages, chapter_checked_messages
+        bank = source_bank({c["chapter_number"]: c["content"] for c in chapters})
+        messages = [*chapter_fact_messages(chapters[0], bank),
+                    {"role": "system", "content": json.dumps(ChapterFacts.model_json_schema(), ensure_ascii=False)}]
         # This fixture uses a nonofficial runtime; its original cap stays 12288.
         bound = estimate_structured_call_bound(messages, DEFAULT_PREVIEW_MAX_TOKENS, model="mimo-v2.6-pro", attempts=1)
-        second_messages = [*preview_checked_messages(chapters, source_bank({c["chapter_number"]: c["content"] for c in chapters}), json.dumps(facts)),
-                           {"role": "system", "content": json.dumps(PreviewCheckedReport.model_json_schema(), ensure_ascii=False)}]
+        frozen = freeze_chapter(facts, bank, {c["chapter_number"]: c["content"] for c in chapters})
+        second_messages = [*chapter_checked_messages(chapters, bank, (frozen,)),
+                           {"role": "system", "content": json.dumps(ChapterOutcome.model_json_schema(), ensure_ascii=False)}]
         second_bound = estimate_structured_call_bound(second_messages, DEFAULT_PREVIEW_MAX_TOKENS, model="mimo-v2.6-pro", attempts=1)
         service = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
                                        model_budget_cny=2 * bound + second_bound + min(bound, second_bound) * 0.1, model_budget_scope="concurrent-validation")
@@ -362,7 +366,7 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
             calls.append(args[2])
             request = json.loads(args[2])
             material = json.loads(request["messages"][1]["content"].split("\n", 1)[1])
-            return envelope(json.dumps(checked if "facts" in material else facts), known=False)
+            return envelope(json.dumps(checked if "chapter_facts" in material else facts), known=False)
         runtime = runtime_for(transport)
         answers = await asyncio.gather(service.analyze_preview(first_project, account, first_payload, runtime),
                                        service.analyze_preview(second_project, account, second_payload, runtime), return_exceptions=True)
