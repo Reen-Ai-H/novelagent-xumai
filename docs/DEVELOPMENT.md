@@ -100,7 +100,7 @@ GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified�
 
 官方配置和计价依据为 [MiMo 首次调用](https://mimo.mi.com/docs/zh-CN/quick-start/summary/first-api-call) 与 [按量定价](https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go)。模型价格按精确名称选取并持久化版本，不能用历史 DeepSeek 价格估算 MiMo。
 
-`scripts/live_deconstruction.py` 是旧阶段独立研究入口，默认10元不是当前授权；不得用它的默认值推导用户许可。阶段37必须从产品 `analyze-preview` / 全文接口验证来源绑定，以同一个 `DeconstructionService(model_budget_cny=2.0, model_budget_scope=...)` 和同一持久数据目录执行本轮授权样本，失败与重试也计入2元。不得更换 scope、重置账本或启动默认10元路径绕过上限。自动化测试断网并用 fake runtime，真实接口运行单独记录。
+`scripts/live_deconstruction.py` 是旧阶段独立研究入口，默认10元不是当前授权；不得用它的默认值推导用户许可。阶段37必须从产品 `analyze-preview` / 全文接口验证来源绑定，并沿用授权轮次对应的持久数据目录、`model_budget_cny`和`model_budget_scope`。10/17旧轮2元账保留；10/18明确新增5元使用另一scope，失败与重试均计入该轮，最新余额见PROGRESS。只有新明确授权才能新建授权轮，不得更换scope、重置账本、转移余额或启动默认10元路径绕过上限。自动化测试断网并用fake runtime，真实接口运行单独记录。
 
 真实验收前独立复核预算与来源安全。验收正文、完整报告、引文、账本和现场仅留忽略目录；不得提交或复制密钥。`scripts/review_server.py` 旧研究入口不能代替产品生成成功证据，也不能覆盖作者现有数据。同一轮使用量未知时保留保守占用，预算不足先停止，不通过删除失败记录释放余额。
 
