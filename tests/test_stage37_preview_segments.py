@@ -199,9 +199,10 @@ class PreviewSegmentsProductTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         call = calls[0]
         self.assertEqual(call["thinking"], {"type": "disabled"})
-        self.assertEqual(call["max_completion_tokens"], 12288)
+        # Explicit contract change: official pro disabled preview now has 24576.
+        self.assertEqual(call["max_completion_tokens"], 24576)
         self.assertEqual(call["temperature"], 0.3)
-        self.assertEqual(reserve.call_args.args[2], 12288)
+        self.assertEqual(reserve.call_args.args[2], 24576)
         sent = material(call["messages"])
         self.assertEqual(set(sent), {"chapters"})
         for chapter, original in zip(sent["chapters"], source.chapters, strict=True):

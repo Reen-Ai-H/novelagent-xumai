@@ -50,7 +50,7 @@ class ThinkingFactoryTest(unittest.TestCase):
                 self.assertEqual(default.settings, injected.settings)
                 # Stage37 trial-4 decision restores the factory's disabled default.
                 self.assertEqual(injected.settings.thinking, "disabled")
-                self.assertEqual(deconstruction_model.preview_max_tokens(injected), 12288)
+                self.assertEqual(deconstruction_model.preview_max_tokens(injected), 24576 if host in OFFICIAL else 12288)
                 self.assertTrue(injected.settings.targeted_structured_repair)
                 self.assertEqual(injected.settings.temperature, 0.3)
         self.assertIsNone(LLMRuntimeSettings().thinking)

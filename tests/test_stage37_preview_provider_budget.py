@@ -62,7 +62,7 @@ class PreviewProviderBudgetTest(unittest.TestCase):
                     if override != "factory":
                         runtime.settings = replace(runtime.settings, thinking=override)
                     thinking = runtime.settings.thinking
-                    expected = 24576 if host in OFFICIAL and thinking == "enabled" else 12288
+                    expected = 24576 if host in OFFICIAL and thinking in {"disabled", "enabled"} else 12288
                     before = self.independent.store.load(project).model_dump(mode="json")
                     with patch.object(budget, "reserve", wraps=budget.reserve) as reserve:
                         response = self.send(runtime, payload)
@@ -82,11 +82,13 @@ class PreviewProviderBudgetTest(unittest.TestCase):
                     self.assertAlmostEqual(budget.public(MODEL)["accounted_spent_cny"], 0.0366)
 
     def test_old_fit_is_still_permitted_while_official_thinking_is_refused_on_same_ledger(self):
-        for host, disabled in (("offline.invalid", False), ("api.xiaomimimo.com", True)):
+        for host, legacy_unknown in (("offline.invalid", False), ("api.xiaomimimo.com", True)):
             with self.subTest(host=host):
                 project, runtime, budget, calls, payload, wire = self.assemble(host)
-                if disabled:
-                    runtime.settings = replace(runtime.settings, thinking="disabled")
+                if legacy_unknown:
+                    # Official disabled pro is intentionally no longer a
+                    # 12288 case. Unknown mode retains that old boundary.
+                    runtime.settings = replace(runtime.settings, thinking=None)
                 account = self.independent.store.load(project).account_id
                 source = self.deconstruction._source(project, account)
                 chapters = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in source.chapters]

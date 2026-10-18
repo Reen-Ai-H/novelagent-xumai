@@ -300,7 +300,7 @@ class TwoPassApiTest(unittest.TestCase):
     _complete_and_process = fixtures.AnalysisImportTest._complete_and_process
     prepare = fixtures.AnalysisImportTest.prepare
 
-    def run_preview(self, packets, *, hook=None, cap=2):
+    def run_preview(self, packets, *, hook=None, cap=2, host="offline.invalid"):
         self.project, _ = self.prepare()
         facts, checked = fixtures.preview_pair(fixtures.preview_selector_report(self.payload["report"]))
         replies = iter(packets(facts, checked))
@@ -308,7 +308,7 @@ class TwoPassApiTest(unittest.TestCase):
         budget = DurableModelBudget(self.deconstruction.store.base_dir / "two-pass", budget_cny=cap)
         self.deconstruction.model_budget = budget
         runtime = deconstruction_model.create_runtime(deconstruction_model.DeconstructionModelSettings(
-            _env_file=None, api_key="synthetic-only", base_url="https://offline.invalid/v1"))
+            _env_file=None, api_key="synthetic-only", base_url=f"https://{host}/v1"))
 
         def transport(url, headers, body, timeout):
             call = json.loads(body)

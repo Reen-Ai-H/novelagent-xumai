@@ -6,16 +6,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.agents.llm_runtime import LLMRuntime, LLMRuntimeSettings
 
 
-# Includes reasoning and final JSON in the official MiMo thinking mode.
+# Preview capacity; enabled mode includes reasoning and final JSON.
 PREVIEW_MAX_TOKENS = 24576
 DEFAULT_PREVIEW_MAX_TOKENS = 12288
 
 
 def preview_max_tokens(runtime) -> int:
-    """Only official MiMo thinking receives the larger reasoning+JSON cap."""
+    """Keep enabled behavior; expand only exact official pro disabled previews."""
     if (isinstance(runtime, LLMRuntime)
             and runtime.settings.base_host in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}
-            and runtime.settings.thinking == "enabled"):
+            and (runtime.settings.thinking == "enabled"
+                 or (runtime.settings.thinking == "disabled" and runtime.model == "mimo-v2.6-pro"))):
         return PREVIEW_MAX_TOKENS
     return DEFAULT_PREVIEW_MAX_TOKENS
 
