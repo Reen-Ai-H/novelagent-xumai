@@ -21,6 +21,7 @@ from app.core.deconstruction_service import DeconstructionService
 from app.core.model_budget import BudgetLedger, MIMO_PRO_PRICING, estimate_structured_call_bound
 from app.core.model_call_budget import DurableModelBudget, budgeted_structured
 from test_stage32_analysis_import import AnalysisImportTest, preview_selector_report
+from preview_fixtures import preview_pair
 
 
 MODEL = "mimo-v2.6-pro"
@@ -208,7 +209,8 @@ class PreviewUsageSafetyTest(unittest.TestCase):
 
         def transport(*args):
             calls.append(1)
-            return envelope(json.dumps(wire), {"total_tokens": 30000})
+            packet = preview_pair(wire)[(len(calls) - 1) % 2]
+            return envelope(json.dumps(packet), {"total_tokens": 30000})
 
         rt = runtime(transport)
         with patch.object(deconstruction_routes, "deconstruction_service", service), \
@@ -219,7 +221,7 @@ class PreviewUsageSafetyTest(unittest.TestCase):
                     break
                 self.assertEqual(response.status_code, 200, response.text)
                 state = self.client.get(self.url + "/model-budget").json()["budget"]
-                self.assertEqual(state["unknown_usage_calls"], index + 1)
+                self.assertEqual(state["unknown_usage_calls"], (index + 1) * 2)
                 self.assertGreater(state["accounted_spent_cny"], 0)
                 self.assertLess(state["remaining_cny"], 2)
                 # A process/service restart must retain the same ledger/cap.

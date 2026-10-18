@@ -9,7 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.agents.deconstruction_model import DEFAULT_PREVIEW_MAX_TOKENS, analysis_messages
+from app.agents.deconstruction_model import DEFAULT_PREVIEW_MAX_TOKENS, analysis_messages, preview_fact_messages, preview_checked_messages
+from app.core.preview_analysis import PreviewFacts, PreviewCheckedReport
+from preview_fixtures import preview_pair
 from app.agents.llm_runtime import LLMResult, LLMRuntime, LLMRuntimeSettings, LLMUsage
 from app.core.analysis_delta import compact_index, merge_delta
 from app.core.analysis_grounding import (
@@ -292,9 +294,10 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         account = self.independent.store.load(project).account_id
         calls = []
         wire = preview_selector_report(self.payload["report"])
+        replies = iter(preview_pair(wire))
         def transport(url, headers, body, timeout):
             calls.append(body)
-            return envelope(json.dumps(wire, ensure_ascii=False), known=False)
+            return envelope(json.dumps(next(replies), ensure_ascii=False), known=False)
         runtime = runtime_for(transport)
         service = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
                                        model_budget_cny=2, model_budget_scope="stage37-validation")
@@ -303,7 +306,7 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         preview = await service.analyze_preview(project, account, payload, runtime)
         self.assertEqual(preview.report.evidence[0].quote, "😀沈禾没有开门。")
         self.assertEqual(preview.report.producer, runtime.model)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], before)
         spent = service.model_budget.public(runtime.model)["accounted_spent_cny"]
         restored = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
@@ -312,11 +315,11 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         runner.start(project, account)
         await runner.tasks[project]
         self.assertEqual(runner.load(project, account)["status"], "paused")
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
         with self.assertRaises(DeconstructionServiceError) as error:
             await restored.analyze_preview(project, account, payload, runtime)
         self.assertEqual(error.exception.code, "model_budget_exceeded")
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
 
     async def test_unknown_source_and_changed_source_never_adopt(self):
         project, _ = self.prepare()
@@ -324,13 +327,16 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         payload = AnalysisRequest(**{k: v for k, v in self.payload.items() if k != "report"}, chapter_numbers=[1])
         bad = preview_selector_report(self.payload["report"])
         bad["evidence"][0]["source_id"] = "S99_" + "0" * 20
-        runtime = runtime_for(lambda *args: envelope(json.dumps(bad)))
+        facts, checked = preview_pair(preview_selector_report(self.payload["report"]))
+        checked["report"] = bad
+        replies = iter((facts, checked))
+        runtime = runtime_for(lambda *args: envelope(json.dumps(next(replies))))
         before = self.client.get(self.url).json()["result"]["document_id"]
         with self.assertRaises(DeconstructionServiceError) as error:
             await self.deconstruction.analyze_preview(project, account, payload, runtime)
         self.assertEqual(error.exception.code, "report_evidence_invalid")
         self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], before)
-        self.assertEqual(self.deconstruction.model_budget.public(runtime.model)["calls"], 1)
+        self.assertEqual(self.deconstruction.model_budget.public(runtime.model)["calls"], 2)
 
     async def test_two_projects_concurrent_previews_share_one_cap_after_restart(self):
         first_project, _ = self.prepare()
@@ -341,28 +347,35 @@ class ProductGroundingTest(unittest.IsolatedAsyncioTestCase):
         account = self.independent.store.load(first_project).account_id
         source = self.deconstruction._source(first_project, account)
         chapters = [{"chapter_number": c.chapter_number, "title": c.title, "content": c.content} for c in source.chapters]
-        messages = [*analysis_messages(chapters), {"role": "system", "content": json.dumps(PreviewGroundedReport.model_json_schema(), ensure_ascii=False)}]
+        facts, checked = preview_pair(wire)
+        messages = [*preview_fact_messages(chapters, source_bank({c["chapter_number"]: c["content"] for c in chapters})),
+                    {"role": "system", "content": json.dumps(PreviewFacts.model_json_schema(), ensure_ascii=False)}]
         # This fixture uses a nonofficial runtime; its original cap stays 12288.
         bound = estimate_structured_call_bound(messages, DEFAULT_PREVIEW_MAX_TOKENS, model="mimo-v2.6-pro", attempts=1)
+        second_messages = [*preview_checked_messages(chapters, source_bank({c["chapter_number"]: c["content"] for c in chapters}), json.dumps(facts)),
+                           {"role": "system", "content": json.dumps(PreviewCheckedReport.model_json_schema(), ensure_ascii=False)}]
+        second_bound = estimate_structured_call_bound(second_messages, DEFAULT_PREVIEW_MAX_TOKENS, model="mimo-v2.6-pro", attempts=1)
         service = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
-                                       model_budget_cny=bound * 1.5, model_budget_scope="concurrent-validation")
+                                       model_budget_cny=2 * bound + second_bound + min(bound, second_bound) * 0.1, model_budget_scope="concurrent-validation")
         calls = []
         def transport(*args):
             calls.append(args[2])
-            return envelope(json.dumps(wire), known=False)
+            request = json.loads(args[2])
+            material = json.loads(request["messages"][1]["content"].split("\n", 1)[1])
+            return envelope(json.dumps(checked if "facts" in material else facts), known=False)
         runtime = runtime_for(transport)
         answers = await asyncio.gather(service.analyze_preview(first_project, account, first_payload, runtime),
                                        service.analyze_preview(second_project, account, second_payload, runtime), return_exceptions=True)
         self.assertEqual(sum(isinstance(x, AnalysisImport) for x in answers), 1)
         errors = [x for x in answers if isinstance(x, DeconstructionServiceError)]
         self.assertEqual([x.code for x in errors], ["model_budget_exceeded"])
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 3)
         restarted = DeconstructionService(independent=self.independent, store=self.deconstruction.store,
                                          model_budget_cny=2, model_budget_scope="concurrent-validation")
         with self.assertRaises(DeconstructionServiceError) as error:
             await restarted.analyze_preview(second_project, account, second_payload, runtime)
         self.assertEqual(error.exception.code, "model_budget_exceeded")
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 3)
         public = restarted.model_budget.public(runtime.model)
         self.assertLessEqual(public["accounted_spent_cny"] + public["reserved_cny"], public["budget_cny"])
 

@@ -12,6 +12,7 @@ from app import deconstruction_routes
 from app.agents import deconstruction_model
 from app.core import analysis_grounding as grounding
 from app.core.model_call_budget import DurableModelBudget
+from app.core.preview_analysis import PreviewCheckedReport
 from schemas.analysis_report import AnalysisReport, Event
 import test_stage32_analysis_import as fixtures
 
@@ -217,18 +218,20 @@ class PreviewRangeApiTest(unittest.TestCase):
         self.request = {k: v for k, v in self.payload.items() if k != "report"}
         self.request["chapter_numbers"] = [1]
         self.wire = fixtures.preview_selector_report(self.payload["report"])
+        self.facts, self.checked = fixtures.preview_pair(self.wire)
         self.calls, self.holds = [], []
         self.runtime = deconstruction_model.create_runtime(deconstruction_model.DeconstructionModelSettings(
             _env_file=None, api_key="synthetic-only", base_url="https://offline.invalid/v1", model="mimo-v2.6-pro"))
         return project
 
     def send(self, replies, hook=None):
+        packets = [self.facts, *[{**deepcopy(self.checked), "report": reply} for reply in replies]]
         def transport(url, headers, body, timeout):
             self.calls.append(json.loads(body))
             self.holds.append(self.deconstruction.model_budget.public(self.runtime.model))
             if hook is not None:
                 hook()
-            return 200, json.dumps({"choices": [{"message": {"content": json.dumps(replies[len(self.calls) - 1])},
+            return 200, json.dumps({"choices": [{"message": {"content": json.dumps(packets[len(self.calls) - 1])},
                                                   "finish_reason": "stop"}],
                                     "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}}).encode()
         self.runtime._transport = transport
@@ -245,18 +248,18 @@ class PreviewRangeApiTest(unittest.TestCase):
         self.assertEqual((event["chapter_number"], event["chapter_end"]), (1, 1))
         self.assertEqual(self.independent.store.load(project).model_dump(mode="json"), before)
         self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], document)
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 2)
         self.assertEqual(self.calls[0]["max_tokens"], 12288)
         self.assertGreater(self.holds[0]["reserved_cny"], 0)
         self.assertEqual(len(self.holds[0]["pending_attempts"]), 1)
         budget = self.deconstruction.model_budget
         state = budget.public(self.runtime.model)
-        self.assertEqual((state["calls"], state["unknown_usage_calls"], state["reserved_cny"]), (1, 0, 0))
-        self.assertAlmostEqual(state["accounted_spent_cny"], 0.00042)
+        self.assertEqual((state["calls"], state["unknown_usage_calls"], state["reserved_cny"]), (2, 0, 0))
+        self.assertAlmostEqual(state["accounted_spent_cny"], 0.00084)
         self.assertEqual(DurableModelBudget(budget.directory, scope=budget.scope, budget_cny=2).public(self.runtime.model), state)
-        system = self.calls[0]["messages"][0]["content"]
+        system = self.calls[1]["messages"][0]["content"]
         schema = json.loads(system.split("严格符合以下 schema，不要 Markdown 或解释：", 1)[1])
-        self.assertEqual(schema, grounding.PreviewGroundedReport.model_json_schema())
+        self.assertEqual(schema, PreviewCheckedReport.model_json_schema())
         self.assertEqual(set(schema["$defs"]["PreviewEvent"]["properties"]), set(grounding.PreviewEvent.model_fields))
         self.assertIn("简短可辨认的ASCII语义ID", system)
         self.assertNotIn('"chapter_number":1', system)
@@ -272,12 +275,12 @@ class PreviewRangeApiTest(unittest.TestCase):
         response = self.send([old_wire, old_wire])
         self.assertEqual(response.status_code, 502, response.text)
         self.assertEqual(response.json()["detail"]["code"], "provider_bad_json")
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.calls), 3)
         self.assertEqual(old_wire, before)
         self.assertTrue(all(h["reserved_cny"] > 0 for h in self.holds))
         state = self.deconstruction.model_budget.public(self.runtime.model)
-        self.assertEqual(state["calls"], 2)
-        self.assertAlmostEqual(state["accounted_spent_cny"], 0.00084)
+        self.assertEqual(state["calls"], 3)
+        self.assertAlmostEqual(state["accounted_spent_cny"], 0.00126)
         self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], document)
         self.assertEqual(self.independent.store.load(project).model_dump(mode="json"), source)
 
@@ -288,8 +291,8 @@ class PreviewRangeApiTest(unittest.TestCase):
         response = self.send([self.wire])
         self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(response.json()["detail"]["code"], "report_evidence_invalid")
-        self.assertEqual(len(self.calls), 1)
-        self.assertEqual(self.deconstruction.model_budget.public(self.runtime.model)["calls"], 1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.deconstruction.model_budget.public(self.runtime.model)["calls"], 2)
         self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], document)
 
     def test_cas_change_after_http_still_refuses_without_extra_call(self):
@@ -334,7 +337,7 @@ class PreviewRangeApiTest(unittest.TestCase):
         self.request.update(expected_source_hash=source.source_hash, expected_source_revision=source.source_revision)
         response = self.send([self.wire])
         self.assertEqual(response.status_code, 200, response.text)
-        system = self.calls[0]["messages"][0]["content"]
+        system = self.calls[1]["messages"][0]["content"]
         self.assertNotIn(attack, system)
         self.assertIn(attack, self.calls[0]["messages"][1]["content"])
         self.assertIn("简短可辨认的ASCII语义ID", system)

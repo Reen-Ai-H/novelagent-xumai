@@ -815,9 +815,10 @@ class DeconstructionService:
         }
     async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
         """Read a bounded source snapshot; model failure never replaces the current result."""
-        from app.agents.deconstruction_model import analysis_messages, preview_max_tokens
+        from app.agents.deconstruction_model import preview_fact_messages, preview_checked_messages, preview_max_tokens
         from app.agents.llm_runtime import LLMRuntimeError
-        from app.core.analysis_grounding import PreviewGroundedReport, bind_preview_selections, source_bank
+        from app.core.analysis_grounding import source_bank
+        from app.core.preview_analysis import PreviewFacts, PreviewCheckedReport, freeze_preview_facts, bind_checked_preview
         from app.core.model_call_budget import budgeted_structured
         from app.core.model_budget import ModelBudgetExceeded
         source = self._source(project_id, account_id)
@@ -842,11 +843,20 @@ class DeconstructionService:
             self._check_source_precondition(current, **bindings)
             if current.pending_changes:
                 raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        material = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters]
+        call_id = f"deconstruction:{project_id}:{source.source_hash}"
         try:
+            first = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
+                call_id=call_id + ":facts", messages=preview_fact_messages(material, bank),
+                response_model=PreviewFacts, max_tokens=preview_max_tokens(runtime), temperature=0.3)
+            check_source()
+            try:
+                frozen = freeze_preview_facts(first.data, bank, read_text)
+            except ValueError:
+                raise DeconstructionServiceError("report_facts_invalid", "模型事实、身份或来源未通过校验，现有结果已保留。", status_code=422) from None
             result = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
-                call_id=f"deconstruction:{project_id}:{source.source_hash}",
-                messages=analysis_messages([dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters], bank),
-                response_model=PreviewGroundedReport, max_tokens=preview_max_tokens(runtime), temperature=0.3)
+                call_id=call_id + ":checked", messages=preview_checked_messages(material, bank, frozen),
+                response_model=PreviewCheckedReport, max_tokens=preview_max_tokens(runtime), temperature=0.3)
         except ModelBudgetExceeded:
             raise DeconstructionServiceError("model_budget_exceeded", "已达到本轮模型总预算上限，现有结果已保留。", status_code=409,
                                             data={"budget": self.model_budget.public(runtime.model)}) from None
@@ -857,7 +867,7 @@ class DeconstructionService:
         except (OSError, ValueError):
             raise DeconstructionServiceError("model_budget_unavailable", "模型预算账暂不可用，未采用本次结果。", status_code=503) from None
         try:
-            report = bind_preview_selections(result.data, bank, read_text, producer=runtime.model)
+            report = bind_checked_preview(result.data, frozen, bank, read_text, producer=runtime.model)
         except ValueError:
             raise DeconstructionServiceError("report_evidence_invalid", "模型来源编号、引用或结构未通过校验，现有结果已保留。", status_code=422) from None
         if set(report.chapter_numbers) != requested:

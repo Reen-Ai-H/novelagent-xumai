@@ -300,13 +300,15 @@ class CandidatePreviewTest(unittest.TestCase):
         wire = import_fixtures.preview_selector_report(self.payload["report"])
         wrong_source = deepcopy(wire)
         wrong_source["evidence"][0]["source_id"] = "S99_" + "0" * 20
-        for second, status in (("{}", 502), (json.dumps(wrong_source), 422)):
+        facts, checked = import_fixtures.preview_pair(wire)
+        checked["report"] = wrong_source
+        for second, status in (("{}", 502), (json.dumps(checked), 422)):
             with self.subTest(status=status):
-                runtime, calls = scripted([envelope("{}"), envelope(second)])
+                runtime, calls = scripted([envelope(json.dumps(facts)), envelope("{}"), envelope(second)])
                 with patch.object(deconstruction_routes, "create_runtime", return_value=runtime):
                     response = self.client.post(self.url + "/analyze-preview", json=body)
                 self.assertEqual(response.status_code, status, response.text)
-                self.assertEqual(len(calls), 2)
-                self.assertEqual(len(candidate_messages(calls[1])), 1)
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(len(candidate_messages(calls[2])), 1)
                 self.assertEqual(self.deconstruction.store.load(project).model_dump(mode="json"), before)
                 self.assertEqual(self.independent.store.load(project).model_dump(mode="json"), source)

@@ -182,10 +182,11 @@ class PreviewSegmentsProductTest(unittest.TestCase):
         source = self.deconstruction._source(project, account)
         wire = fixtures.preview_selector_report(self.payload["report"])
         calls = []
+        replies = iter(fixtures.preview_pair(wire))
 
         def transport(url, headers, body, timeout):
             calls.append(json.loads(body))
-            return 200, json.dumps({"choices": [{"message": {"content": json.dumps(wire)}, "finish_reason": "stop"}],
+            return 200, json.dumps({"choices": [{"message": {"content": json.dumps(next(replies))}, "finish_reason": "stop"}],
                                     "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}}).encode()
 
         runtime._transport = transport
@@ -195,7 +196,8 @@ class PreviewSegmentsProductTest(unittest.TestCase):
                 patch.object(self.deconstruction.model_budget, "reserve", wraps=self.deconstruction.model_budget.reserve) as reserve:
             response = self.client.post(self.url + "/analyze-preview", json=payload)
         self.assertEqual(response.status_code, 200, response.text)
-        call, = calls
+        self.assertEqual(len(calls), 2)
+        call = calls[0]
         self.assertEqual(call["thinking"], {"type": "disabled"})
         self.assertEqual(call["max_completion_tokens"], 12288)
         self.assertEqual(call["temperature"], 0.3)
@@ -204,7 +206,10 @@ class PreviewSegmentsProductTest(unittest.TestCase):
         self.assertEqual(set(sent), {"chapters"})
         for chapter, original in zip(sent["chapters"], source.chapters, strict=True):
             self.assertEqual("".join(s["text"] for s in chapter["segments"]), original.content)
-        self.assertEqual(self.deconstruction.model_budget.public(runtime.model)["calls"], 1)
+        self.assertEqual(self.deconstruction.model_budget.public(runtime.model)["calls"], 2)
+        second = material(calls[1]["messages"])
+        self.assertEqual(second["chapters"], sent["chapters"])
+        self.assertIn("facts", second)
 
     def test_invalid_bank_fails_before_reservation_transport_or_adoption(self):
         project, _ = self.prepare()

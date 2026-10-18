@@ -133,7 +133,9 @@ class PreviewThinkingBudgetTest(unittest.TestCase):
         budget = DurableModelBudget(self.deconstruction.store.base_dir / "model-budgets", budget_cny=2)
         self.deconstruction.model_budget = budget
         wire = import_fixtures.preview_selector_report(self.payload["report"])
-        runtime, calls = repair_fixtures.scripted([repair_fixtures.envelope("{}"), repair_fixtures.envelope(json.dumps(wire))])
+        facts, checked = import_fixtures.preview_pair(wire)
+        runtime, calls = repair_fixtures.scripted([repair_fixtures.envelope("{}"), repair_fixtures.envelope(json.dumps(facts)),
+                                                  repair_fixtures.envelope(json.dumps(checked))])
         runtime.settings = replace(deconstruction_model.create_runtime(config_for("api.xiaomimimo.com")).settings,
                                    thinking="enabled")
         body = {key: value for key, value in self.payload.items() if key != "report"}
@@ -142,7 +144,7 @@ class PreviewThinkingBudgetTest(unittest.TestCase):
                 patch.object(budget, "reserve", wraps=budget.reserve) as reserve:
             response = self.client.post(self.url + "/analyze-preview", json=body)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         records = json.loads(budget.path.read_text())["records"]
         for call, reservation, record in zip(calls, reserve.call_args_list, records, strict=True):
             self.assertEqual(call["max_completion_tokens"], 24576)
