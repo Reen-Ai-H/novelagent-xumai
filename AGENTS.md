@@ -37,6 +37,7 @@
 
 - 产品决策先写 docs/DECISIONS.md，再同步相关规格、流程和验收。
 - 每轮读取Notion最新验收意见；Agent只维护开发进度，完成自测后至多标待验收。“已验收”仅由作者选择，不改写作者意见或已验收状态。
+- 子Agent仅使用`gpt-6.1-sol`，禁止Astra；推理等级按任务选择，启动时显式指定并核对实际配置。
 - 长任务先读本文件、PROGRESS.md、BLOCKED.md 和 docs/README.md；每轮记录真实命令结果。
 - 不用 skip、放宽断言、吞异常或假数据制造通过；保留既有 dirty worktree 并区分归属。
 - 每个阶段使用独立的 `codex/stage-<编号>-<主题>` 分支；完成本阶段门禁后必须提交并推送到 GitHub，并在 PROGRESS.md 记录分支、提交和 PR。需要复核的阶段保持 Draft PR，不得只留在本地。
