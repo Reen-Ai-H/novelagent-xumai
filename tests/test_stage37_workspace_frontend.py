@@ -13,7 +13,7 @@ class WorkspaceFrontendTest(unittest.TestCase):
         html = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
         assets = re.findall(r'(?:href|src)="/static/([^"?]+\.(?:css|js))\?v=([^"&]+)"', html)
         self.assertEqual(len(assets), 13)
-        self.assertEqual({release for _, release in assets}, {"stage37-final2"})
+        self.assertEqual({release for _, release in assets}, {"stage37-status3"})
         self.assertEqual(len({name for name, _ in assets}), 13)
         for name, _ in assets:
             self.assertTrue((ROOT / "frontend" / name).is_file(), name)
