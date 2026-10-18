@@ -78,7 +78,7 @@ MiMo 通过唯一运行时接入，官方主机使用 `max_completion_tokens` �
 
 拆解专用配置可将完整且不超过65,536字符的失败输出，以不可信用户数据用于唯一一次定点格式修复；默认运行时不启用。失败候选不进入系统指令、不记录到默认日志，空/截断/超限内容不截取回传。新增候选输入计入原预算预留，结果仍通过相同schema与来源绑定；代码不规范化或删除错误字段来绕过验证。
 
-拆解factory默认thinking=disabled、预览12,288 token；真实实验中推理耗尽输出未形成完整报告，故不默认开启。显式官方MiMo enabled运行时仍支持24,576总输出上限、不发temperature/top_p；书级分步上限独立保留。流式收集器只装配最终content，完整completion usage进入费用账，推理文本不进入公开结果或默认日志。模式选择不代表内容质量已经通过。
+拆解factory默认thinking=disabled；官方host、精确mimo-v2.6-pro的disabled章节预览回答上限为24,576 token，针对连续初次事实输出截断扩大容量，不重启深度思考。其他运行时仍12,288；显式官方MiMo enabled的既有24,576总上限与不发temperature/top_p行为保留，书级分步上限独立不变。每HTTP按实际新上限完整预留，余额不足拒绝。流式收集器只装配最终content，完整completion usage进入费用账，推理文本不进入公开结果或默认日志。容量/模式选择不代表内容质量已通过；参数含义见[官方输出合同](https://mimo.mi.com/docs/en-US/api/chat)与[思考模式说明](https://mimo.mi.com/docs/en-US/quick-start/usage-guide/other/deep-thinking)。
 
 预览输入按章节发送有序原文片段，可引用片段附服务端原source_id，未可引用的文字与空白仍保留；拼接严格还原正文。避免整章与来源库quote重复发送，不减少作者内容或证据编号。与bank不匹配、越界或重叠的片段在请求前拒绝；书级增量协议本轮不随之改造，预览事件范围按上文专用wire装配。
 
