@@ -1,6 +1,6 @@
 # 叙脉文档索引
 
-2026-10-18 当前实施为[阶段37 · 独立创作本机完整可用版](goals/STAGE_37_USABLE_WORKSPACE.md)：正式六章、A版分层与本机工程已复核，真实分析质量继续完善。用户新授权5元，独立于旧2元账；Notion仅作者选择已验收。下方阶段36是继承基线，不再代表当前交互目标；决定和结果分别见[DECISIONS](DECISIONS.md)与[PROGRESS](../PROGRESS.md)。
+2026-10-18 当前实施为[阶段37 · 独立创作本机完整可用版](goals/STAGE_37_USABLE_WORKSPACE.md)：正式六章、A版分层与本机工程已复核，真实分析未通过；三次整稿首包失败后，按[章级事实预览合同](STAGE_37_CHAPTER_PREVIEW_CONTRACT.md)改造中，暂不追加同类付费试跑。用户新授权5元，独立于旧2元账；Notion仅作者选择已验收。下方阶段36是继承基线，不再代表当前交互目标；决定和结果分别见[DECISIONS](DECISIONS.md)与[PROGRESS](../PROGRESS.md)。
 
 2026-10-16 网页端接手见 [CODEX_WEB_HANDOFF](CODEX_WEB_HANDOFF.md)：当前最新进度在阶段36分支，尚未合并到 `main`；含基线、环境、验证及本机私有材料边界。
 
