@@ -2397,18 +2397,31 @@
 
   function renderDeconstructionStatus(data) {
     const working = ["queued", "running"].includes(data.runStatus);
-    const progress = data.progress.percent === null ? 0 : Math.max(0, Math.min(100, data.progress.percent));
-    const progressText = data.progress.percent === null ? "服务端尚未提供进度百分比" : `已完成 ${Math.round(data.progress.percent)}%`;
+    const percent = deconstructionNumber(data.progress.percent);
+    const progress = percent === null ? null : Math.max(0, Math.min(100, percent));
+    const progressText = progress === null ? "进度待更新" : `已完成 ${Math.round(progress)}%`;
+    const stage = /[\u3400-\u9fff]/u.test(data.progress.currentStage || "") && !/[a-z_]/iu.test(data.progress.currentStage)
+      ? data.progress.currentStage : deconstructionStatusText[data.effectiveStatus] || "状态待确认";
     const sourceText = data.source.chapterCount !== null || data.source.wordCount !== null
       ? `${formatDeconstructionCount(data.source.chapterCount, " 章")} · ${formatDeconstructionCount(data.source.wordCount, " 字")}`
       : "来源规模待识别";
-    const sourceLine = data.source.versionId
-      ? `SOURCE / ${data.source.versionId.slice(0, 12)} · REV / ${data.source.revision ?? "—"} · HASH / ${data.source.contentHash ? data.source.contentHash.slice(0, 12) : "—"}`
-      : "SOURCE / 尚未形成正式稿本";
     return `<section class="deconstruction-state-card is-${escapeHtml(data.effectiveStatus)}" aria-label="拆解状态">
-      <div class="deconstruction-state-copy"><div class="deconstruction-state-kicker"><span class="eyebrow">拆解状态</span><span class="deconstruction-status-note">${escapeHtml(data.runStatus === "none" ? "服务端状态" : `运行 / ${data.runStatus}`)}</span></div><h2>${escapeHtml(deconstructionStatusHeading(data))}</h2><p>${escapeHtml(deconstructionStatusMessage(data))}</p><small class="deconstruction-source-line mono">${escapeHtml(sourceLine)}</small></div>
-      <div class="deconstruction-state-side">${working ? `<div class="deconstruction-progress" role="progressbar" aria-label="拆解进度" aria-valuemin="0" aria-valuemax="100" ${data.progress.percent === null ? "" : `aria-valuenow="${Math.round(data.progress.percent)}"`}><span style="width: ${progress}%"></span></div><span class="deconstruction-progress-label">${escapeHtml(progressText)} · ${escapeHtml(data.progress.currentStage)}</span>` : `<span class="deconstruction-state-source">来源 / ${escapeHtml(sourceText)}</span>`}${deconstructionStatusAction(data)}</div>
+      <div class="deconstruction-state-copy"><div class="deconstruction-state-kicker"><span class="eyebrow">拆解状态</span></div><h2>${escapeHtml(deconstructionStatusHeading(data))}</h2><p>${escapeHtml(deconstructionStatusMessage(data))}</p></div>
+      <div class="deconstruction-state-side">${working ? `<div class="deconstruction-progress${progress === null ? " is-indeterminate" : ""}" role="progressbar" aria-label="拆解进度" aria-valuemin="0" aria-valuemax="100" ${progress === null ? "" : `aria-valuenow="${Math.round(progress)}"`}><span${progress === null ? "" : ` style="width: ${progress}%"`}></span></div><span class="deconstruction-progress-label">${escapeHtml(progressText)} · ${escapeHtml(stage)}</span>` : ""}<span class="deconstruction-state-source">正文 / ${escapeHtml(sourceText)}</span>${deconstructionStatusAction(data)}</div>
     </section>`;
+  }
+
+  function renderDeconstructionDiagnostics(data) {
+    const value = (item) => escapeHtml(item === null || item === undefined || item === "" ? "未记录" : item);
+    const fields = [
+      ["运行状态码", data.runStatus],
+      ["处理阶段原值", data.progress.currentStage],
+      ["原因代码", data.error?.code],
+      ["来源版本", data.source.versionId],
+      ["来源修订", data.source.revision],
+      ["内容指纹", data.source.contentHash],
+    ];
+    return renderAnalysisDetails("技术详情", `<dl class="analysis-source-facts">${fields.map(([label, item]) => `<div><dt>${label}</dt><dd>${value(item)}</dd></div>`).join("")}</dl>`, "deconstruction-technical-details");
   }
 
   function depthClamp(value, fallback = 0) {
@@ -2730,7 +2743,7 @@
     elements.deconstructionRefreshButton.disabled = working;
     elements.deconstructionPageContent.setAttribute("aria-busy", String(working));
     state.deconstructionVolumeId = data.focusDocumentId || "";
-    document.getElementById("workspaceSource").innerHTML = data.result ? renderAnalysisSource(data, isRule ? "规则分析" : "模型报告", data.scopeLabel || `${data.result.scopeStart || 1}–${data.result.scopeEnd || data.source.chapterCount || '—'} 章`) : "";
+    document.getElementById("workspaceSource").innerHTML = (data.result ? renderAnalysisSource(data, isRule ? "规则分析" : "模型报告", data.scopeLabel || `${data.result.scopeStart || 1}–${data.result.scopeEnd || data.source.chapterCount || '—'} 章`) : "") + renderDeconstructionDiagnostics(data);
     const volumeBar = renderDeconstructionVolumeBar(data);
     const readableRuleUpgrade = data.effectiveStatus === "rebuild_required" && data.updateAvailable
       && data.error?.code === "engine_update_available" && isRule && data.runStatus === "completed";
