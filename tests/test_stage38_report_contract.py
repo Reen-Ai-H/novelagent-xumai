@@ -6,6 +6,7 @@ from app.agents.deconstruction_model import report_messages
 from app.core.report_pipeline import (ReportDraft, ReportReview, ReportVerification, ReviewRevise,
     MAX_REVISION_BYTES, apply_revision, canonical, object_hash, public_wire, target_hashes,
     validate_draft, validate_review)
+from schemas.analysis_report import AnalysisReport
 from stage38_report_fixtures import report_case, acceptance
 
 
@@ -62,17 +63,82 @@ class ReportContractTest(unittest.TestCase):
         self.draft["characters"][0]["aliases"] = ["虚构别名"]
         with self.assertRaises(ValueError): self.bind()
 
-    def test_importance_projects_frontend_role_prefix_and_preserves_identity(self):
+    def test_importance_is_explicit_and_role_and_identity_are_preserved(self):
         self.draft["characters"][0]["role"] = "渡口记账人"
         self.draft["characters"][1]["role"] = "验货见证者"
         _, report = self.bind()
-        self.assertEqual(report.characters[0].role, "主要人物 · 渡口记账人")
-        self.assertEqual(report.characters[1].role, "实质配角 · 验货见证者")
+        self.assertEqual(report.characters[0].role, "渡口记账人")
+        self.assertEqual(report.characters[1].role, "验货见证者")
+        self.assertEqual([p.importance for p in report.characters], ["main", "support"])
         self.assertEqual(report.characters[0].identity.text, self.draft["characters"][0]["identity"]["text"])
-        self.draft["characters"][0]["role"] = "配角 · 记账人"
+
+    def test_legacy_missing_or_null_importance_roundtrips_without_role_changes(self):
+        _, report = self.bind()
+        legacy = report.model_dump(mode="json")
+        for person in legacy["characters"]:
+            person.pop("importance")
+        parsed = AnalysisReport.model_validate(legacy, strict=True)
+        self.assertEqual([p.importance for p in parsed.characters], [None, None])
+        self.assertEqual([p.role for p in parsed.characters], [p["role"] for p in legacy["characters"]])
+        reread = AnalysisReport.model_validate_json(parsed.model_dump_json(), strict=True)
+        self.assertEqual(reread, parsed)
+
+    def test_eighty_character_role_is_not_prefixed_or_truncated(self):
+        role = "原身份说明" * 16
+        self.assertEqual(len(role), 80)
+        self.draft["characters"][0]["role"] = role
+        _, report = self.bind()
+        self.assertEqual(report.characters[0].role, role)
+        self.assertEqual(report.characters[0].importance, "main")
+        self.draft["characters"][0]["role"] = role + "字"
         with self.assertRaises(ValueError): self.bind()
-        self.draft["characters"][0]["role"] = "角" * 71
+
+    def test_identity_prefix_is_not_a_classification_or_validation_rule(self):
+        self.draft["characters"][1]["role"] = "主要人物的导师"
+        _, report = self.bind()
+        self.assertEqual(report.characters[1].role, "主要人物的导师")
+        self.assertEqual(report.characters[1].importance, "support")
+        self.draft["characters"][0]["role"] = "配角的保护者"
+        _, report = self.bind()
+        self.assertEqual(report.characters[0].role, "配角的保护者")
+        self.assertEqual(report.characters[0].importance, "main")
+
+    def test_new_draft_still_requires_explicit_grounded_importance(self):
+        for bad in (None, "incidental", "主要人物", True):
+            with self.subTest(value=bad):
+                self.draft["characters"][0]["importance"] = bad
+                with self.assertRaises(ValueError): self.bind()
+        self.draft["characters"][0].pop("importance")
         with self.assertRaises(ValueError): self.bind()
+        _, report = validate_draft(report_case()[0], self.bank, self.texts, producer="synthetic")
+        public = report.model_dump(mode="json")
+        public["characters"][0]["importance"] = "unrecognised"
+        with self.assertRaises(ValueError): AnalysisReport.model_validate(public, strict=True)
+
+    def test_first_second_person_cards_reject_even_when_name_occurs_in_real_source(self):
+        _, _, base = report_case(1)
+        for pronoun in ("我", "我们", "咱", "咱们", "俺", "俺们", "你", "你们", "您", "您们"):
+            with self.subTest(pronoun=pronoun):
+                texts = {1: f"林客说，{pronoun}和许守一起核对来船记录。" + base[1]}
+                draft, bank, texts = report_case(texts=texts)
+                person = draft["characters"][0]
+                person["name"] = pronoun
+                selected = {e["id"]: bank[e["source_id"]].quote for e in draft["evidence"]}
+                self.assertTrue(any(pronoun in selected[q] for q in person["name_evidence_ids"]))
+                with self.assertRaisesRegex(ValueError, "代词"):
+                    validate_draft(draft, bank, texts, producer="synthetic")
+
+    def test_named_first_person_narrator_and_contextual_alias_remain_valid(self):
+        _, _, base = report_case(1)
+        texts = {1: "我叫林客，许守叫我阿林，今天我和许守一同核对来船记录。" + base[1]}
+        draft, bank, texts = report_case(texts=texts)
+        draft["characters"][0].update(aliases=["阿林"], alias_basis=[dict(name="阿林", evidence_ids=["Q1_0"])])
+        draft["characters"][0]["identity"]["text"] = "第一人称叙述者名为林客，也被称为阿林。"
+        _, report = validate_draft(draft, bank, texts, producer="synthetic")
+        self.assertEqual(report.characters[0].name, "林客")
+        self.assertEqual(report.characters[0].aliases, ["阿林"])
+        self.assertEqual(report.characters[0].importance, "main")
+        self.assertTrue(any("我" in e.quote for e in report.evidence))
 
     def test_null_and_wrong_identity_cannot_be_borrowed(self):
         for subject, obj in ((None, None), ("null", "Xu"), ("Xu", None)):

@@ -35,6 +35,7 @@ class Character(StrictModel):
     name: str = Field(min_length=1, max_length=80)
     aliases: list[str] = Field(default_factory=list, max_length=20)
     role: str = Field(min_length=1, max_length=80)
+    importance: Literal["main", "support"] | None = None
     identity: Claim
     motivation: Claim
     change: Claim

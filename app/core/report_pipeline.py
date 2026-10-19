@@ -9,7 +9,6 @@ from __future__ import annotations
 from copy import deepcopy
 from hashlib import sha256
 import json
-import re
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, RootModel
@@ -26,8 +25,9 @@ VERIFY_MAX_TOKENS = 4096
 MAX_REVISION_BYTES = 12 * 1024
 ID = r"^[A-Za-z][A-Za-z0-9_-]{0,63}$"
 HASH = r"^[a-f0-9]{64}$"
-NON_PEOPLE = frozenset(("他", "她", "它", "其", "他们", "她们", "它们", "大家", "众人",
-                        "群众", "人群", "大道", "某人", "某某", "我们", "你们", "自己"))
+NON_PEOPLE = frozenset(("我", "我们", "咱", "咱们", "俺", "俺们", "你", "你们", "您", "您们",
+                        "他", "她", "它", "其", "他们", "她们", "它们", "大家", "众人",
+                        "群众", "人群", "大道", "某人", "某某", "自己"))
 
 
 class DraftClaim(Claim):
@@ -58,7 +58,6 @@ class Participant(StrictModel):
 
 
 class DraftCharacter(Character):
-    role: str = Field(min_length=1, max_length=70)
     identity: DraftClaim
     motivation: DraftClaim
     change: DraftClaim
@@ -66,7 +65,7 @@ class DraftCharacter(Character):
     insights: list[DraftDetail] = Field(default_factory=list, max_length=8)
     name_evidence_ids: list[str] = Field(min_length=1, max_length=12)
     alias_basis: list[AliasBasis] = Field(max_length=20)
-    importance: Literal["main", "support"]
+    importance: Literal["main", "support"] = Field(...)
     importance_basis: Claim
 
 
@@ -187,17 +186,6 @@ def _public_claim(claim, *, title=False, finding=False):
     return {key: getattr(claim, key) for key in keys}
 
 
-def public_role(person):
-    """Project a validated classification without rewriting its literary role."""
-    main = bool(re.match(r"^(?:主角|主要人物|主人公)", person.role))
-    support = bool(re.match(r"^(?:配角|次要人物|实质配角)", person.role))
-    if (main and person.importance != "main") or (support and person.importance != "support"):
-        raise ValueError("主配分类与角色说明不一致")
-    if main or support:
-        return person.role
-    return ("主要人物" if person.importance == "main" else "实质配角") + " · " + person.role
-
-
 def public_wire(draft):
     """An explicit projection after validation; never discard an unknown field."""
     data = {key: getattr(draft, key) for key in
@@ -206,8 +194,7 @@ def public_wire(draft):
     data["findings"] = [_public_claim(c, finding=True) for c in draft.findings]
     data["characters"] = []
     for person in draft.characters:
-        item = {key: getattr(person, key) for key in ("id", "entity_key", "name", "aliases", "role")}
-        item["role"] = public_role(person)
+        item = {key: getattr(person, key) for key in ("id", "entity_key", "name", "aliases", "role", "importance")}
         for field in ("identity", "motivation", "change", "portrait"):
             claim = getattr(person, field)
             item[field] = _public_claim(claim) if claim is not None else None

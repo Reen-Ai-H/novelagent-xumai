@@ -183,7 +183,7 @@ class ReportApiTest(unittest.TestCase):
             with self.subTest(body=bad): self.assertEqual(self.start(bad).status_code, 422)
         self.assertEqual(self.calls, [])
 
-    def test_one_sourced_revision_then_final_review_and_classification_projection(self):
+    def test_one_sourced_revision_then_final_review_and_explicit_classification(self):
         self.prepare()
         self.scripted([lambda: self.draft, self.revised_reply, lambda: acceptance(self.job()["revised"])])
         self.assertEqual(self.start().status_code, 200)
@@ -192,7 +192,8 @@ class ReportApiTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 3)
         self.assertEqual(self.job()["draft"]["characters"][0]["role"], "主要人物")
         report = self.client.get(self.url).json()["result"]["report"]
-        self.assertEqual(report["characters"][0]["role"], "主要人物 · 渡口记账人")
+        self.assertEqual(report["characters"][0]["role"], "渡口记账人")
+        self.assertEqual(report["characters"][0]["importance"], "main")
         self.assertIn("verification_response", self.job())
 
     def test_final_blocker_stops_no_semantic_retry_no_partial_adoption(self):
