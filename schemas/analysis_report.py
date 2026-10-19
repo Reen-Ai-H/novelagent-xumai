@@ -151,3 +151,28 @@ class AnalysisRequest(StrictModel):
     expected_source_revision: int = Field(ge=0)
     expected_source_hash: str = Field(min_length=16, max_length=128)
     chapter_numbers: list[int] = Field(min_length=1, max_length=20)
+
+
+class ReportTaskRequest(StrictModel):
+    """Explicitly analyse the complete current manuscript; never a silent subset."""
+
+    expected_source_version_id: str = Field(min_length=1, max_length=128)
+    expected_source_revision: int = Field(ge=0)
+    expected_source_hash: str = Field(min_length=16, max_length=128)
+
+
+ReportTaskStatus = Literal["running", "paused", "failed", "completed"]
+ReportTaskStage = Literal["queued", "draft", "review", "revise", "verify", "adopt", "completed"]
+
+
+class ReportTaskPublic(StrictModel):
+    kind: Literal["report-v2"] = "report-v2"
+    run_id: str
+    status: ReportTaskStatus
+    stage: ReportTaskStage
+    cursor: int = Field(ge=0, le=3)
+    total: int = Field(ge=2, le=3)
+    message: str
+    budget: dict
+    document_id: str | None = None
+    error_code: str | None = None

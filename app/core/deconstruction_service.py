@@ -813,6 +813,23 @@ class DeconstructionService:
             "volumes": self._volumes(source, record),
             "characters": [item.model_dump(mode="json") for item in characters],
         }
+    def report_material(self, project_id: str, account_id: str, payload):
+        """Full current source only; run before creating or scheduling a paid job."""
+        from app.core.analysis_grounding import source_bank
+        from app.core.report_pipeline import REPORT_LIMIT
+        source = self._source(project_id, account_id)
+        self._check_source_precondition(source, **payload.model_dump())
+        if not source.sufficient or source.pending_changes:
+            raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        if sum(len(c.content) for c in source.chapters) > REPORT_LIMIT:
+            raise DeconstructionServiceError("report_scope_large", "本轮完整正文超过三万字符，尚不支持此入口；正文没有被截断。", status_code=422)
+        numbers = sorted(c.chapter_number for c in source.chapters)
+        if not numbers or numbers != list(range(numbers[0], numbers[-1] + 1)):
+            raise DeconstructionServiceError("report_scope_invalid", "当前正文的正式章节范围不完整。", status_code=422)
+        material = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in source.chapters]
+        read_text = {c.chapter_number: c.content for c in source.chapters}
+        return source, material, source_bank(read_text), read_text
+
     async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
         """Read a bounded source snapshot; model failure never replaces the current result."""
         from app.agents.deconstruction_model import chapter_fact_messages, chapter_checked_messages, preview_max_tokens
