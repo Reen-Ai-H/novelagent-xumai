@@ -9,7 +9,7 @@ from unittest.mock import patch
 from app import deconstruction_routes
 from app.core.book_analysis import BookAnalysis
 from app.core.report_pipeline import object_hash
-from app.core.source_report import SOURCE_REPORT_WIRE, check_source_directory, source_target_hashes
+from app.core.source_report import SOURCE_REPORT_V2_WIRE, check_source_directory, source_target_hashes
 from stage38_report_fixtures import acceptance
 from stage38_source_report_fixtures import source_case
 import test_stage38_report_api as old
@@ -65,7 +65,7 @@ class SourceReportApiTest(unittest.TestCase):
         final = self.wait()
         self.assertEqual((final["status"], final["stage"], final["cursor"], final["total"]), ("completed", "completed", 2, 2))
         job = self.job()
-        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_WIRE)
+        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_V2_WIRE)
         entries = check_source_directory(job, self.bank, self.texts)
         self.assertEqual(len(entries), len(self.bank))
         self.assertEqual(job["draft_diagnostics"], [])
@@ -272,7 +272,7 @@ class SourceReportApiTest(unittest.TestCase):
         self.assertEqual(final["error_code"], "provider_bad_json")
         self.assertEqual(len(self.calls), 2)
         self.assertNotIn("draft", self.job())
-        self.assertEqual(self.job()["report_wire_version"], SOURCE_REPORT_WIRE)
+        self.assertEqual(self.job()["report_wire_version"], SOURCE_REPORT_V2_WIRE)
         self.unchanged()
 
     def test_failed_legacy_json_is_preserved_in_history_not_converted_or_adopted(self):
@@ -293,7 +293,7 @@ class SourceReportApiTest(unittest.TestCase):
         self.assertEqual(current["report_history"][-1], {k: v for k, v in before.items() if k != "report_history"})
         self.assertEqual(current["report_history"][-1]["draft_response"], old_draft)
         self.assertNotEqual(current["run_id"], "failed-legacy")
-        self.assertEqual(current["report_wire_version"], SOURCE_REPORT_WIRE)
+        self.assertEqual(current["report_wire_version"], SOURCE_REPORT_V2_WIRE)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(current["draft_response"], self.draft)
 

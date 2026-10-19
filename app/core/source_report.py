@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from pydantic import create_model, model_validator
+from pydantic import Field, create_model, model_validator
 
 from app.core.analysis_grounding import source_bank
 from app.core.report_pipeline import (
@@ -21,6 +21,8 @@ from schemas.analysis_report import Claim, StrictModel
 
 
 SOURCE_REPORT_WIRE = "source-report-v1"
+SOURCE_REPORT_V2_WIRE = "source-report-v2"
+SOURCE_REPORT_WIRES = (SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE)
 LEGACY_REPORT_WIRE = "report-draft-v1"
 REF_NAMES = {"evidence_ids": "source_ids", "name_evidence_ids": "name_source_ids",
              "time_evidence_ids": "time_source_ids"}
@@ -89,11 +91,34 @@ class SourceReportDraft(_SourceReportShape):
         return self
 
 
+class SourceInsight(SourceDetail):
+    # Presentation metadata only. Explicit invalid values must still fail;
+    # never synthesize a manuscript-derived title or default a factual field.
+    title: str = Field(default="补充信息", min_length=1, max_length=80,
+                       description="仅source-report-v2人物insights可缺省此展示标题，缺省为补充信息；"
+                                   "显式提供时原样保留并严格限制，null/空串/超长不使用默认值。")
+
+
+SourceCharacterV2 = _source_model("SourceCharacterV2", SourceCharacter, insights=list[SourceInsight])
+SourceReportDraftV2 = create_model("SourceReportDraftV2", __base__=SourceReportDraft,
+    __doc__=SourceReportDraft.__doc__ + "\n编号限制仅针对编号冲突，不禁止其他schema结构修复。"
+                                     "仅source-report-v2人物insights缺title时使用补充信息；其他标题仍必填。",
+    characters=(list[SourceCharacterV2], deepcopy(SourceReportDraft.model_fields["characters"])))
+
+
+def source_report_model(wire=SOURCE_REPORT_WIRE):
+    if wire == SOURCE_REPORT_WIRE:
+        return SourceReportDraft
+    if wire == SOURCE_REPORT_V2_WIRE:
+        return SourceReportDraftV2
+    raise ValueError("未知的私有来源报告合同版本")
+
+
 def report_wire(job):
     version = job.get("report_wire_version")
     if version in (None, LEGACY_REPORT_WIRE):
         return LEGACY_REPORT_WIRE
-    if version != SOURCE_REPORT_WIRE:
+    if version not in SOURCE_REPORT_WIRES:
         raise ValueError("未知的私有报告合同版本")
     return version
 
@@ -178,8 +203,8 @@ def _references(value, path="", target=None):
             yield from _references(item, f"{path}[{index}]", target)
 
 
-def _shape(data, entries, read_text):
-    draft = SourceReportDraft.model_validate(data, strict=True)
+def _shape(data, entries, read_text, *, wire=SOURCE_REPORT_WIRE):
+    draft = source_report_model(wire).model_validate(data, strict=True)
     if (set(draft.chapter_numbers) != set(read_text)
             or len(draft.chapter_numbers) != len(read_text)):
         raise ValueError("报告必须覆盖全部当前正文")
@@ -216,9 +241,9 @@ def _legacy_projection(data, entries):
     return projected
 
 
-def validate_source_candidate(data, entries, bank, read_text, *, producer):
+def validate_source_candidate(data, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
     check_source_entries(entries, bank, read_text)
-    draft = _shape(data, entries, read_text).model_dump(mode="json")
+    draft = _shape(data, entries, read_text, wire=wire).model_dump(mode="json")
     _, report = validate_draft(_legacy_projection(draft, entries), bank, read_text, producer=producer)
     return draft, report
 
@@ -253,14 +278,14 @@ def _cycle_targets(nodes, edges):
     return []
 
 
-def prepare_source_draft(data, entries, bank, read_text, *, producer):
+def prepare_source_draft(data, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
     """Strict shape/boundary first; only enumerated, addressable defects review.
 
     No exception from the final validator is converted into a diagnostic.
     Unexpected errors still fail the job. Diagnostics never make a draft valid.
     """
     check_source_entries(entries, bank, read_text)
-    draft = _shape(data, entries, read_text)
+    draft = _shape(data, entries, read_text, wire=wire)
     value = draft.model_dump(mode="json")
     diagnostics = []
     def emit(code, targets, field, **details):
@@ -390,7 +415,7 @@ def prepare_source_draft(data, entries, bank, read_text, *, producer):
     if not diagnostics:
         # A backstop here is also intentional. Unexpected validator failures
         # must stop, not be silently relabelled as a reviewable content issue.
-        validate_source_candidate(value, entries, bank, read_text, producer=producer)
+        validate_source_candidate(value, entries, bank, read_text, producer=producer, wire=wire)
     return value, diagnostics
 
 
@@ -402,8 +427,13 @@ def _review_sources(refs, entries, bank, read_text):
     _source_check([entries[ref] for ref in refs], bank, read_text)
 
 
-def validate_source_review(data, draft, entries, bank, read_text, *, final=False):
+def validate_source_review(data, draft, entries, bank, read_text, *, final=False, wire=SOURCE_REPORT_WIRE):
     check_source_entries(entries, bank, read_text)
+    if wire == SOURCE_REPORT_V2_WIRE:
+        if source_report_model(wire).model_validate(draft, strict=True).model_dump(mode="json") != draft:
+            raise ValueError("审查对象必须是同版本的规范化草稿")
+    else:
+        source_report_model(wire)
     review = (ReportVerification if final else ReportReview).model_validate(data, strict=True).root
     if review.draft_hash != object_hash(draft):
         raise ValueError("审查绑定了其他草稿")
@@ -424,10 +454,10 @@ def validate_source_review(data, draft, entries, bank, read_text, *, final=False
     return review
 
 
-def apply_source_revision(review, draft, entries, bank, read_text, *, producer):
+def apply_source_revision(review, draft, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
     if not isinstance(review, ReviewRevise):
         raise ValueError("只允许一次有源修订")
-    validate_source_review(review.model_dump(mode="json"), draft, entries, bank, read_text)
+    validate_source_review(review.model_dump(mode="json"), draft, entries, bank, read_text, wire=wire)
     original, revised, removals = source_target_index(draft), deepcopy(draft), {}
     for change in review.changes:
         exists = change.target in original
@@ -474,4 +504,4 @@ def apply_source_revision(review, draft, entries, bank, read_text, *, producer):
             del revised[group][index]
     # A revision is only applied once and must immediately pass the ORIGINAL
     # full validator. No second diagnostic/revision round is opened here.
-    return validate_source_candidate(revised, entries, bank, read_text, producer=producer)[0]
+    return validate_source_candidate(revised, entries, bank, read_text, producer=producer, wire=wire)[0]

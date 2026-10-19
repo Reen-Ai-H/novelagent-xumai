@@ -13,8 +13,8 @@ from app.core.report_pipeline import (
 )
 from schemas.analysis_report import AnalysisImport, ReportTaskRequest
 from app.core.source_report import (
-    SOURCE_REPORT_WIRE, SourceReportDraft, apply_source_revision, check_source_directory,
-    prepare_source_draft, report_wire, validate_source_candidate, validate_source_review,
+    SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_WIRES, apply_source_revision, check_source_directory,
+    prepare_source_draft, report_wire, source_report_model, validate_source_candidate, validate_source_review,
 )
 
 
@@ -92,34 +92,52 @@ async def run_report_job(runner, project, account):
                                     expected_source_revision=job["source_revision"],
                                     expected_source_hash=job["source_hash"])
         _, material, bank, read_text = runner.service.report_material(project, account, payload)
-        source_wire = report_wire(job) == SOURCE_REPORT_WIRE
+        wire = report_wire(job)
+        source_wire = wire in SOURCE_REPORT_WIRES
         entries = check_source_directory(job, bank, read_text) if source_wire else None
 
         def prepare(data):
             if source_wire:
-                return prepare_source_draft(data, entries, bank, read_text, producer=job["model"])
+                return prepare_source_draft(data, entries, bank, read_text, producer=job["model"], wire=wire)
             return validate_draft(data, bank, read_text, producer=job["model"])[0], None
 
         def validate(data):
             if source_wire:
-                return validate_source_candidate(data, entries, bank, read_text, producer=job["model"])
+                return validate_source_candidate(data, entries, bank, read_text, producer=job["model"], wire=wire)
             return validate_draft(data, bank, read_text, producer=job["model"])
 
         def check_review(data, candidate, *, final=False):
             if source_wire:
-                return validate_source_review(data, candidate, entries, bank, read_text, final=final)
+                return validate_source_review(data, candidate, entries, bank, read_text, final=final, wire=wire)
             return validate_review(data, candidate, bank, read_text, final=final)
 
         def revise(review, candidate):
             if source_wire:
-                return apply_source_revision(review, candidate, entries, bank, read_text, producer=job["model"])
+                return apply_source_revision(review, candidate, entries, bank, read_text, producer=job["model"], wire=wire)
             return apply_revision(review, candidate, bank, read_text, producer=job["model"])
+
+        def cached_response(key, schema):
+            if wire != SOURCE_REPORT_V2_WIRE:
+                return job[key]
+            # A v2 cache needs actual content provenance. Neither normalized
+            # data nor an older diagnostic may be relabelled as raw text.
+            text = job[key + "_text"]
+            if not isinstance(text, str):
+                raise ValueError("缓存缺少安全的原始响应")
+            raw = dict(LLMRuntime._decode_json_object(text))
+            if raw != job[key]:
+                raise ValueError("缓存原始文本与响应JSON不一致")
+            schema.model_validate(raw, strict=True)
+            return raw
+
+        def review_response():
+            return cached_response("review_response", ReportReview)
 
         async def obtain(stage, key, schema, max_tokens, **context):
             nonlocal job, runtime
             guard()
-            if key in job:
-                return job[key]
+            if key in job or (wire == SOURCE_REPORT_V2_WIRE and key + "_text" in job):
+                return cached_response(key, schema)
             runtime = get_runtime()
             if not runtime.available:
                 raise DeconstructionServiceError("model_unavailable", "拆书模型暂不可用，现有结果已保留。", status_code=503)
@@ -129,7 +147,7 @@ async def run_report_job(runner, project, account):
                 max_tokens = preview_max_tokens(runtime)
             if source_wire:
                 messages = source_report_messages(material, bank, entries, stage=stage,
-                                                  diagnostics=job.get("draft_diagnostics"), **context)
+                                                  wire=wire, diagnostics=job.get("draft_diagnostics"), **context)
             else:
                 messages = report_messages(material, bank, stage=stage, **context)
             def begin():
@@ -146,25 +164,35 @@ async def run_report_job(runner, project, account):
                                         max_tokens=max_tokens, timeout=1220)
             if answer is None:
                 raise _Stopped()
+            response = answer.data
+            if wire == SOURCE_REPORT_V2_WIRE:
+                # structured() dumps defaults. Preserve the actual validated
+                # response separately from the normalized frozen draft/revision.
+                # This is decoding only, never patching a failed candidate.
+                response = dict(LLMRuntime._decode_json_object(answer.text))
+                if schema.model_validate(response, strict=True).model_dump(mode="json") != answer.data:
+                    raise ValueError("原始响应与结构化结果不一致")
             # Persist a returned response even when the author paused during
             # HTTP. It can be validated on explicit resume without paying again.
             with runner._lock(project):
                 current = runner.load(project, account)
                 if not current or not runner._same_job(current, job):
                     raise _Stopped()
-                current.update({key: answer.data, "inflight": False})
+                current.update({key: response, "inflight": False})
+                if wire == SOURCE_REPORT_V2_WIRE:
+                    current[key + "_text"] = answer.text
                 runner.save(current)
                 job = current
             if job["status"] != "running":
                 raise _Stopped()
             guard()
-            return answer.data
+            return response
 
         if job["stage"] == "queued":
             update(dict(stage="draft"), before_save=guard)
         if job["stage"] == "draft":
             # The same factory/cap rule as preview; no larger output allowance.
-            raw = await obtain("draft", "draft_response", SourceReportDraft if source_wire else ReportDraft,
+            raw = await obtain("draft", "draft_response", source_report_model(wire) if source_wire else ReportDraft,
                                None)
             draft, diagnostics = prepare(raw)
             values = dict(draft=draft, stage="review", cursor=1)
@@ -172,6 +200,12 @@ async def run_report_job(runner, project, account):
                 values["draft_diagnostics"] = diagnostics
             update(values, before_save=guard)
         draft, diagnostics = prepare(job["draft"])
+        if wire == SOURCE_REPORT_V2_WIRE and draft != job["draft"]:
+            raise ValueError("冻结草稿不是本版本的规范化结果")
+        if wire == SOURCE_REPORT_V2_WIRE:
+            raw = cached_response("draft_response", source_report_model(wire))
+            if source_report_model(wire).model_validate(raw, strict=True).model_dump(mode="json") != draft:
+                raise ValueError("冻结草稿与原始响应不一致")
         if source_wire and diagnostics != job["draft_diagnostics"]:
             raise ValueError("草稿诊断与冻结原稿不一致")
         if job["stage"] == "review":
@@ -188,13 +222,17 @@ async def run_report_job(runner, project, account):
                 update(dict(stage="adopt", cursor=2, approved_hash=object_hash(draft),
                             message="核对完成，正在保存报告"), before_save=guard)
         if job["stage"] == "revise":
-            review = check_review(job["review_response"], draft)
+            review = check_review(review_response(), draft)
             revised = revise(review, draft)
             update(dict(revised=revised, stage="verify"), before_save=guard)
         if job["stage"] == "verify":
             revised, _ = validate(job["revised"])
+            if wire == SOURCE_REPORT_V2_WIRE and revised != job["revised"]:
+                raise ValueError("冻结修订不是本版本的规范化结果")
+            if wire == SOURCE_REPORT_V2_WIRE and revise(check_review(review_response(), draft), draft) != revised:
+                raise ValueError("冻结修订与原始审查不一致")
             raw = await obtain("verify", "verification_response", ReportVerification, VERIFY_MAX_TOKENS,
-                               draft=revised, original=draft, revision=job["review_response"])
+                               draft=revised, original=draft, revision=review_response())
             verification = check_review(raw, revised, final=True)
             if not isinstance(verification, ReviewAccept):
                 raise _Rejected()
@@ -203,13 +241,13 @@ async def run_report_job(runner, project, account):
         if job["stage"] == "adopt":
             # Revalidate stored review provenance on every recovery, not just
             # the mutable phase marker. A half-report is never imported.
-            review = check_review(job["review_response"], draft)
+            review = check_review(review_response(), draft)
             candidate = draft
             if isinstance(review, ReviewRevise):
                 candidate = revise(review, draft)
                 if candidate != job.get("revised"):
                     raise ValueError("持久修订与审查不一致")
-                verdict = check_review(job["verification_response"], candidate, final=True)
+                verdict = check_review(cached_response("verification_response", ReportVerification), candidate, final=True)
                 if not isinstance(verdict, ReviewAccept):
                     raise _Rejected()
             elif not isinstance(review, ReviewAccept):

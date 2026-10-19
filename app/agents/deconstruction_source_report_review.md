@@ -10,6 +10,6 @@
 
 仅允许一次decision=revise、同一draft_hash、1至8个changes，整个修订JSON最多12KiB。每条target/before_hash/replacement/text/source_ids，理由须有同一目录内的真实来源。before_hash逐字复制target_hashes，新增对象用null。target仅完整对象characters/ID、events/ID、findings/ID、participants/ID；或relations/索引、character_relations/索引、open_questions/索引、contradictions/索引、order_constraints/索引、question_sources/索引；或story_order、time_note、time_source_ids、title、scope。没有evidence可写目标，不接受任意嵌套路径。索引以原稿为准，新增索引只能等于原数组长度。
 
-replacement是完整新对象，稳定ID不变，使用同一SourceReportDraft字段和短来源合同。元信息或单个open_questions用{"value":完整值}包装。新增引用直接选已给短ID，不另加证据表。importance_basis仍只text/status/source_ids，关系仍无独立id。依赖对象须同批明确修订，不指望代码改端点。确为无据人物或错误关系可replacement=null作明确有源撤回，但仍成立的动作、身份安排和重要分句须在正确位置保留；不强迫错误分句成立，也不删事实凑过审。原稿与撤回理由保留，终审逐条核对。
+replacement是完整新对象，稳定ID不变，使用同一显式版本的SourceReportDraft字段和短来源合同。SourceDetail的title必填；仅source-report-v2人物insights的SourceInsight允许缺title使用固定补充信息，原始修订保留，规范化后才生成终审草稿/hash。已提供的标题继续核对，不把固定标签当作内容通过。元信息或单个open_questions用{"value":完整值}包装。新增引用直接选已给短ID，不另加证据表。importance_basis仍只text/status/source_ids，关系仍无独立id。依赖对象须同批明确修订，不指望代码改端点。确为无据人物或错误关系可replacement=null作明确有源撤回，但仍成立的动作、身份安排和重要分句须在正确位置保留；不强迫错误分句成立，也不删事实凑过审。原稿与撤回理由保留，终审逐条核对。
 
 不重写全报告，不通过降低确定性或泛化问题隐藏错误。超过8目标/12KiB、来源不足或不能闭合时blocked，不裁剪纠错清单。修订后遗留任何结构/来源错误都失败，不再修订；终审只能accept/blocked。

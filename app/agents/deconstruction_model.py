@@ -192,13 +192,15 @@ def report_messages(chapters, bank, *, stage, draft=None, original=None, revisio
 
 
 def source_report_messages(chapters, bank, entries, *, stage, draft=None,
-                           original=None, revision=None, diagnostics=None):
+                           original=None, revision=None, diagnostics=None, wire="source-report-v1"):
     """Explicit new wire only. Never expose two selector namespaces to the model."""
     import json
-    from app.core.source_report import check_source_entries, source_target_hashes, source_target_index
+    from app.core.source_report import (SOURCE_REPORT_V2_WIRE, check_source_entries,
+        source_report_model, source_target_hashes, source_target_index)
     from app.core.report_pipeline import object_hash
 
     check_source_entries(entries, bank, {c["chapter_number"]: c["content"] for c in chapters})
+    source_report_model(wire)  # Explicit version only, never infer it from a candidate.
     reverse = {source: short for short, source in entries.items()}
     if len(reverse) != len(entries) or set(reverse) != set(bank):
         raise ValueError("短来源目录必须与完整来源库一一对应")
@@ -209,6 +211,12 @@ def source_report_messages(chapters, bank, entries, *, stage, draft=None,
                 segment["source_id"] = reverse[segment["source_id"]]
     material = {"chapters": segments}
     rules = Path(__file__).with_name("deconstruction_source_report_rules.md").read_text(encoding="utf-8")
+    version_rule = ("本轮私有合同source-report-v2：仅人物insights使用SourceInsight，缺title时采用固定展示标签补充信息。"
+                    "显式提供的title原样保留且严格限制，null、空串、超长不兜底；不从正文猜标题。"
+                    "events.sub_events及contradictions仍使用必填title的SourceDetail。"
+                    if wire == SOURCE_REPORT_V2_WIRE else
+                    "本轮私有合同source-report-v1：人物insights、events.sub_events及contradictions均为SourceDetail，title全部必填。")
+    rules = version_rule + "\n" + rules
     if stage == "draft":
         instruction = "起草SourceReportDraft，直接返回完整紧凑JSON。"
     elif stage in {"review", "verify"}:
