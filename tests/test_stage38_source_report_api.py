@@ -177,14 +177,15 @@ class SourceReportApiTest(unittest.TestCase):
         self.assertEqual(len(self.job()["draft"]["relations"]), len(self.draft["relations"]))
         self.unchanged()
 
-    def test_object_id_ambiguity_fails_before_review_no_content_repair(self):
+    def test_object_id_ambiguity_still_fails_before_review_after_one_format_repair(self):
         self.prepare()
         self.draft["events"][0]["id"] = "Lin"
+        self.scripted([lambda: self.draft, lambda: self.draft])
         self.start(); final = self.wait()
-        self.assertEqual(final["error_code"], "report_evidence_invalid")
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(final["error_code"], "provider_bad_json")
+        self.assertEqual(len(self.calls), 2)
         self.assertNotIn("draft", self.job())
-        self.assertIn("draft_response", self.job())
+        self.assertNotIn("review_response", self.job())
         self.unchanged()
 
     def test_unexpected_draft_error_is_fatal_not_an_ignorable_review_issue(self):

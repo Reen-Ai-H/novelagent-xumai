@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from pydantic import create_model
+from pydantic import create_model, model_validator
 
 from app.core.analysis_grounding import source_bank
 from app.core.report_pipeline import (
@@ -38,6 +38,12 @@ def _source_model(name, base, **overrides):
               for key, field in base.model_fields.items() if key != "evidence"}
     for key, annotation in overrides.items():
         fields[key] = (annotation, fields[key][1])
+    if "id" in fields:
+        # Code-owned schema guidance survives the common runtime's deliberate
+        # removal of candidate values/messages from repair error summaries.
+        fields["id"][1].description = (
+            "内部稳定编号；须与本报告characters、events、findings、participants全部对象的id全局唯一。"
+            "不同对象即使用名或拼音近似也不得共用id；不能通过合并或删除对象解决编号冲突。")
     return create_model(name, __base__=StrictModel, **fields)
 
 
@@ -57,11 +63,30 @@ SourceRelation = _source_model("SourceRelation", DraftRelation)
 SourceCharacterRelation = _source_model("SourceCharacterRelation", DraftCharacterRelation)
 SourceTimeConstraint = _source_model("SourceTimeConstraint", TimeConstraint)
 SourceQuestion = _source_model("SourceQuestion", QuestionSource)
-SourceReportDraft = _source_model("SourceReportDraft", ReportDraft,
+_SourceReportShape = _source_model("SourceReportShape", ReportDraft,
     findings=list[SourceFinding], characters=list[SourceCharacter], events=list[SourceEvent],
     relations=list[SourceRelation], character_relations=list[SourceCharacterRelation],
     contradictions=list[SourceDetail], participants=list[SourceParticipant],
     order_constraints=list[SourceTimeConstraint], question_sources=list[SourceQuestion])
+
+
+class SourceReportDraft(_SourceReportShape):
+    """characters、events、findings、participants中全部对象的id必须全局唯一。
+
+    编号只作内部引用，不是姓名或文学事实。格式修复须保留全部人物/事件/对象、
+    事实文字、判断状态与来源编号选择；只可重分配可无歧义的内部ID，并同步对应的
+    subject_id/object_id、actor_ids、from_id/to_id、story_order及动作定位引用
+    from_action/to_action/action_ref。不得合并、去重、删对象或猜测身份/端点。
+    无法明确归属的引用不能靠改编号掩盖；仍有歧义或重复时必须拒绝，不另增修复循环。
+    """
+
+    @model_validator(mode="after")
+    def unique_object_ids(self):
+        ids = [item.id for group in SOURCE_ID_GROUPS for item in getattr(self, group)]
+        if len(ids) != len(set(ids)):
+            # No ID/name/source values are put into trusted error prose.
+            raise ValueError("报告对象的内部ID必须全局唯一")
+        return self
 
 
 def report_wire(job):

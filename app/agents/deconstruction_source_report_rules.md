@@ -6,6 +6,10 @@
 
 SourceReportDraft是报告本身。基础SourceClaim只用text/status/source_ids。SourceDraftClaim适用字段：findings、characters.identity、characters.motivation、characters.change、characters.portrait、characters.insights、events.action、events.consequence、events.sub_events、contradictions。这些字段再加subject_id/object_id/kind/phase，id/title等仍按各自对象schema；importance_basis只用text/status/source_ids。relations和character_relations不带独立id。人物、参与者、事件及finding的ID全局唯一，不能占用服务器来源ID。端点用已有个体ID或真正JSON null，不用字符串null。kind为action/state/knowledge/feeling，phase为actual/planned/requested/negated/unknown，与fact/reported/inferred/unknown认知status分开。复杂主张中主体或阶段不同须拆开，用sub_events保留关键细节，不为图省事删分句。知情和情感的subject是实际持有者；人物字段必须关于本人，未观察到的必填项可有据表达局部未知，不编造变化。
 
+内部ID不是姓名，相近用名或拼音不能共用编号。若本阶段进入既有格式修复，只能修正可无歧义的编号冲突及对应引用，保留全部人物、事件、对象、事实文字、status与source_ids选择；同步subject_id/object_id、actor_ids、from_id/to_id、story_order及from_action/to_action/action_ref中的对应定位。不得服务器合并/去重，也不得删对象、改事实或猜测身份来制造唯一性。无法明确判定归属时保留冲突并让严格校验拒绝，不伪造另一种顶层结果或增加修复循环。无歧义结构合格后，仍须独立原文review，不把编号唯一当作人物或端点语义正确。
+
+findings保留少量跨人物、跨事件的综合发现，不作人物卡或事件摘要合集。人物字段写本人的身份、动机和变化，事件字段写经过、结果及关键细节。必要重复只保留各自职责所需的概括，主体、时层和阶段保持一致；重要事实及限定留在正确归属处，不为适配8目标删事实或降低确定性。
+
 人物只建主要人物和实质配角，importance必须为main/support，由importance_basis支持。role是不超过80字符的身份/作用说明，原样保留；“主要人物的导师”不证明该人物为main，不用分类前缀替代明确importance。characters给name_source_ids、逐项alias_basis；aliases与alias_basis.name一一对应，别名合并须有同一人的真实上下文，近似姓名或同名不是同一性证据。先核对年代、代际与经历，跨世代同名不得绑定当前人物ID。未上卡但有实际动作的个体放participants，不能借内部分类排除持续视角、核心选择或关键照护者。“我/你/您/他/她”等代词、“大道”等概念和“群众/众人”等群体不成为个体；有名的第一人称叙述者保留原文姓名。匿名而明确的单个人可按原文称谓保留，不自动归并不同同称者。
 
 先逐段确定叙述者、对白说话者、受话者和被指对象，再判断身份、动作和动机。区分商议者、说出安排者、对外父母、抚养者、真实亲属与执行者。连续语境已建立身份时不因同句无姓名而悬置为未知；真实用名冲突才保留原称谓与两端来源，不替作者改名或编同名者。亲属代际、收徒/抚养、知情/经手/主谋分别核对。
