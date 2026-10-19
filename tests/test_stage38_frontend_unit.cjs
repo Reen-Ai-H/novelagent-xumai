@@ -69,6 +69,11 @@ report.character_relations=[
  {from_id:'missing',to_id:'C1',label:'无效端点',status:'fact'}];
 const before=JSON.stringify(report),options={claim:JSON.stringify,evidence:()=>''};
 const data=R.mountModel({},report,options);
+assert.equal(data.timeNote,report.time_note);
+const noteReport=structuredClone(report);noteReport.time_note='回忆中的顺序未定。\n  <原样 & 不改写>';
+assert.equal(R.mountModel({},noteReport,options).timeNote,noteReport.time_note);
+delete noteReport.time_note;
+assert.equal(R.mountModel({},noteReport,options).timeNote,'');
 assert.equal(data.people[0].group,'主要人物');assert.equal(data.people[3].group,'配角');
 const explicit=structuredClone(report),longRole='在旧港记录来往船只并见证众人选择的普通人'.repeat(4).slice(0,80);
 assert.equal(longRole.length,80);

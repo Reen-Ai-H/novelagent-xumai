@@ -64,6 +64,9 @@
 .workspace-order,.workspace-object-tabs { display:flex; gap:4px; margin:0 0 18px; }
 .workspace-order button,.workspace-object-tabs button { min-height:40px; padding:8px 18px; color:var(--ink-soft); background:transparent; border-bottom:2px solid transparent; }
 .workspace-order [aria-pressed=true],.workspace-object-tabs [aria-pressed=true] { color:var(--cobalt); border-bottom-color:var(--cobalt); }
+.workspace-time-note { margin:-8px 0 18px; color:var(--ink-soft); font:.8rem/1.7 var(--sans); }
+.workspace-time-note summary { cursor:pointer; }
+.workspace-time-note p { margin:10px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .workspace-event-path { display:grid; grid-template-columns:minmax(0,1fr); gap:0; padding:12px 0; }
 .workspace-event-stop { position:relative; display:flex; align-items:baseline; gap:16px; padding:18px 16px 26px; border-top:1px solid var(--line); border-left:2px solid #c4d2ef; background:var(--paper); min-width:0; }
 .workspace-event-stop::before { content:''; position:absolute; left:-5px; top:28px; width:8px; height:8px; background:var(--cobalt); border-radius:50%; }
@@ -271,10 +274,12 @@
 .total-graph-node.is-selected { border-color:var(--cobalt); }
 .total-graph-node .eyebrow { color:var(--ink-soft); font:.7rem/1.5 var(--sans); }
 .total-graph-node h2 { margin:8px 0 0; font:500 1.15rem/1.6 var(--serif); }
+.total-graph-position { margin-right:7px; color:var(--cobalt); font:.7rem/1.5 var(--mono); }
 .total-graph-link { color:var(--ink); overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .total-graph-link::after { content:''; position:absolute; inset:0; }
 .total-graph-edge { position:absolute; transform:translate(-50%,-50%); display:grid; justify-items:center; gap:3px; width:var(--graph-label-width,138px); min-height:44px; padding:5px; background:var(--paper); color:var(--cobalt); border:1px solid var(--line); font:.78rem/1.5 var(--sans); }
-.total-graph-edge > span:first-child { overflow-wrap:anywhere; }
+.total-graph-edge-text { min-width:0; max-width:100%; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.total-graph-edge-direction { display:inline-block; width:1em; }
 .total-graph-edge .analysis-badge { margin:0; font-size:.6rem; }
 .total-graph-edge small { color:var(--ink-soft); }
 .total-graph-empty { font:.85rem/1.8 var(--sans); color:var(--ink-soft); margin:14px 0; }

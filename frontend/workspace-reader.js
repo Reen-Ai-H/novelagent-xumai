@@ -130,10 +130,10 @@
     return refined?null:searchGraphPath(blocks,tracks,starts,goals,width,height,true);
   }
 
-  function graphRoute(layout,edge,occupied=[]) {
+  function graphRoute(layout,edge,occupied=[],labelSize=null) {
     const initialHeight=layout.height;
     const a=layout.positions.get(String(edge.from)),b=layout.positions.get(String(edge.to));
-    const nw=layout.nodeWidth || 210,nh=layout.nodeHeight || 94,lw=layout.labelWidth || 138,lh=layout.labelHeight || 52;
+    const nw=layout.nodeWidth || 210,nh=layout.nodeHeight || 94,lw=labelSize?.width ?? layout.labelWidth ?? 138,lh=labelSize?.height ?? layout.labelHeight ?? 52;
     const nodes=[...layout.positions.values()].map(p=>({left:p.x-nw/2,right:p.x+nw/2,top:p.y-nh/2,bottom:p.y+nh/2}));
     const overlaps=(a,b,pad=0)=>a.left<b.right+pad && a.right>b.left-pad && a.top<b.bottom+pad && a.bottom>b.top-pad;
     const rect=p=>({left:p.x-lw/2,right:p.x+lw/2,top:p.y-lh/2,bottom:p.y+lh/2});
@@ -220,8 +220,8 @@
       // Search both legs with all obstacle-corner coordinates, rather than
       // repeatedly trying the same saturated ports/corridors farther away.
       layout.height=initialHeight;
-      const bayY=layout.height+lh/2+24,left={x:18,y:bayY},right={x:18+lw+32,y:bayY},label={x:(left.x+right.x)/2,y:bayY},box=rect(label);
-      layout.height=bayY+lh/2+24;
+      const bayY=Math.ceil(layout.height+lh/2+24),left={x:18,y:bayY},right={x:18+lw+32,y:bayY},label={x:(left.x+right.x)/2,y:bayY},box=rect(label);
+      layout.height=Math.ceil(bayY+lh/2+24);
       const inflate=r=>({left:r.left-1,right:r.right+1,top:r.top-1,bottom:r.bottom+1});
       const blocks=[...nodes,...occupied,box].map(inflate),bay={start:left,end:right};
       const ports=p=>{
@@ -267,7 +267,7 @@
     const relations = list(report.character_relations).filter(r=>peopleById.has(r.from_id) && peopleById.has(r.to_id));
     const kinds = {causes:'促成',enables:'提供条件',reveals:'揭示',foreshadow_payoff:'线索回收',follows:'先后'};
     return mount(root, {
-      people,events,storyOrder:list(report.story_order),
+      people,events,storyOrder:list(report.story_order),timeNote:report.time_note || '',
       personEdges:relations.map(r=>({from:r.from_id,to:r.to_id,label:r.label || r.text || '',status:r.status,body:()=>claim(r)})),
       eventEdges:list(report.relations).map(r=>({from:r.from_id,to:r.to_id,label:kinds[r.kind] || '待核对',kind:r.kind,status:r.status,body:()=>claim(r)})),
       personRelations:p=>relations.filter(r=>r.from_id===p.id || r.to_id===p.id).map(r=>({from:r.from_id,to:r.to_id,label:r.label || r.text || '',status:r.status,body:()=>claim(r)})),
@@ -311,7 +311,8 @@
     try { saved=JSON.parse(sessionStorage.getItem(key) || '{}'); } catch { /* Storage is optional; the URL remains authoritative. */ }
     const fresh=()=>({query:'',page:1,filters:{},selected:'',order:'narrative',map:'total'});
     const browsing={characters:{...fresh(),...saved.characters},plot:{...fresh(),...saved.plot}};
-    let section=options.section==='characters'?'characters':'plot', object=null, pane='relations', edgeChoices=[];
+    const legacyTime=options.section==='time';
+    let section=options.section==='characters'?'characters':'plot', object=null, pane='relations', edgeChoices=[],timeNoteOpen=legacyTime;
     const params=new URLSearchParams(location.search);
     const validScope=params.get('volume')===options.documentId;
     if(validScope) {
@@ -327,6 +328,7 @@
     } else if(params.has('character') || params.has('event')) {
       root.innerHTML='<p role="alert">此链接缺少报告来源。请从人物或剧情索引重新打开。</p>';return {select:()=>{}};
     }
+    if(legacyTime)object=null;
     if (!data.storyOrder.length) browsing.plot.order='narrative';
     const state=()=>browsing[section];
     const persist=()=>{try{sessionStorage.setItem(key,JSON.stringify(browsing));}catch{/* In-memory and URL state continue to work. */}};
@@ -397,7 +399,7 @@
       return `<div class="workspace-map-switch" role="group" aria-label="阅读方式"><button type="button" data-reader-map="total" aria-pressed="${state().map!=='index'}">${section==='characters'?'人物关系总图':'事件关系总图'}</button><button type="button" data-reader-map="index" aria-pressed="${state().map==='index'}">${section==='characters'?'人物索引':'逐章浏览'}</button></div>`;
     }
     function orderSwitch() {
-      return `<div class="workspace-order" role="group" aria-label="事件顺序"><button data-reader-order="narrative" aria-pressed="${state().order==='narrative'}">叙述顺序</button><button data-reader-order="story" aria-pressed="${state().order==='story'}" ${data.storyOrder.length?'':'disabled title="本报告未提供故事顺序"'}>故事顺序</button></div>`;
+      return `<div class="workspace-order" role="group" aria-label="事件顺序"><button data-reader-order="narrative" aria-pressed="${state().order==='narrative'}">叙述顺序</button><button data-reader-order="story" aria-pressed="${state().order==='story'}" ${data.storyOrder.length?'':'disabled title="本报告未提供故事顺序"'}>故事顺序</button></div>${data.timeNote?`<details class="workspace-time-note" data-reader-time-note ${timeNoteOpen?'open':''}><summary>时间与不确定性</summary><p>${esc(data.timeNote)}</p></details>`:''}`;
     }
     function totalGraph(kind) {
       const character=kind==='characters',items=character?data.people:orderEvents();
@@ -408,15 +410,33 @@
       const marker=`totalArrow${++graphSerial}`,byId=character?people:events;
       const routes=new Map(),routeReservations=[];
       edgeChoices.forEach((r,i)=>{const pair=JSON.stringify([r.from,r.to]);if(!routes.has(pair))routes.set(pair,[]);routes.get(pair).push(i);});
-      const segments=[...routes.values()].map(indices=>{
-        const r=edgeChoices[indices[0]],route=graphRoute(layout,r,routeReservations);
+      const groups=[...routes.values()];
+      const labels=groups.map(indices=>{
+        const r=edgeChoices[indices[0]];
         const from=byId.get(String(r.from)),to=byId.get(String(r.to)),label=indices.map(i=>edgeChoices[i].label).join(' / ');
-        return {path:`<path d="${route.d}" marker-end="url(#${marker})" data-total-from="${esc(r.from)}" data-total-to="${esc(r.to)}"/>`,label:`<button type="button" class="total-graph-edge" style="left:${route.label.x}px;top:${route.label.y}px" data-reader-edges="${indices.join(',')}" aria-label="${esc(`${from.name || from.title} → ${label} → ${to.name || to.title}`)}"><span>${esc(short(label,22))} ${route.direction}</span>${indices.length===1?badge(r.status):`<small>${indices.length} 项联系</small>`}</button>`};
+        return `<button type="button" class="total-graph-edge" data-reader-edges="${indices.join(',')}" aria-label="${esc(`${from.name || from.title} → ${label} → ${to.name || to.title}`)}"><span class="total-graph-edge-text">${esc(short(label,22))} <span class="total-graph-edge-direction" aria-hidden="true">→</span></span>${indices.length===1?badge(r.status):`<small>${indices.length} 项联系</small>`}</button>`;
       });
-      const nodes=items.map(item=>{const p=layout.positions.get(String(item.id));
-        return `<article class="total-graph-node ${character?'is-person':'is-event'}" style="left:${p.x}px;top:${p.y}px" ${character?`data-person-id="${esc(item.id)}"`:`data-event-id="${esc(item.id)}"`}><span class="eyebrow">${esc(character?item.group:item.label)}</span><h2>${link(kind,item.id,character?item.name:item.title,'total-graph-link')}</h2></article>`;
+      const nodes=items.map((item,i)=>{const p=layout.positions.get(String(item.id));
+        return `<article class="total-graph-node ${character?'is-person':'is-event'}" style="left:${p.x}px;top:${p.y}px" ${character?`data-person-id="${esc(item.id)}"`:`data-event-id="${esc(item.id)}"`}><span class="eyebrow">${character?esc(item.group):`<span class="total-graph-position">${String(i+1).padStart(2,'0')}</span> ${esc(item.label)}`}</span><h2>${link(kind,item.id,character?item.name:item.title,'total-graph-link')}</h2></article>`;
       }).join('');
-      root.innerHTML=`<div class="workspace-reader-index" data-reader-index="${kind}">${mapSwitch()}${character?'':orderSwitch()}<div ${character?'data-person-index':'data-event-index'}><div class="total-graph-meta"><span>${items.length} ${character?'个人物':'个事件'} · ${edgeChoices.length} 条联系</span>${character?'':`<span>${state().order==='story'?'故事顺序':'叙述顺序'}</span>`}</div>${items.length?`<div class="total-graph-scroll" role="region" tabindex="0" aria-label="${character?'人物关系总图':'事件关系总图'}，可滚动查看"><div class="total-graph-canvas" style="width:${layout.width}px;height:${layout.height}px;--graph-node-width:${layout.nodeWidth || 210}px;--graph-label-width:${layout.labelWidth || 138}px"><svg class="total-graph-lines" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true">${arrow(marker)}${segments.map(s=>s.path).join('')}</svg>${segments.map(s=>s.label).join('')}${nodes}</div></div>`:'<p class="workspace-empty">报告中尚未记录'+(character?'人物':'事件')+'。</p>'}${items.length && !edgeChoices.length?`<p class="total-graph-empty">${character?'暂无已记录的语义关系，可点人物查看经历。':'暂无已记录的事件联系，可点节点查看经过。'}</p>`:''}</div><section data-edge-basis hidden></section></div>`;
+      root.innerHTML=`<div class="workspace-reader-index" data-reader-index="${kind}">${mapSwitch()}${character?'':orderSwitch()}<div ${character?'data-person-index':'data-event-index'}><div class="total-graph-meta"><span>${items.length} ${character?'个人物':'个事件'} · ${edgeChoices.length} 条联系</span>${character?'':`<span>${state().order==='story'?'故事顺序':'叙述顺序'}</span>`}</div>${items.length?`<div class="total-graph-scroll" role="region" tabindex="0" aria-label="${character?'人物关系总图':'事件关系总图'}，可滚动查看"><div class="total-graph-canvas" style="width:${layout.width}px;height:${layout.height}px;--graph-node-width:${layout.nodeWidth || 210}px;--graph-label-width:${layout.labelWidth || 138}px"><svg class="total-graph-lines" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true">${arrow(marker)}</svg>${labels.join('')}${nodes}</div></div>`:'<p class="workspace-empty">报告中尚未记录'+(character?'人物':'事件')+'。</p>'}${items.length && !edgeChoices.length?`<p class="total-graph-empty">${character?'暂无已记录的语义关系，可点人物查看经历。':'暂无已记录的事件联系，可点节点查看经过。'}</p>`:''}</div><section data-edge-basis hidden></section></div>`;
+      // Measure the real, two-line-clamped buttons before any routing. The
+      // fixed-width direction glyph can change without changing their size.
+      // The same dimensions drive ordinary obstacles, reservations and bays.
+      const buttons=Array.from(root.querySelectorAll('.total-graph-edge'));
+      const sizes=buttons.map(button=>{const {width,height}=button.getBoundingClientRect();return {width,height};});
+      const paths=buttons.map((button,i)=>{
+        const r=edgeChoices[groups[i][0]],route=graphRoute(layout,r,routeReservations,sizes[i]);
+        button.style.left=`${route.label.x}px`;button.style.top=`${route.label.y}px`;
+        button.querySelector('.total-graph-edge-direction').textContent=route.direction;
+        return `<path d="${route.d}" marker-end="url(#${marker})" data-total-from="${esc(r.from)}" data-total-to="${esc(r.to)}"/>`;
+      });
+      if(buttons.length){
+        const canvas=root.querySelector('.total-graph-canvas');
+        canvas.style.height=`${layout.height}px`;
+        const svg=canvas.querySelector('.total-graph-lines');
+        svg.setAttribute('viewBox',`0 0 ${layout.width} ${layout.height}`);svg.insertAdjacentHTML('beforeend',paths.join(''));
+      }
       if(!character)updatePlotFocus();
       sync(false);
     }
@@ -500,6 +520,9 @@
       }
       if(entry==='top')window.scrollTo({top:0,behavior:'instant'});
     }
+    root.addEventListener('toggle',event=>{
+      if(event.target.matches('[data-reader-time-note]'))timeNoteOpen=event.target.open;
+    },true);
     root.addEventListener('click',event=>{
       const edge=event.target.closest('[data-reader-edges]');
       if(edge){const chosen=edge.dataset.readerEdges.split(',').map(i=>edgeChoices[Number(i)]).filter(Boolean),basis=root.querySelector('[data-edge-basis]');
@@ -526,7 +549,12 @@
     root.addEventListener('focusin',event=>{if(!object && section==='plot' && event.target.matches('[data-reader-open]')){state().selected=event.target.dataset.readerOpen;sync(false);updatePlotFocus();}});
     const returning=history.state?.xumaiReaderReturn;
     sync(false);draw(!object && returning?.key===key && returning.section===section?'restore':'top');
-    return {select(next){navigate(next==='characters'?'characters':'plot');}};
+    function revealTimeNote(){
+      const note=root.querySelector('[data-reader-time-note]');
+      if(note){note.open=true;note.querySelector('summary').focus({preventScroll:true});note.scrollIntoView({block:'nearest',behavior:'instant'});}
+    }
+    if(legacyTime)revealTimeNote();
+    return {select(next){if(next==='time')timeNoteOpen=true;navigate(next==='characters'?'characters':'plot');if(next==='time')revealTimeNote();}};
   }
   window.XumaiWorkspaceReader=Object.freeze({mountModel,mountRule,personSlots,plotSlots,graphLayout,graphRoute});
 })();
