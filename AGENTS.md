@@ -13,7 +13,7 @@
 - 文档索引：[docs/README.md](docs/README.md)
 - 网页端接手：[docs/CODEX_WEB_HANDOFF.md](docs/CODEX_WEB_HANDOFF.md)（当前未合并候选须从阶段37分支继续，验收状态见PROGRESS）
 - 长期路线：[docs/ROADMAP.md](docs/ROADMAP.md)
-- 当前阶段任务书：[docs/goals/STAGE_37_USABLE_WORKSPACE.md](docs/goals/STAGE_37_USABLE_WORKSPACE.md)
+- 当前阶段任务书：[docs/goals/STAGE_38_PLATFORM_DECONSTRUCTION.md](docs/goals/STAGE_38_PLATFORM_DECONSTRUCTION.md)
 - 阶段状态：[PROGRESS.md](PROGRESS.md)、[BLOCKED.md](BLOCKED.md)
 
 ## 技术与命令
@@ -36,10 +36,10 @@
 ## 协作与交付
 
 - 产品决策先写 docs/DECISIONS.md，再同步相关规格、流程和验收。
-- 每轮读取Notion最新验收意见及“验收状态”（未验收/验收未通过/已通过）；作者未通过后保留意见与标签，按意见修改并自测后再标未验收供复验。“已通过”仅由作者选择，Agent不自行通过或撤回；原“处理状态”仅作开发进度/历史，不替代新验收字段。
-- 子Agent仅使用`gpt-6.1-sol`，禁止Astra；推理等级按任务选择，启动时显式指定并核对实际配置。
+- 每轮读取Notion所有功能的最新意见与验收状态，不因未验收或旧已通过标签漏掉新意见；按意见修改并自测后再标未验收供复验，原意见保留。“已通过”由作者选择，Agent不自行通过或撤回；原“处理状态”仅作开发进度/历史。
+- 研发/审查子Agent仅使用`gpt-6.1-sol`，禁止Astra；推理等级按任务选择，启动时显式指定并核对实际配置。10/20作者另允许MiMo额度用尽时以Luna极高推理执行拆书，不作为一般研发替代或伪装MiMo结果。
 - 长任务先读本文件、PROGRESS.md、BLOCKED.md 和 docs/README.md；每轮记录真实命令结果。
 - 不用 skip、放宽断言、吞异常或假数据制造通过；保留既有 dirty worktree 并区分归属。
 - 每个阶段使用独立的 `codex/stage-<编号>-<主题>` 分支；完成本阶段门禁后必须提交并推送到 GitHub，并在 PROGRESS.md 记录分支、提交和 PR。需要复核的阶段保持 Draft PR，不得只留在本地。
 - GitHub `main` 是当前 V1 开发基线：阶段 27 独立审计已通过；离线质量门 Q2 已验证，但真实生成质量增益与产品集成仍 pending；未部署生产。
-- 新管理任务从 `docs/ROADMAP.md` 恢复长期顺序，从 `docs/goals/STAGE_37_USABLE_WORKSPACE.md` 与 `PROGRESS.md` 恢复当前阶段；阶段36是继承基线，聊天记录不是唯一任务来源。
+- 新管理任务从 `docs/ROADMAP.md` 恢复长期顺序，从 `docs/goals/STAGE_38_PLATFORM_DECONSTRUCTION.md` 与 `PROGRESS.md` 恢复当前阶段；阶段37是继承基线，聊天记录不是唯一任务来源。必须用作者指定账户从书架走到结果，内部测试账户或文件报告不替代网站交付。
