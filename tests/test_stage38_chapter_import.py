@@ -7,6 +7,7 @@ import unittest
 import test_independent_api as fixtures
 from test_stage37_chapters import docx
 from app.core.chapter_parser import parse_document, utf16_length
+from app.core.chapter_segmentation import partition_text, suggest_boundaries
 from app.core.independent_service import IndependentWorkspaceService
 
 
@@ -137,6 +138,77 @@ class NormalChapterImportTest(unittest.TestCase):
         preview = self.upload(self._project(), text, "层级.md")
         self.assertEqual(preview["chapter_count"], 1)
         self.assertEqual(preview["chapters"][0]["content"], parse_document("层级.md", text).chapters[0].content)
+
+    def test_enumerated_body_labels_stay_inside_declared_chapter_after_confirm(self):
+        # Long explanations and widely separated labels are still subordinate
+        # to the declared chapter. No "list" keyword is needed to protect it.
+        for labels in (("一、来处", "二、件数", "三、归处"),
+                       ("1. 来处", "2. 件数", "3. 归处"),
+                       ("１．来处", "２．件数", "３．归处")):
+            paragraphs = [("第一章 核验", None), (BODY + "😀", None)]
+            for label in labels:
+                paragraphs.extend([(label, None), (BODY, None)])
+            text = "\n".join(value for value, _ in paragraphs)
+            for suffix in ("txt", "md", "docx"):
+                with self.subTest(labels=labels, suffix=suffix):
+                    content = docx(paragraphs) if suffix == "docx" else text
+                    decoded = (IndependentWorkspaceService._decode_docx_structure(content)[0]
+                               if suffix == "docx" else text)
+                    expected = parse_document("核验." + suffix, decoded).chapters[0]
+                    project = self._project()
+                    preview = self.upload(project, content, "核验." + suffix)
+                    self.assertEqual(preview["chapter_count"], 1)
+                    self.assertEqual(preview["chapters"][0]["content"], expected.content)
+                    kept = self.independent.store.load(project).pending_imports[0]
+                    self.assertEqual(kept.raw_text, decoded)
+                    saved = self.confirm(project, preview)["active_version"]["chapters"]
+                    self.assertEqual(len(saved), 1)
+                    self.assertEqual(saved[0]["title"], "第一章 核验")
+                    self.assertEqual(saved[0]["formal_content"], expected.content)
+                    self.assertEqual(saved[0]["content"], expected.content)
+                    reread = self.client.get(f"/api/independent/projects/{project}").json()
+                    self.assertEqual(reread["active_version"]["chapters"], saved)
+
+    def test_enumerated_body_label_does_not_fill_formal_number_gap(self):
+        for label in ("一、来处", "2. 件数", "３．归处"):
+            with self.subTest(label=label):
+                text = "第一章 核验\n" + BODY + "\n" + label + "\n" + BODY + "\n第三章 归航\n" + BODY
+                boundaries = suggest_boundaries(text, "核验")
+                self.assertEqual([b["title"] for b in boundaries], ["第一章 核验", "第三章 归航"])
+                self.assertEqual("".join(partition_text(text, boundaries)[1]), text)
+                preview = self.upload(self._project(), text)
+                self.assertEqual([c["chapter_number"] for c in preview["chapters"]], [1, 3])
+                self.assertEqual([c["content"] for c in preview["chapters"]],
+                                 [c.content for c in parse_document("核验.txt", text).chapters])
+
+    def test_root_enumerated_and_explicit_peer_titles_remain_chapters(self):
+        for text, titles in (
+            ("1、古驿来客\n" + BODY + "\n二、旧城札记\n" + BODY,
+             ["1、古驿来客", "二、旧城札记"]),
+            ("# 第一章 离岸\n" + BODY + "\n# 1、古驿来客\n" + BODY + "\n# 2、旧城札记\n" + BODY,
+             ["第一章 离岸", "1、古驿来客", "2、旧城札记"]),
+        ):
+            with self.subTest(titles=titles):
+                boundaries = suggest_boundaries(text, "合成稿")
+                self.assertEqual([b["title"] for b in boundaries], titles)
+                self.assertEqual("".join(partition_text(text, boundaries)[1]), text)
+                project = self._project()
+                preview = self.upload(project, text, "合成稿.md")
+                self.assertEqual([c["title"] for c in preview["chapters"]], titles)
+                saved = self.confirm(project, preview)["active_version"]["chapters"]
+                self.assertEqual([c["title"] for c in saved], titles)
+
+    def test_enumerated_labels_cannot_be_peers_of_genuine_bare_titles(self):
+        text = ("第一章 离岸\n" + BODY + "\n一、来处\n" + BODY
+                + "\n二、件数\n" + BODY + "\n古驿来客\n" + BODY + "\n旧城札记\n" + BODY)
+        titles = ["第一章 离岸", "古驿来客", "旧城札记"]
+        boundaries = suggest_boundaries(text, "合成稿")
+        self.assertEqual([b["title"] for b in boundaries], titles)
+        self.assertEqual("".join(partition_text(text, boundaries)[1]), text)
+        project = self._project()
+        preview = self.upload(project, text)
+        self.assert_chapters(preview["chapters"], text, titles)
+        self.assert_chapters(self.confirm(project, preview)["active_version"]["chapters"], text, titles)
 
     def test_explicit_only_legacy_body_fragments_and_numbers_stay_compatible(self):
         text = "导入说明\n# 第七章 启程\n甲。\n# 第九章 归来\n乙。"

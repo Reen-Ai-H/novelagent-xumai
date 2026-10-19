@@ -12,6 +12,9 @@ from app.core.chapter_outline import _ACTION_CLAUSE, _SCENERY, _UTTERANCE
 from app.core.chapter_parser import parse_document, recognize_heading, scan_code_fence, utf16_length
 
 
+_ENUMERATED_LABEL = re.compile(r"^(?:[0-9０-９]{1,4}|[一二两三四五六七八九十百]{1,5})[、.．]\s*")
+
+
 def partition_text(text: str, boundaries: list[dict]) -> tuple[list[dict], list[str]]:
     """Validate author metadata, then derive all content exclusively from text."""
     if not text.strip() or not boundaries or len(boundaries) > 5000:
@@ -46,7 +49,7 @@ def partition_text(text: str, boundaries: list[dict]) -> tuple[list[dict], list[
 def _bare_title(value: str) -> str | None:
     # Typography is evidence, not a title dictionary. Numbered short labels
     # still need the same narrative/peer checks as unnumbered short headings.
-    label = re.sub(r"^(?:[0-9０-９]{1,4}|[一二两三四五六七八九十百]{1,5})[、.．]\s*", "", value)
+    label = _ENUMERATED_LABEL.sub("", value)
     if (not re.fullmatch(r"[\u4e00-\u9fff]{2,12}", label)
             or _UTTERANCE.search(label) or _SCENERY.search(label) or _ACTION_CLAUSE.search(label)):
         return None
@@ -140,6 +143,12 @@ def suggest_boundaries(text: str, title: str, *, heading_levels: dict[int, int] 
         in_narrative = slot >= 0 and row["position"] < spans[slot][1]
         if (not in_narrative or row["blocked"] or recognize_heading(value)
                 or row["position"] in (heading_levels or {}) or not _bare_title(value)):
+            continue
+        # An enumerated body label below an established chapter is a lower
+        # layer, not a peer merely because its explanation is long. Explicit
+        # sibling headings above and root-level numbered bare titles remain
+        # supported; do not let body lists supply peers or fill number gaps.
+        if anchors and row["position"] > anchors[0]["position"] and _ENUMERATED_LABEL.match(value):
             continue
         following = occupied[index+1:index+4]
         previous = occupied[index-1] if index else None
