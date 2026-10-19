@@ -326,6 +326,8 @@
     if (state.screen === "archive" && screen !== "archive") state.archiveScrollSpyCleanup?.();
     if (state.screen === "deconstruction" && screen !== "deconstruction") {
       document.getElementById('workspaceToolsDialog')?.close();
+      document.getElementById('reportConfirmDialog')?.close();
+      window.clearTimeout(state.bookPollTimer);
       window.clearTimeout(state.deconstructionPollTimer);
       state.deconstructionPollTimer = null;
       closeDeconstructionEvidenceDialog?.();
@@ -402,7 +404,7 @@
     elements.sessionExpiredNotice.classList.toggle("is-hidden", !state.sessionExpired);
     elements.emailError.textContent = "";
     elements.emailField.classList.remove("has-error");
-    elements.loginStatus.textContent = "";
+    elements.loginStatus.textContent = state.account?.email ? `当前已登录 ${state.account.email}。输入其他邮箱可切换账户。` : "";
     elements.loginStatus.classList.remove("is-error");
   }
 
@@ -463,10 +465,22 @@
   }
 
   function renderLibraryHeader() {
+    renderAccountIdentity();
     const account = state.account || {};
     elements.accountEmail.textContent = account.email || "—";
     elements.creditBalance.textContent = Number(account.credit_balance || 0).toLocaleString("zh-CN");
     elements.librarySearch.value = state.query;
+  }
+
+  function renderAccountIdentity() {
+    const email=String(state.account?.email || '').trim();
+    const name=email.split('@')[0] || '账户';
+    $$('[data-account-identity]').forEach(node=>{
+      node.hidden=!email;
+      node.querySelector('[data-account-name]').textContent=name;
+      node.querySelector('[data-account-name]').title=email;
+      node.querySelector('[data-account-avatar]').textContent=Array.from(name)[0]?.toLocaleUpperCase() || '';
+    });
   }
 
   function updateNotificationCount() {
@@ -577,7 +591,7 @@
     const target = project.target_chapter_count ? ` / ${project.target_chapter_count}` : "";
     const statusClass = project.status.includes("失败") ? "status-failed" : project.status.includes("处理") ? "status-processing" : "";
     return `
-      <article class="project-card" data-project-id="${escapeHtml(project.project_id)}">
+      <a class="project-card" data-project-id="${escapeHtml(project.project_id)}" href="/${ai ? 'ai' : 'independent'}/${encodeURIComponent(project.project_id)}" data-route aria-label="${escapeHtml(`打开《${project.title}》${ai ? '创作室' : '工作台'}`)}">
         <div class="project-cover">
           <small>PROJECT / ${String(index + 1).padStart(2, "0")}</small>
           <h3>${escapeHtml(project.title)}</h3>
@@ -585,15 +599,14 @@
         <div class="project-body">
           <div class="project-meta">
             ${ai ? '<span class="mode-flag">AI 辅助写作</span>' : '<span class="mode-note">独立创作</span>'}
-            <button class="project-menu" type="button" aria-label="作品选项" disabled>···</button>
           </div>
           <h4>${escapeHtml(project.brief || modeText[project.mode]?.description || "作品基础已保存")}</h4>
           <div class="project-stats"><span>${project.chapter_count} 章${target}</span><span>${Number(project.total_word_count || 0).toLocaleString("zh-CN")} 字</span>${ai ? `<span>创作积分 ${Number(project.credits_used || 0).toLocaleString("zh-CN")} · 暂不结算</span>` : ""}</div>
           <div class="progress-line" aria-label="创作进度 ${project.progress_percent}%"><b style="width: ${project.progress_percent}%"></b></div>
-          <div class="project-footer"><span class="project-status ${statusClass}">${escapeHtml(project.status)}</span><button class="project-continue" type="button" data-action="open-project">查看作品 →</button></div>
+          <div class="project-footer"><span class="project-status ${statusClass}">${escapeHtml(project.status)}</span><span class="project-continue">进入工作台 →</span></div>
           <div class="project-footer"><span>最近编辑：${escapeHtml(formatDate(project.latest_edited_at))}</span><span class="mono">${project.progress_percent}%</span></div>
         </div>
-      </article>`;
+      </a>`;
   }
 
   function renderProjects(projects) {
@@ -763,6 +776,9 @@
       return;
     }
     state.account = null;
+    renderAccountIdentity();
+    state.reportTask=null;
+    state.reportConfirmation=null;
     state.projects = [];
     state.notifications = [];
     state.unreadNotifications = 0;
@@ -778,7 +794,12 @@
       const payload = await requestJson("/api/auth/session");
       if (payload.authenticated) {
         state.account = payload.account;
+        renderAccountIdentity();
         state.sessionExpired = false;
+        if (preferredScreen === 'login') {
+          window.history.replaceState({}, '', '/library');
+          preferredScreen = 'library';
+        }
         if (preferredScreen === "library") {
           setActiveScreen("library");
           await loadLibrary();
@@ -1084,6 +1105,30 @@
     return chapter.status === 'analyzing' ? '分析中' : chapter.status === 'failed' ? '分析失败' : '写作中';
   }
 
+  // The heading is a view of chapter structure, never a manuscript rewrite.
+  const numberedChapterTitle = /^\s*(?:第\s*[\d〇零一二三四五六七八九十百千万两]+\s*[章节回]|chapter\s+\d+)/iu;
+  function chapterNumber(number) {
+    const n=Number(number);
+    if(!Number.isInteger(n) || n<1)return '';
+    if(n>9999)return String(n);
+    const digits='零一二三四五六七八九',units=['','十','百','千'];
+    let value=n,text='',zero=false;
+    for(let i=3;i>=0;i--){
+      const digit=Math.floor(value / (10 ** i));value %= 10 ** i;
+      if(digit){if(zero)text+='零';text+=digits[digit]+units[i];zero=false;}
+      else if(text && value)zero=true;
+    }
+    return text.replace(/^一十/u,'十');
+  }
+  function chapterPrefix(chapter) {
+    if(numberedChapterTitle.test(chapter.title || ''))return '';
+    const number=chapterNumber(chapter.chapter_number ?? chapter.number);
+    return number?`第${number}章`:'';
+  }
+  function chapterTitle(chapter) {
+    return [chapterPrefix(chapter),String(chapter.title || '').trim()].filter(Boolean).join(' ');
+  }
+
   function nextIndependentChapter() {
     if (state.workspace?.mode === 'ai_assisted') return null;
     const chapters=activeEditorVersion()?.chapters || [];
@@ -1101,11 +1146,12 @@
   }
 
   function renderChapterList(version) {
-    const mobile=`<select class="mobile-chapter-navigation" aria-label="正式章节，共 ${version.chapters.length} 章">${version.chapters.map(c=>`<option value="${escapeHtml(c.chapter_id)}" ${c.chapter_id===state.activeChapterId?'selected':''}>${escapeHtml(c.title || `第${c.chapter_number}章`)}</option>`).join('')}</select>`;
-    elements.chapterList.innerHTML = mobile + version.chapters.map((chapter) => {
+    const chapters=version.chapters.map(c=>c.chapter_id===state.activeChapterId && state.editorDirty?{...c,title:state.editorTitleBuffer}:c);
+    const mobile=`<select class="mobile-chapter-navigation" aria-label="正式章节，共 ${chapters.length} 章">${chapters.map(c=>`<option value="${escapeHtml(c.chapter_id)}" ${c.chapter_id===state.activeChapterId?'selected':''}>${escapeHtml(chapterTitle(c))}</option>`).join('')}</select>`;
+    elements.chapterList.innerHTML = mobile + chapters.map((chapter) => {
       return `<div class="chapter-directory-entry">
       <button class="chapter-list-item ${chapter.chapter_id === state.activeChapterId ? "is-active" : ""} ${chapter.status === "failed" ? "is-failed" : ""}" type="button" data-action="select-chapter" data-chapter-id="${escapeHtml(chapter.chapter_id)}" ${chapter.chapter_id === state.activeChapterId ? 'aria-current="page"' : ""}>
-        <span class="chapter-list-number mono" aria-hidden="true">${/^(?:第\s*[\d〇零一二三四五六七八九十百千两]+\s*[章节回]|chapter\s+\d+)/iu.test(chapter.title || '') ? '' : String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapterStateLabel(chapter))}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
+        <span class="chapter-list-number mono" aria-hidden="true">${numberedChapterTitle.test(chapter.title || '') ? '' : String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapterTitle(chapter))}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapterStateLabel(chapter))}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
       </button></div>`;
     }).join("");
   }
@@ -1181,7 +1227,8 @@
       state.editorRevision = chapter.server_revision || 0;
       state.editorSavedRevision = chapter.server_revision || 0;
     }
-    elements.editorChapterHeading.textContent = chapter.title || `第${chapter.chapter_number}章`;
+    renderAccountIdentity();
+    renderEditorChapterTitle(chapter);
     elements.chapterTitleInput.value = state.editorTitleBuffer;
     elements.chapterEditor.value = state.editorBuffer;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
@@ -1213,9 +1260,11 @@
     else setEditorSaveState("等待保存");
   }
 
-  function handleEditorInput() {
+  function handleEditorInput(event) {
     if (state.editorReadOnly) return;
-    state.editorBuffer = elements.chapterEditor.value;
+    // A title edit must not round-trip the body through textarea's LF-only
+    // value; imported CRLF remains byte-for-byte intact until a body edit.
+    if(event?.target !== elements.chapterTitleInput)state.editorBuffer = elements.chapterEditor.value;
     state.editorTitleBuffer = elements.chapterTitleInput.value;
     state.editorDirty = true; if (state.workspace?.mode !== "ai_assisted") { state.editorAnalysis = null; renderArchiveSummary(state.activeArchive); }
     state.editorChangeToken += 1;
@@ -1223,11 +1272,22 @@
     state.editorSaveFailed = false;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
     const version=activeEditorVersion();
+    const chapter=version?.chapters.find(c=>c.chapter_id===state.activeChapterId);
+    if(chapter){renderEditorChapterTitle(chapter);renderChapterList(version);}
     renderCompleteChapterAction(version?.chapters.find(chapter=>chapter.chapter_id===state.activeChapterId),
       (state.workspace?.tasks || []).some(task=>task.version_id===version?.version_id && ['queued','running'].includes(task.status)));
     setEditorSaveState("本地待保存");
     window.clearTimeout(state.saveTimer);
     state.saveTimer = window.setTimeout(() => { flushPendingSave(); }, 720);
+  }
+
+  function renderEditorChapterTitle(chapter) {
+    const display={...chapter,title:state.editorTitleBuffer};
+    const prefix=$('#chapterTitlePrefix');
+    if(prefix){prefix.textContent=chapterPrefix(display);prefix.hidden=!prefix.textContent;}
+    elements.editorChapterHeading.textContent=chapterTitle(display);
+    elements.chapterTitleInput.placeholder='为这一章命名';
+    elements.chapterTitleInput.setAttribute('aria-label',`${chapterTitle({chapter_number:chapter.chapter_number})}标题`);
   }
 
   function renderSaveConflict(error) {
@@ -2725,8 +2785,11 @@
   }
 
   function renderDeconstructionPage(data) {
+    renderAccountIdentity();
     state.deconstructionWorkspace = data;
     state.deconstructionProjectId = data.projectId || state.deconstructionProjectId;
+    ensureReportTask(state.deconstructionProjectId);
+    renderReportWorkflow();
     elements.deconstructionProjectTitle.textContent = data.title || "—";
     const isRule = data.result?.analysisContractVersion === "2.0";
     elements.deconstructionStatusPill.textContent = data.effectiveStatus === "completed"
@@ -2747,7 +2810,11 @@
     const volumeBar = renderDeconstructionVolumeBar(data);
     const readableRuleUpgrade = data.effectiveStatus === "rebuild_required" && data.updateAvailable
       && data.error?.code === "engine_update_available" && isRule && data.runStatus === "completed";
-    let content = (data.effectiveStatus === "completed" || readableRuleUpgrade) && data.sourceMatch ? [] : [renderDeconstructionStatus(data)];
+    const statusContent=(data.effectiveStatus === "completed" || readableRuleUpgrade) && data.sourceMatch ? '' : renderDeconstructionStatus(data);
+    // The normal action uses report-v2. Rule retry and diagnostics remain
+    // available in the source tools, outside the author's primary workflow.
+    if(statusContent)document.getElementById('workspaceSource').insertAdjacentHTML('beforeend',renderAnalysisDetails('基础索引状态',statusContent));
+    let content = [];
     if (hasDeconstructionResults(data) && (data.effectiveStatus === "completed" || readableRuleUpgrade) && data.sourceMatch) {
       content.push(renderDeconstructionResult(data));
     } else if (data.effectiveStatus === "completed") {
@@ -3167,11 +3234,13 @@
     }
     const loadToken = ++state.deconstructionLoadToken;
     if (state.deconstructionProjectId !== projectId) {
+      state.reportTask=null;
       state.modelAnalysisCandidate = null;
       document.getElementById("modelAnalysisPreview").innerHTML = "";
       document.getElementById("modelAnalysisStatus").textContent = "先预览，再采用。";
     }
     state.deconstructionProjectId = projectId;
+    if(!silent){const task=ensureReportTask(projectId);task.loaded=false;task.available=null;task.budget=null;}
     document.getElementById("deconstructionSubnav").hidden = false;
     document.querySelector('[data-action="deconstruction-open-self"]')?.setAttribute("aria-expanded", "true");
     window.clearTimeout(state.deconstructionPollTimer);
@@ -3188,6 +3257,7 @@
       if (!silent) void pollBook(projectId);
       setWorkspaceNotice(elements.deconstructionNotice, "");
       void loadNotifications();
+      return true;
     } catch (error) {
       if (loadToken !== state.deconstructionLoadToken || state.deconstructionProjectId !== projectId) return;
       if (error.status === 401) {
@@ -3198,6 +3268,7 @@
       }
       setWorkspaceNotice(elements.deconstructionNotice, error.message || "作品拆解读取失败，请稍后重试。", "red");
       renderDeconstructionReadError(error.message);
+      return false;
     }
   }
 
@@ -3776,13 +3847,23 @@
   async function refreshModelBudget(project) {
     const node = document.getElementById('modelSharedBudget');
     try {
-      const {budget} = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/model-budget`);
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/model-budget`);
+      const {budget}=payload;
       if (state.deconstructionProjectId !== project) return;
+      const task=ensureReportTask(project);
+      task.budget=budget;
+      // Unknown availability is a disabled state, not permission to send.
+      task.available=typeof payload.model_available==='boolean'?payload.model_available:null;
+      task.budgetError='';
+      renderReportWorkflow();
       const amount = value => Number.isFinite(Number(value)) ? `¥${Number(value).toFixed(4)}` : '未知';
       node.textContent = `本机模型共用预算 ${amount(budget.budget_cny)} · 已计 ${amount(budget.estimated_spent_cny)} · 在途 ${amount(budget.reserved_cny)} · 剩余 ${amount(budget.remaining_cny)}`;
       if (budget.unknown_usage_calls) node.textContent += ' · 部分用量按保守上限记账';
     } catch (error) {
-      if (state.deconstructionProjectId === project) node.textContent = `共用预算暂不可读：${error.message}`;
+      if (state.deconstructionProjectId === project) {
+        node.textContent = `共用预算暂不可读：${error.message}`;
+        const task=ensureReportTask(project);task.budget=null;task.available=null;task.budgetError='暂时无法读取预算，请刷新重试。';renderReportWorkflow();
+      }
     }
   }
 
@@ -3792,6 +3873,21 @@
     try {
       const { job } = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book`);
       if (state.screen !== "deconstruction" || state.deconstructionProjectId !== project) return;
+      const task=ensureReportTask(project);
+      task.job=job;task.loaded=true;task.pollError='';
+      renderReportWorkflow();
+      if(job?.kind==='report-v2') {
+        const token=`${job.run_id}:${job.status}:${job.stage}:${job.document_id || ''}`;
+        // Refresh once after a persisted successful publication, including a
+        // fresh page that discovers an already completed background task.
+        if(job.status==='completed' && task.published!==token) {
+          task.published=token;
+          const loaded=await loadDeconstructionWorkspace(project,{silent:true,documentId:''});
+          if(!loaded){task.published='';task.pollError='报告暂时无法读取，请刷新重试。';renderReportWorkflow();}
+        }
+        if(['queued','running'].includes(job.status))state.bookPollTimer=setTimeout(()=>pollBook(project),3000);
+        return;
+      }
       const budgetText = job?.budget
         ? ` · 本任务估算 ¥${Number(job.budget.estimated_spent_cny || 0).toFixed(4)}`
         : "";
@@ -3804,12 +3900,109 @@
       if (job?.status === "running") elements.deconstructionStatusPill.textContent = "全文分析中";
       if (job?.status === "running") state.bookPollTimer = setTimeout(() => pollBook(project), 8000);
     } catch (error) {
-      if (state.deconstructionProjectId === project) document.getElementById("bookAnalysisStatus").textContent = error.message;
+      if (state.deconstructionProjectId === project) {
+        document.getElementById("bookAnalysisStatus").textContent = error.message;
+        const task=ensureReportTask(project);task.pollError='暂时无法读取任务状态，请刷新重试。';task.loaded=false;renderReportWorkflow();
+        if(state.screen==='deconstruction')state.bookPollTimer=setTimeout(()=>pollBook(project),8000);
+      }
     }
+  }
+
+  function ensureReportTask(projectId) {
+    if(state.reportTask?.projectId!==projectId)state.reportTask={projectId,job:null,budget:null,available:null,loaded:false,sending:false,checking:false,published:'',pollError:'',budgetError:''};
+    return state.reportTask;
+  }
+  function reportStartBlock(data,task) {
+    if(task.sending || task.checking || task.controlling)return '正在确认任务…';
+    if(!task.loaded)return task.pollError || '正在读取任务状态…';
+    if(['queued','running'].includes(task.job?.status))return '分析正在后台继续';
+    if(task.job?.kind==='report-v2' && !['running','paused','failed','completed'].includes(task.job.status))return '任务状态待确认';
+    if(task.job?.error_code==='report_request_unknown')return '上次请求尚待确认，费用占用已保留';
+    if(task.budgetError)return task.budgetError;
+    if(task.available===false)return '模型服务当前未启用';
+    if(task.available!==true)return '模型服务状态待确认';
+    if(!task.budget || !Number.isFinite(task.budget.remaining_cny))return '预算尚未确认';
+    if(Number(task.budget.remaining_cny)<=0)return '当前预算不足';
+    if(!data?.source?.versionId || data.source.revision===null || !data.source.contentHash)return '请先保存并确认正文';
+    if(!(data.source.wordCount>0))return '请先写作或导入正文';
+    if(data.source.wordCount>30000)return '当前拆书支持三万字以内的稿本';
+    return '';
+  }
+  function reportJobMessage(job) {
+    if(!job)return '';
+    if(job.kind!=='report-v2')return job.status==='running'?'已有分析任务在后台运行':'';
+    if(job.status==='completed')return '拆书完成，报告已自动采用';
+    if(job.status==='failed' || job.status==='failed_retryable')return '本次拆书未完成，原报告保留';
+    if(job.status==='paused')return '拆书已暂停';
+    const stages={queued:'拆书已排队',draft:'正在整理人物与剧情',review:'正在核对原文依据',revise:'正在修正报告',verify:'正在校验报告',adopt:'正在保存报告'};
+    return `${stages[job.stage] || '正在分析正文'}，离开页面也会继续`;
+  }
+  function renderReportWorkflow() {
+    const root=$('#reportWorkflow'),data=state.deconstructionWorkspace,task=state.reportTask;
+    if(!root || !task || data?.projectId!==task.projectId)return;
+    const block=reportStartBlock(data,task),hasReport=data.result?.analysisContractVersion==='model.1';
+    $$('[data-action="book-start"],[data-action="model-analyze"]').forEach(node=>node.disabled=Boolean(block || state.modelAnalysisBusy));
+    const legacyPause=$('[data-action="book-pause"]');
+    if(legacyPause)legacyPause.disabled=task.job?.kind==='report-v2' || task.job?.status!=='running';
+    const running=['queued','running'].includes(task.job?.status),message=reportJobMessage(task.job);
+    const action=task.job?.kind==='report-v2' && task.job.status==='paused'?'继续拆书':hasReport || task.job?.kind==='report-v2' && ['completed','failed'].includes(task.job.status)?'重新分析':'开始拆书';
+    root.className=`report-workflow ${hasReport?'is-compact':''}`;
+    root.innerHTML=`<div>${hasReport?'':`<h2>${running?'正在整理人物与剧情':'把正文整理成人物与剧情'}</h2>`}<p class="report-workflow-status" role="status">${escapeHtml(message || '分析当前稿本，完成后自动显示报告。')}</p>${task.job?.kind==='report-v2' && task.job.status==='failed' && task.job.message?`<p class="report-workflow-error">${escapeHtml(task.job.message)}</p>`:''}</div><div class="report-workflow-action"><button class="button button-primary" type="button" data-action="open-report-confirm" ${block?'disabled':''}>${running?'拆书进行中':action}</button>${running && task.job?.kind==='report-v2'?`<button type="button" class="quiet-link" data-action="pause-report" ${task.controlling?'disabled':''}>暂停拆书</button>`:''}${block?`<span>${escapeHtml(block)}</span>`:'<span>模型分析 · 开始前确认费用</span>'}${task.pollError || task.budgetError?'<button class="quiet-link" type="button" data-action="refresh-report-status">刷新状态</button>':''}</div>`;
+  }
+  async function pauseReport() {
+    const project=state.deconstructionProjectId,task=ensureReportTask(project);
+    if(task.controlling || task.job?.kind!=='report-v2' || task.job.status!=='running')return;
+    task.controlling=true;renderReportWorkflow();
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book/pause`,{method:'POST'});
+      if(state.screen==='deconstruction' && state.deconstructionProjectId===project)await pollBook(project);
+    } catch(error){if(state.deconstructionProjectId===project)setWorkspaceNotice(elements.deconstructionNotice,error.message || '暂停没有完成，请重试。','red');}
+    finally {task.controlling=false;renderReportWorkflow();}
+  }
+  async function openReportConfirmation() {
+    const project=state.deconstructionProjectId,task=ensureReportTask(project);
+    if(reportStartBlock(state.deconstructionWorkspace,task))return;
+    task.checking=true;renderReportWorkflow();
+    try {
+      const current=await deconstructionApi.read(project);
+      await Promise.all([refreshModelBudget(project),pollBook(project)]);
+      if(state.screen!=='deconstruction' || state.deconstructionProjectId!==project)return;
+      task.checking=false;
+      const block=reportStartBlock(current,task);if(block)throw new Error(block);
+      state.reportConfirmation={projectId:project,source:{...current.source}};
+      const amount=value=>`¥${Number(value).toFixed(4)}`;
+      $('#reportConfirmScope').textContent=`《${current.title}》 · 当前完整稿本 ${current.source.chapterCount} 章 · ${Number(current.source.wordCount).toLocaleString('zh-CN')} 字`;
+      $('#reportConfirmBudget').textContent=`本机共用上限 ${amount(task.budget.budget_cny)} · 已计 ${amount(task.budget.estimated_spent_cny)} · 在途 ${amount(task.budget.reserved_cny)} · 剩余 ${amount(task.budget.remaining_cny)}。按实际用量计费，以上余额不是本次费用报价。`;
+      $('#reportConfirmError').textContent='';$('#reportConfirmButton').disabled=false;
+      const dialog=$('#reportConfirmDialog');rememberDialogFocus(dialog);dialog.showModal();
+    } catch(error) {setWorkspaceNotice(elements.deconstructionNotice,error.message || '暂时无法确认拆书，请重试。','red');}
+    finally {task.checking=false;renderReportWorkflow();}
+  }
+  async function confirmReport() {
+    const pending=state.reportConfirmation,project=state.deconstructionProjectId,task=ensureReportTask(project);
+    if(!pending || pending.projectId!==project || task.sending)return;
+    task.sending=true;$('#reportConfirmButton').disabled=true;renderReportWorkflow();
+    try {
+      await Promise.all([refreshModelBudget(project),pollBook(project)]);
+      if(state.screen!=='deconstruction' || state.deconstructionProjectId!==project)return;
+      const block=reportStartBlock(state.deconstructionWorkspace,{...task,sending:false});
+      if(block)throw new Error(block);
+      // Server CAS validates this exact reviewed source. A concurrent change
+      // cannot silently change the scope or start analysis of another draft.
+      await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book/start-report`,{method:'POST',body:JSON.stringify({expected_source_version_id:pending.source.versionId,expected_source_revision:pending.source.revision,expected_source_hash:pending.source.contentHash})});
+      task.published='';
+      if(state.screen==='deconstruction' && state.deconstructionProjectId===project){$('#reportConfirmDialog').close();state.reportConfirmation=null;await pollBook(project);}
+    } catch(error) {
+      if(state.screen==='deconstruction' && state.deconstructionProjectId===project)$('#reportConfirmError').textContent=error.message || '拆书没有启动，请重试。';
+      // A rejected source requires a new review, not a second stale submit.
+      if(state.reportConfirmation?.projectId===project)state.reportConfirmation=null;
+      await Promise.all([refreshModelBudget(project),pollBook(project)]);
+    } finally {task.sending=false;renderReportWorkflow();}
   }
 
   async function controlBook(action) {
     const project = state.deconstructionProjectId;
+    if(action==='start' && reportStartBlock(state.deconstructionWorkspace,ensureReportTask(project)))return;
     const button = document.querySelector(`[data-action="book-${action}"]`);
     button.disabled = true;
     try {
@@ -3843,6 +4036,8 @@
     let numbers;
     try { numbers = parseModelChapterRange(document.getElementById("modelAnalysisChapters").value); }
     catch (error) { status.textContent = error.message; return; }
+    const block=reportStartBlock(state.deconstructionWorkspace,ensureReportTask(projectId));
+    if(block){status.textContent=block;return;}
     state.modelAnalysisBusy = true; button.disabled = true;
     state.modelAnalysisCandidate = null; preview.innerHTML = "";
     status.textContent = "正在阅读和拆解，可能需要数分钟。试拆期间请保持本页打开；长范围可使用后台全文拆解。";
@@ -4008,6 +4203,11 @@
     if (action === "select-chapter") selectEditorChapter(actionNode.dataset.chapterId);
     if (action === "resegment-chapters") await previewResegment();
     if (action === "open-workspace-tools") { const dialog=$('#workspaceToolsDialog'); rememberDialogFocus(dialog); dialog.showModal(); void refreshModelBudget(state.deconstructionProjectId); }
+    if(action==='open-report-confirm')await openReportConfirmation();
+    if(action==='confirm-report')await confirmReport();
+    if(action==='pause-report')await pauseReport();
+    if(action==='close-report-confirm')$('#reportConfirmDialog').close();
+    if(action==='refresh-report-status')await pollBook(state.deconstructionProjectId);
     if (action === "close-workspace-tools") $('#workspaceToolsDialog').close();
     if (action === "save-editor") {
       if (state.workspace?.initialized && !state.editorReadOnly && await flushPendingSave()) showToast("正文已保存。");
@@ -4125,6 +4325,7 @@
     document.addEventListener("click", async (event) => {
       const routeLink = event.target.closest("[data-route]");
       if (routeLink) {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         const path = routeLink.getAttribute("href") || "/";
         if (path.startsWith("#")) return;
@@ -4159,6 +4360,11 @@
     elements.deconstructionEvidenceDialog?.addEventListener("click", handleAction);
     elements.deconstructionEvidenceDialog?.addEventListener("close", () => restoreDialogFocus(elements.deconstructionEvidenceDialog));
     $('#workspaceToolsDialog').addEventListener('close', () => restoreDialogFocus($('#workspaceToolsDialog')));
+    $('#reportConfirmDialog').addEventListener('close',()=>{
+      state.reportConfirmation=null;
+      if(state.screen==='deconstruction')$('#reportWorkflow [data-action="open-report-confirm"]')?.focus({preventScroll:true});
+    });
+    $('#reportConfirmDialog').addEventListener('keydown',trapDialogFocus);
     $('#workspaceToolsDialog').addEventListener('keydown', trapDialogFocus);
     elements.deconstructionEvidenceDialog?.addEventListener("cancel", () => {
       state.deconstructionEvidenceRequestToken += 1;
@@ -4298,5 +4504,6 @@
     }
   }
 
+  window.XumaiChapterTitles=Object.freeze({title:chapterTitle,prefix:chapterPrefix});
   start();
 })();

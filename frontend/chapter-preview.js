@@ -32,7 +32,7 @@
         const start=offset;offset+=line.length+1;
         return line.trim()?`<option value="${start}">${esc(line.trim().slice(0,70))}</option>`:'';
       }).join('');
-      dialog.querySelector('[data-preview-current]').textContent=boundaries[selected]?.title || '正文';
+      dialog.querySelector('[data-preview-current]').textContent=window.XumaiChapterTitles.title({chapter_number:selected+1,title:boundaries[selected]?.title}) || '正文';
       dialog.querySelectorAll('[data-preview-chapter]').forEach(n=>n.setAttribute('aria-current',Number(n.dataset.previewChapter)===selected?'page':'false'));
       dialog.querySelector('[data-preview-merge]').disabled=selected===0 || busy;
     }
@@ -62,6 +62,7 @@
     dialog.addEventListener('input',event=>{
       if(!event.target.matches('[data-preview-title]'))return;
       boundaries[Number(event.target.dataset.previewTitle)].title=event.target.value;dirty=true;controls();
+      dialog.querySelector('[data-preview-current]').textContent=window.XumaiChapterTitles.title({chapter_number:selected+1,title:boundaries[selected]?.title}) || '正文';
     });
     dialog.addEventListener('change',event=>{
       if(!event.target.matches('[data-preview-paragraph]') || event.target.value==='')return;
