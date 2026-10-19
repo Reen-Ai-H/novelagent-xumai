@@ -33,7 +33,8 @@ function check(m,expectedNodes,expectedEdges){
  for(const key of ['shared','detached','labelNode','labelLabel','lineNode','foreignLabel'])assert.deepEqual(m[key],[],key+': '+JSON.stringify(m[key]));
  assert.equal(m.documentOverflow,0);
 }
-(async()=>{
+module.exports={measure,check};
+if(require.main===module)(async()=>{
  const out=await fs.mkdtemp(path.join(os.tmpdir(),'xumai-stage38-routes-')),browser=await chromium.launch({headless:true,channel:'chrome'}),summary=[];
  try{for(const [width,height]of [[1440,900],[1024,768],[390,844]])for(const kind of ['dense','legacy6']){
   const context=await browser.newContext({viewport:{width,height},reducedMotion:'reduce'}),page=await context.newPage(),errors=[],requests=[],screenshots=[];

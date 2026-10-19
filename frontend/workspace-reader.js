@@ -84,13 +84,61 @@
     return {positions,edges:valid,width:Math.max(600,maxX+160),height:Math.max(220,bottom)};
   }
 
+  // Rectilinear visibility-grid search, used only after the short route
+  // templates fail. Rectangle corridors are connected (labels have clearance
+  // from every node/label); prior lines forbid retracing, not point crossings.
+  function searchGraphPath(blocks, tracks, starts, goals, width, height, refined=false) {
+    if(!starts.length || !goals.length)return null;
+    const coordinates=(values,limit)=>{
+      const sorted=[...new Set(values)].filter(v=>v>=1 && v<=limit-1).sort((a,b)=>a-b);
+      return refined?[...new Set([...sorted,...sorted.slice(1).map((v,i)=>(v+sorted[i])/2)])].sort((a,b)=>a-b):sorted;
+    };
+    const xs=coordinates([1,width-1,...blocks.flatMap(b=>[b.left-2,b.right+2,...(refined?[b.left,b.right]:[])]),...tracks.flatMap(s=>[s.start.x-4,s.start.x+4,s.end.x-4,s.end.x+4,...(refined?[s.start.x,s.end.x]:[])]),...starts.map(s=>s.x),...goals.map(g=>g.x)],width);
+    const ys=coordinates([1,height-1,...blocks.flatMap(b=>[b.top-2,b.bottom+2,...(refined?[b.top,b.bottom]:[])]),...tracks.flatMap(s=>[s.start.y-4,s.start.y+4,s.end.y-4,s.end.y+4,...(refined?[s.start.y,s.end.y]:[])]),...starts.map(s=>s.y),...goals.map(g=>g.y)],height);
+    const nx=xs.length,xIndex=new Map(xs.map((x,i)=>[x,i])),yIndex=new Map(ys.map((y,i)=>[y,i]));
+    const cell=p=>yIndex.get(p.y)*nx+xIndex.get(p.x),targets=new Map(goals.map((g,i)=>[cell(g),i]));
+    const horizontal=new Map(),vertical=new Map();
+    for(const s of tracks){const map=s.start.y===s.end.y?horizontal:vertical,key=map===horizontal?s.start.y:s.start.x;
+      if(!map.has(key))map.set(key,[]);map.get(key).push(map===horizontal?[Math.min(s.start.x,s.end.x),Math.max(s.start.x,s.end.x)]:[Math.min(s.start.y,s.end.y),Math.max(s.start.y,s.end.y)]);}
+    const rows=new Map(),columns=new Map();
+    const allowed=(x1,y1,x2,y2)=>{
+      const horizontalMove=y1===y2,coordinate=horizontalMove?y1:x1,cache=horizontalMove?rows:columns;
+      if(!cache.has(coordinate))cache.set(coordinate,blocks.filter(b=>horizontalMove?coordinate>b.top && coordinate<b.bottom:coordinate>b.left && coordinate<b.right).map(b=>horizontalMove?[b.left,b.right]:[b.top,b.bottom]));
+      const lo=Math.min(horizontalMove?x1:y1,horizontalMove?x2:y2),hi=Math.max(horizontalMove?x1:y1,horizontalMove?x2:y2);
+      return !cache.get(coordinate).some(([a,b])=>lo<b && hi>a) && !(horizontalMove?horizontal:vertical).get(coordinate)?.some(([a,b])=>lo<b && hi>a);
+    };
+    const minX=Math.min(...goals.map(g=>g.x)),maxX=Math.max(...goals.map(g=>g.x)),minY=Math.min(...goals.map(g=>g.y)),maxY=Math.max(...goals.map(g=>g.y));
+    const heuristic=(x,y)=>Math.max(minX-x,0,x-maxX)+Math.max(minY-y,0,y-maxY);
+    // Keep incoming-axis state so equally short grid paths prefer a few clear
+    // bends over a staircase of tiny alternating horizontal/vertical steps.
+    const distance=new Float64Array(nx*ys.length*3).fill(Infinity),previous=new Int32Array(distance.length).fill(-1),owner=new Int32Array(distance.length),heap=[];
+    const push=item=>{let i=heap.length;heap.push(item);while(i){const p=(i-1)>>1;if(heap[p].score<=item.score)break;heap[i]=heap[p];i=p;}heap[i]=item;};
+    const pop=()=>{const first=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length && heap[c+1].score<heap[c].score)c++;if(heap[c].score>=last.score)break;heap[i]=heap[c];i=c;}heap[i]=last;}return first;};
+    starts.forEach((s,i)=>{const id=cell(s)*3;if(!Number.isInteger(id) || blocks.some(b=>s.x>b.left && s.x<b.right && s.y>b.top && s.y<b.bottom))return;distance[id]=0;owner[id]=i;push({id,cost:0,score:heuristic(s.x,s.y)});});
+    while(heap.length){const at=pop();if(at.cost!==distance[at.id])continue;
+      const pointId=Math.floor(at.id/3),axis=at.id%3;
+      if(targets.has(pointId)){const points=[];for(let id=at.id;id!==-1;id=previous[id]){const p=Math.floor(id/3);points.push({x:xs[p%nx],y:ys[Math.floor(p/nx)]});}return {points:points.reverse(),start:owner[at.id],goal:targets.get(pointId),refined};}
+      const ix=pointId%nx,iy=Math.floor(pointId/nx),x=xs[ix],y=ys[iy];
+      for(const [jx,jy] of [[ix-1,iy],[ix+1,iy],[ix,iy-1],[ix,iy+1]]){
+        if(jx<0 || jx>=nx || jy<0 || jy>=ys.length || !allowed(x,y,xs[jx],ys[jy]))continue;
+        const direction=jy===iy?1:2,id=(jy*nx+jx)*3+direction,cost=at.cost+Math.abs(xs[jx]-x)+Math.abs(ys[jy]-y)+(axis && axis!==direction?12:0);
+        if(cost>=distance[id])continue;distance[id]=cost;previous[id]=at.id;owner[id]=owner[at.id];push({id,cost,score:cost+heuristic(xs[jx],ys[jy])});
+      }
+    }
+    // Complete subdivision: each free interval between obstacles/used lines
+    // gets its own coordinate, even if a narrow corridor saturated coarse rails.
+    return refined?null:searchGraphPath(blocks,tracks,starts,goals,width,height,true);
+  }
+
   function graphRoute(layout,edge,occupied=[]) {
+    const initialHeight=layout.height;
     const a=layout.positions.get(String(edge.from)),b=layout.positions.get(String(edge.to));
     const nw=layout.nodeWidth || 210,nh=layout.nodeHeight || 94,lw=layout.labelWidth || 138,lh=layout.labelHeight || 52;
     const nodes=[...layout.positions.values()].map(p=>({left:p.x-nw/2,right:p.x+nw/2,top:p.y-nh/2,bottom:p.y+nh/2}));
     const overlaps=(a,b,pad=0)=>a.left<b.right+pad && a.right>b.left-pad && a.top<b.bottom+pad && a.bottom>b.top-pad;
     const rect=p=>({left:p.x-lw/2,right:p.x+lw/2,top:p.y-lh/2,bottom:p.y+lh/2});
     const segmentHits=(a,b,r)=>a.x===b.x?a.x>r.left+1 && a.x<r.right-1 && Math.max(a.y,b.y)>r.top+1 && Math.min(a.y,b.y)<r.bottom-1:a.y>r.top+1 && a.y<r.bottom-1 && Math.max(a.x,b.x)>r.left+1 && Math.min(a.x,b.x)<r.right-1;
+    const labelHits=(a,b,r)=>segmentHits(a,b,{left:r.left-1,right:r.right+1,top:r.top-1,bottom:r.bottom+1});
     const reserved=occupied.flatMap(r=>r.segments || []);
     const segments=points=>points.slice(1).map((end,i)=>({start:points[i],end}));
     const shared=(a,b)=>a.start.x===a.end.x && b.start.x===b.end.x && a.start.x===b.start.x
@@ -115,7 +163,7 @@
       // Distinct endpoint pairs never share a trunk. A perpendicular crossing
       // remains a single point; it does not imply a semantic junction.
       if(tracks.some(s=>reserved.some(r=>shared(s,r))))return;
-      if(tracks.some(s=>occupied.some(box=>segmentHits(s.start,s.end,box))))return;
+      if(tracks.some(s=>occupied.some(box=>labelHits(s.start,s.end,box))))return;
       const length=points.reduce((sum,p,i)=>sum+(i?Math.abs(p.x-points[i-1].x)+Math.abs(p.y-points[i-1].y):0),0);
       for(let i=1;i<points.length;i++) {
         const start=points[i-1],end=points[i],horizontal=start.y===end.y;
@@ -125,7 +173,7 @@
           const label={x:start.x+(end.x-start.x)*t,y:start.y+(end.y-start.y)*t},box=rect(label);
           if(box.left<4 || box.top<4 || box.right>layout.width-4 || box.bottom>layout.height-4)continue;
           if(nodes.some(n=>overlaps(box,n,6)) || occupied.some(n=>overlaps(box,n,8)))continue;
-          if(reserved.some(s=>segmentHits(s.start,s.end,box)))continue;
+          if(reserved.some(s=>labelHits(s.start,s.end,box)))continue;
           const score=length+(points.length-2)*20+Math.abs(.5-t)*60;
           if(!best || score<best.score)best={points,segments:tracks,label,box,score,direction:horizontal?(end.x>start.x?'→':'←'):(end.y>start.y?'↓':'↑')};
         }
@@ -167,7 +215,41 @@
         }
       }
     }
-    if(!best)throw new Error('关系图路由空间不足');
+    if(!best) {
+      // A free label bay below the existing graph guarantees label space.
+      // Search both legs with all obstacle-corner coordinates, rather than
+      // repeatedly trying the same saturated ports/corridors farther away.
+      layout.height=initialHeight;
+      const bayY=layout.height+lh/2+24,left={x:18,y:bayY},right={x:18+lw+32,y:bayY},label={x:(left.x+right.x)/2,y:bayY},box=rect(label);
+      layout.height=bayY+lh/2+24;
+      const inflate=r=>({left:r.left-1,right:r.right+1,top:r.top-1,bottom:r.bottom+1});
+      const blocks=[...nodes,...occupied,box].map(inflate),bay={start:left,end:right};
+      const ports=p=>{
+        const candidates=[];
+        for(const verticalSide of [true,false])for(const sign of [-1,1]){
+          const center=verticalSide?p.y:p.x,half=(verticalSide?nh:nw)/2-6;
+          const used=reserved.flatMap(s=>[s.start,s.end]).filter(v=>verticalSide?Math.abs(v.x-p.x)===nw/2:Math.abs(v.y-p.y)===nh/2).map(v=>verticalSide?v.y:v.x).filter(v=>Math.abs(v-center)<half);
+          const bounds=unique([center-half,...used,center+half]);
+          const values=unique([center,center-12,center+12,center-24,center+24,...bounds.slice(1).map((v,i)=>(v+bounds[i])/2)]).filter(v=>Math.abs(v-center)<=half);
+          for(const value of values){const port=verticalSide?{x:p.x+sign*nw/2,y:value}:{x:value,y:p.y+sign*nh/2},escape=verticalSide?{x:port.x+sign*3,y:value}:{x:value,y:port.y+sign*3},stub={start:port,end:escape};
+            if(escape.x<1 || escape.x>layout.width-1 || escape.y<1 || escape.y>layout.height-1)continue;
+            if(nodes.some(n=>segmentHits(port,escape,n)) || occupied.some(n=>labelHits(port,escape,n)) || reserved.some(s=>shared(stub,s)))continue;
+            candidates.push({port,escape,stub});
+          }
+        }
+        return candidates;
+      };
+      const starts=ports(a),ends=ports(b),first=searchGraphPath(blocks,[...reserved,bay],starts.map(p=>p.escape),[left],layout.width,layout.height);
+      if(first){const firstTracks=segments([starts[first.start].port,...first.points]),endPorts=ends.filter(p=>!firstTracks.some(s=>shared(p.stub,s)));
+        const second=searchGraphPath(blocks,[...reserved,bay,...firstTracks],[right],endPorts.map(p=>p.escape),layout.width,layout.height);
+        if(second){consider([starts[first.start].port,...first.points,...second.points,endPorts[second.goal].port]);
+          // The bay is on the route and outside every earlier object/line.
+          // Keep its own label rather than placing one in a crowded interior.
+          if(best)best={...best,label,box,direction:'→',searched:true};
+        }
+      }
+    }
+    if(!best)throw new Error('关系图可用路径搜索失败');
     occupied.push({...best.box,segments:best.segments});
     return {...best,d:best.points.map((p,i)=>`${i?'L':'M'}${p.x},${p.y}`).join(' ')};
   }
