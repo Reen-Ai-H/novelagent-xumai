@@ -2,11 +2,11 @@
 
 2026-10-20当前：[阶段38 · 作者账户的拆书闭环](goals/STAGE_38_PLATFORM_DECONSTRUCTION.md)，分支`codex/stage-38-platform-deconstruction`。已发现并纠正测试账户与作者账户不一致；正在把正常上传自动分章、主拆书入口、持久报告与人物/事件总图接成同一网站体验。最新目标和合同见任务书与DECISIONS，实际进度见PROGRESS；下方“六章副本可验收”不替代本阶段完成。
 
-2026-10-20：8057当前副本已重启，正文六章可查看/编辑，模型调用保持关闭。Notion改用独立“验收状态”（未验收/验收未通过/已通过）及“验收台”；未通过项按意见修改、自测后再回到未验收，原意见保留。开发进度与作者结论分开，详见[验收规则](ACCEPTANCE.md)和[最新进度](../PROGRESS.md)。
+Notion使用独立“验收状态”（未验收/验收未通过/已通过）及“验收台”；所有行的意见都要读取，返修、自测后再回到未验收，原意见保留。开发进度与作者结论分开，详见[验收规则](ACCEPTANCE.md)和[最新进度](../PROGRESS.md)。8057的当前运行、预算及付费开关也只以最新进度为准。
 
-2026-10-18 当前实施为[阶段37 · 独立创作本机完整可用版](goals/STAGE_37_USABLE_WORKSPACE.md)：正式六章、A版分层与状态页已复核，[章级事实预览](STAGE_37_CHAPTER_PREVIEW_CONTRACT.md)通过免费工程门禁，但六章实跑和单章推理对照均未通过内容/绑定检查，未采用。8057保留可编辑副本、试验调用关闭；新增5元轮估算已用1.7907元、余3.2093元，独立于旧2元账。先评估有源纠错与核对负担，不继续盲跑。Notion仅作者选择已验收；子Agent只用Sol。下方阶段36是继承基线，不再代表当前目标；决定和结果分别见[DECISIONS](DECISIONS.md)与[PROGRESS](../PROGRESS.md)。
+历史基线：[阶段37](goals/STAGE_37_USABLE_WORKSPACE.md)正式分章和A版分层进入阶段38；[章级事实预览](STAGE_37_CHAPTER_PREVIEW_CONTRACT.md)曾通过免费门禁，但六章与单章实跑未通过，失败记录保留。当前正常入口改为report-v2，旧章级流程仅兼容，不以历史工程通过替代实稿质量。
 
-2026-10-16 网页端接手见 [CODEX_WEB_HANDOFF](CODEX_WEB_HANDOFF.md)：当前最新进度在阶段36分支，尚未合并到 `main`；含基线、环境、验证及本机私有材料边界。
+网页端接手见 [CODEX_WEB_HANDOFF](CODEX_WEB_HANDOFF.md)：从阶段38最新远端候选继续，尚未合并到`main`；本机私人材料不随Git上传。
 
 > 继承基线为 [阶段 36 · 工作台减法与结构化阅读](goals/STAGE_36_VISUAL_READING.md)。用户认可主配区分，不代表界面和导入已验收。研究依据见[图形阅读设计](research/STAGE_36_VISUAL_READING_2026-10-13.md)。
 

@@ -118,7 +118,7 @@ LLM_TEMPERATURE=0.7
 
 ## 开发状态
 
-- 当前为[阶段37本机完整可用版](docs/goals/STAGE_37_USABLE_WORKSPACE.md)候选 [Draft PR #14](https://github.com/Reen-Ai-H/novelagent-xumai/pull/14)，基于阶段36 #13；阶段34–37尚未合并，不等于 GitHub main、已验收或生产状态。
+- 当前为[阶段38作者账户的拆书闭环](docs/goals/STAGE_38_PLATFORM_DECONSTRUCTION.md)候选 [Draft PR #15](https://github.com/Reen-Ai-H/novelagent-xumai/pull/15)，基于阶段37 #14；阶段34–38尚未合并，不等于 GitHub main、已验收或生产状态。
 - 最新测试、浏览器、独立审计及对应提交统一见 [PROGRESS.md](PROGRESS.md)，当前未闭合事项见 [BLOCKED.md](BLOCKED.md)。历史阶段的测试数字不作为当前验收依据。
 - 拆解明确区分无模型规则索引与模型报告。图只展示已有联系，正文证据可精确定位，历史证据保持只读。
 - 来源编号与严格引文校验已接入产品试拆和全文运行；真实调用、语义复核与界面验收以当前阶段记录为准，不用旧私有样例冒充新流程通过。
