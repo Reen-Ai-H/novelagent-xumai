@@ -26,12 +26,18 @@ const origin='http://empty-state.invalid';
    const req=route.request(),url=new URL(req.url()),p=url.pathname;
    assert.equal(url.origin,origin,'No request may leave the synthetic origin');calls.push(`${req.method()} ${p}`);
    const json=data=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
-   if(p.startsWith('/static/')){const name=p.slice(8);assert.match(name,/^[a-z0-9.-]+$/);return route.fulfill({contentType:name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/javascript',body:await fs.readFile(path.join(root,'frontend',name))});}
+   if(p.startsWith('/static/')){const name=p.slice(8);assert.match(name,/^[a-z0-9.-]+$/);let body=await fs.readFile(path.join(root,'frontend',name));
+    if(name==='app.js'){
+     const hook='  start();\n})();',source=body.toString('utf8');assert.equal(source.split(hook).length,2);
+     body=source.replace(hook,'  window.__emptyStateAudit={renderReportWorkflow,activateDeconstructionSection,selectDeconstructionVolume,loadDeconstructionWorkspace};\n'+hook);
+    }
+    return route.fulfill({contentType:name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/javascript',body});}
    if(!p.startsWith('/api/'))return route.fulfill({contentType:'text/html',body:await fs.readFile(path.join(root,'frontend/index.html'))});
    if(p==='/api/auth/session')return json({authenticated:true,account:{account_id:'synthetic',email:'empty.reader@example.test'}});
    if(p==='/api/notifications')return json({notifications:[],unread_count:0});
    if(p.endsWith('/model-budget'))return json({model_available:available,budget:{budget_cny:5,estimated_spent_cny:1,reserved_cny:0,remaining_cny:4}});
    if(p.endsWith('/book'))return json({job});
+   if(p.endsWith('/deconstruction/guide'))return json({characters:[]});
    if(p.endsWith('/book/pause')){assert.equal(req.method(),'POST');posts.push(p);job={...job,status:'paused'};return json({job});}
    if(p.endsWith('/book/start-report')){
     assert.equal(req.method(),'POST');assert.deepEqual(req.postDataJSON(),{expected_source_version_id:'v1',expected_source_revision:1,expected_source_hash:'a'.repeat(64)});
@@ -123,6 +129,30 @@ const origin='http://empty-state.invalid';
     cases.push({width,case:`historical report retained during ${status}`});
    }
    const file=path.join(out,`${width}x${height}-people-history-preserved.png`);await page.screenshot({path:file});screenshots.push(file);
+   // Same mounted page: a readable report/history/guide is not busy simply
+   // because the preceding first-report empty state was running.
+   const content=page.locator('#deconstructionPageContent');
+   for(const target of ['guide','report','history']){
+    formal=false;historical=false;job=task('running','review');await navigate('plot');
+    assert.equal(await content.getAttribute('aria-busy'),'true');
+    if(target==='guide'){
+     await page.evaluate(()=>window.__emptyStateAudit.activateDeconstructionSection('guide'));
+     await page.waitForFunction(()=>document.querySelector('[data-guide-note]')?.textContent==='0 卷生效');
+    }else{
+     formal=true;historical=target==='history';
+     if(historical)await page.evaluate(()=>window.__emptyStateAudit.selectDeconstructionVolume('history'));
+     else await page.evaluate(()=>window.__emptyStateAudit.loadDeconstructionWorkspace('p1',{silent:true,documentId:'doc'}));
+     await page.locator('.total-graph-scroll').waitFor();
+     assert.equal(await page.locator('.total-graph-node').count(),6);
+    }
+    assert.equal(await content.getAttribute('aria-busy'),'false',`Running empty -> ${target} must clear busy`);
+    // Exercise the workflow-only repaint too, independently of the full
+    // reader's initial aria-busy assignment. This is the residual-state case.
+    assert.equal(await content.evaluate(n=>{
+     n.setAttribute('aria-busy','true');window.__emptyStateAudit.renderReportWorkflow();return n.getAttribute('aria-busy');
+    }),'false',`${target} workflow-only repaint must clear residual busy`);
+    cases.push({width,case:`running empty -> ${target}; workflow-only residual busy reset`});
+   }
    assert.deepEqual(errors,[]);assert.ok(!calls.some(p=>/analyze-preview|\/book\/start$|\/retry$|\/rebuild$/.test(p)));
   }catch(error){await page.screenshot({path:path.join(out,`${width}-failure.png`)});console.error({out,width,errors});throw error;}
   finally{await context.close();}

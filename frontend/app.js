@@ -3051,6 +3051,7 @@
       elements.deconstructionStatusPill.textContent = "全书导读";
       elements.deconstructionStatusPill.className = "deconstruction-status-pill is-completed";
       const volumeBar = renderDeconstructionVolumeBar(state.deconstructionWorkspace || {});
+      elements.deconstructionPageContent.setAttribute('aria-busy','false');
       elements.deconstructionPageContent.innerHTML = (volumeBar ? volumeBar : "") + deconstructionGuideShell();
       void loadGuideAggregate(projectId);
       return;
@@ -4038,6 +4039,7 @@
     const action=job?.kind==='report-v2' && job.status==='paused'?'继续拆书':job?.kind==='report-v2' && ['completed','failed'].includes(job.status)?'重新分析':'开始拆书';
     const reason=task.pollError || task.budgetError || (job?.kind==='report-v2' && job.status==='failed'?job.message:message || block);
     const empty=!hasDeconstructionResults(data) && new URLSearchParams(location.search).get('section')!=='guide';
+    elements.deconstructionPageContent.setAttribute('aria-busy',String(empty && running));
     const focused=root.contains?.(document.activeElement)?document.activeElement?.dataset?.action:null;
     // Move, never clone, the existing safe controls; polling and confirmation
     // continue to use the same task ownership and source checks.
@@ -4054,7 +4056,6 @@
       // Running needs a stage, not the same long sentence in two places.
       detail=task.pollError || task.budgetError || (reportJob?.error_code==='report_request_unknown'?block:reportJob?.status==='failed'?reportJob.message:!running?block:'');
       if(detail===heading || (!task.loaded && !task.pollError))detail='';
-      elements.deconstructionPageContent.setAttribute('aria-busy',String(running));
     }
     root.innerHTML=`${steps}${heading?`<h2>${escapeHtml(heading)}</h2>`:''}${detail?`<p class="report-workflow-status${job?.status==='failed'?' report-workflow-error':''}" role="status">${escapeHtml(detail)}</p>`:''}<div class="report-workflow-action"><button class="button button-primary" type="button" data-action="open-report-confirm" ${block?'disabled':''}>${running?'拆书进行中':action}</button>${running && job?.kind==='report-v2'?`<button type="button" class="quiet-link" data-action="pause-report" ${task.controlling?'disabled':''}>暂停拆书</button>`:''}${task.pollError || task.budgetError?'<button class="quiet-link" type="button" data-action="refresh-report-status">刷新状态</button>':''}</div>`;
     if(focused && !root.hidden)root.querySelector(`[data-action="${focused}"]:not(:disabled)`)?.focus({preventScroll:true});
