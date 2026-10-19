@@ -7,11 +7,11 @@
     <title>叙脉｜新一代写作体验</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
     <!-- Release CSS and JS together; browser_stage36_visual.cjs checks this token on normal reload. -->
-    <link rel="stylesheet" href="/static/styles.css?v=stage38-preflight" />
-    <link rel="stylesheet" href="/static/deconstruction-report.css?v=stage38-preflight" />
-    <link rel="stylesheet" href="/static/workspace-ui.css?v=stage38-preflight" />
-    <link rel="stylesheet" href="/static/visual-reading.css?v=stage38-preflight" />
-    <link rel="stylesheet" href="/static/workspace-reader.css?v=stage38-preflight" />
+    <link rel="stylesheet" href="/static/styles.css?v=stage38-platform2" />
+    <link rel="stylesheet" href="/static/deconstruction-report.css?v=stage38-platform2" />
+    <link rel="stylesheet" href="/static/workspace-ui.css?v=stage38-platform2" />
+    <link rel="stylesheet" href="/static/visual-reading.css?v=stage38-platform2" />
+    <link rel="stylesheet" href="/static/workspace-reader.css?v=stage38-platform2" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -308,10 +308,9 @@
         <main class="deconstruction-main">
           <header class="deconstruction-header">
             <div class="deconstruction-heading"><p class="kicker"><span class="kicker-line"></span>独立创作 / <span id="deconstructionProjectTitle">—</span></p><h1 id="deconstructionPageTitle">作品拆解</h1></div>
-            <div class="deconstruction-header-actions"><span id="deconstructionStatusPill" class="deconstruction-status-pill">等待读取</span><button class="button button-outline" type="button" data-action="open-workspace-tools">分析与来源</button></div>
+            <div class="deconstruction-header-actions"><section id="reportWorkflow" class="report-workflow" aria-live="polite"></section><span id="deconstructionStatusPill" class="deconstruction-status-pill">等待读取</span><button class="button button-outline" type="button" data-action="open-workspace-tools">分析与来源</button></div>
           </header>
           <div id="deconstructionNotice" class="notice deconstruction-notice is-hidden" role="status"></div>
-          <section id="reportWorkflow" class="report-workflow" aria-live="polite"></section>
           <dialog id="reportConfirmDialog" class="review-dialog report-confirm-dialog" aria-labelledby="reportConfirmTitle"><div class="review-dialog-shell"><button class="dialog-close" type="button" data-action="close-report-confirm" aria-label="关闭拆书确认">×</button><h2 id="reportConfirmTitle">确认开始拆书</h2><p id="reportConfirmScope"></p><p id="reportConfirmBudget"></p><p>模型调用会产生费用，并与其他作品共用本机预算；失败与重试也会计入。完成后自动显示报告，离开页面也会继续。</p><p id="reportConfirmError" role="alert"></p><div class="review-actions"><button class="button button-outline" type="button" data-action="close-report-confirm">暂不开始</button><button id="reportConfirmButton" class="button button-primary" type="button" data-action="confirm-report">确认费用并开始拆书</button></div></div></dialog>
           <dialog id="workspaceToolsDialog" class="review-dialog workspace-tools-dialog" aria-labelledby="workspaceToolsTitle"><div class="review-dialog-shell"><button class="dialog-close" type="button" data-action="close-workspace-tools" aria-label="关闭分析与来源">×</button><h2 id="workspaceToolsTitle">分析与来源</h2><div id="workspaceSource"></div><button id="deconstructionRefreshButton" class="quiet-link" type="button" data-action="deconstruction-refresh">刷新结果</button><button class="quiet-link" type="button" data-action="deconstruction-section" data-section="guide">全书导读</button>
           <details class="model-analysis-options"><summary>高级分析（旧版）<span id="modelAnalysisActivity"></span></summary><p id="modelSharedBudget" role="status">正在读取本机共用预算…</p><div class="model-analysis-controls"><button class="button button-outline" data-action="book-start" disabled>旧版分段分析（付费）</button><button class="quiet-link" data-action="book-pause" disabled>暂停旧版任务</button><span id="bookAnalysisStatus" role="status">由你主动开始，模型调用会产生费用。</span></div>
@@ -472,13 +471,13 @@
       </div>
     </dialog>
 
-    <script src="/static/report-browser.js?v=stage38-preflight" defer></script>
-    <script src="/static/visual-reading.js?v=stage38-preflight" defer></script>
-    <script src="/static/chapter-sections.js?v=stage38-preflight" defer></script>
-    <script src="/static/chapter-preview.js?v=stage38-preflight" defer></script>
-    <script src="/static/workspace-reader.js?v=stage38-preflight" defer></script>
-    <script src="/static/rule-report.js?v=stage38-preflight" defer></script>
-    <script src="/static/deconstruction-report.js?v=stage38-preflight" defer></script>
-    <script src="/static/app.js?v=stage38-preflight" defer></script>
+    <script src="/static/report-browser.js?v=stage38-platform2" defer></script>
+    <script src="/static/visual-reading.js?v=stage38-platform2" defer></script>
+    <script src="/static/chapter-sections.js?v=stage38-platform2" defer></script>
+    <script src="/static/chapter-preview.js?v=stage38-platform2" defer></script>
+    <script src="/static/workspace-reader.js?v=stage38-platform2" defer></script>
+    <script src="/static/rule-report.js?v=stage38-platform2" defer></script>
+    <script src="/static/deconstruction-report.js?v=stage38-platform2" defer></script>
+    <script src="/static/app.js?v=stage38-platform2" defer></script>
   </body>
 </html>

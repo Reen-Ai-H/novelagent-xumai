@@ -29,7 +29,7 @@ if(require.main===module)(async()=>{
  const summary=[];
  try{
   for(const width of [1440,1024,390]){
-   const context=await browser.newContext({viewport:{width,height:900},reducedMotion:'reduce'});
+   const context=await browser.newContext({viewport:{width,height:width===1024?768:900},reducedMotion:'reduce'});
    const page=await context.newPage(),errors=[],requests=[],writes=[];
    let email=primary,empty=false;
    const {workspace,response,refs}=fixture(),initialBodies=workspace.active_version.chapters.map(c=>c.content);
@@ -123,6 +123,24 @@ if(require.main===module)(async()=>{
      return [...document.querySelectorAll('.total-graph-edge')].filter(n=>{const r=n.getBoundingClientRect();return nodes.some(b=>r.left<b.right&&r.right>b.left&&r.top<b.bottom&&r.bottom>b.top);}).length;
     });
     assert.equal(overlaps,0,'Every semantic label must remain clear of person cards');
+    const diagram=await page.evaluate(()=>{
+     const region=document.querySelector('.total-graph-scroll'),r=region.getBoundingClientRect();
+     const nodes=[...document.querySelectorAll('.total-graph-node')].map(n=>n.getBoundingClientRect());
+     const canvas=document.querySelector('.total-graph-canvas'),paths=[...document.querySelectorAll('.total-graph-lines > path[data-total-from]')];
+     const labels=[...document.querySelectorAll('.total-graph-edge')];
+     const distances=labels.map((n,i)=>{
+      const x=parseFloat(n.style.left),y=parseFloat(n.style.top),p=paths[i],length=p.getTotalLength();
+      let distance=Infinity;
+      for(let j=0;j<=600;j++){const at=p.getPointAtLength(length*j/600);distance=Math.min(distance,Math.hypot(at.x-x,at.y-y));}
+      return distance;
+     });
+     return {top:r.top,allVisible:nodes.every(n=>n.left>=r.left && n.right<=r.right && n.top>=r.top && n.bottom<=r.bottom && n.bottom<=innerHeight),scrollX:region.scrollWidth-region.clientWidth,scrollY:region.scrollHeight-region.clientHeight,distances,guides:document.querySelectorAll('.total-label-guide').length};
+    });
+    assert.equal(diagram.guides,0);assert.ok(diagram.distances.every(n=>n<3),JSON.stringify(diagram));
+    if(width>=1024){assert.ok(diagram.top<260);assert.equal(diagram.allVisible,true);assert.equal(diagram.scrollX,0);assert.equal(diagram.scrollY,0);}
+    assert.equal(await page.locator('#reportWorkflow').isVisible(),false,'A current valid report has no redundant workflow bar');
+    const assets=await page.evaluate(()=>[...document.querySelectorAll('script[src],link[rel=stylesheet]')].map(n=>n.src || n.href));
+    assert.equal(assets.length,13);assert.ok(assets.every(url=>new URL(url).searchParams.get('v')==='stage38-platform2'));
     await capture('people-total');
     await page.locator('.total-graph-edge').first().focus();await page.keyboard.press('Enter');
     assert.equal(await page.locator('[data-edge-basis]').isVisible(),true);
@@ -141,6 +159,10 @@ if(require.main===module)(async()=>{
     assert.equal(await page.locator('[data-person-index] input[type=search]').inputValue(),'林舟');
     await page.goto(origin+'/independent/p1?view=deconstruction&volume=doc&section=plot');await page.locator('.total-graph-scroll').waitFor();
     assert.equal(await page.locator('.total-graph-node').count(),6);assert.equal(await page.locator('[data-total-from]').count(),2);
+    if(width>=1024)assert.equal(await page.evaluate(()=>{
+     const region=document.querySelector('.total-graph-scroll'),r=region.getBoundingClientRect();
+     return region.scrollWidth===region.clientWidth && region.scrollHeight===region.clientHeight && [...document.querySelectorAll('.total-graph-node')].every(n=>{const b=n.getBoundingClientRect();return b.left>=r.left&&b.right<=r.right&&b.top>=r.top&&b.bottom<=r.bottom&&b.bottom<=innerHeight;});
+    }),true,'The small event map also fits without hiding nodes');
     await capture('plot-total');
     await page.locator('[data-reader-open=E2]').click();await page.locator('[data-reader-detail=plot]').waitFor();
     await page.locator('.workspace-event-body .analysis-proof > summary').first().click();
@@ -175,7 +197,7 @@ if(require.main===module)(async()=>{
     assert.deepEqual(errors,[]);
     assert.ok(writes.every(p=>/\/auth\/(email|logout)$|\/chapters(?:\/c1\/draft)?$/.test(p)),JSON.stringify(writes));
     assert.ok(!requests.some(p=>/analyze-preview|book\/start|\/retry$|\/rebuild$/.test(p)),'No paid or wrong-pipeline calls');
-    summary.push({width,screenshots:4,consoleErrors:errors.length,requests:requests.length,writes});
+    summary.push({width,height:page.viewportSize().height,diagram,screenshots:4,consoleErrors:errors.length,requests:requests.length,writes});
    }catch(error){await page.screenshot({path:path.join(out,`${width}-failure.png`),fullPage:true});console.error({url:page.url(),errors,out});throw error;}
    finally{await context.close();}
   }

@@ -3944,10 +3944,16 @@
     $$('[data-action="book-start"],[data-action="model-analyze"]').forEach(node=>node.disabled=Boolean(block || state.modelAnalysisBusy));
     const legacyPause=$('[data-action="book-pause"]');
     if(legacyPause)legacyPause.disabled=task.job?.kind==='report-v2' || task.job?.status!=='running';
-    const running=['queued','running'].includes(task.job?.status),message=reportJobMessage(task.job);
-    const action=task.job?.kind==='report-v2' && task.job.status==='paused'?'继续拆书':hasReport || task.job?.kind==='report-v2' && ['completed','failed'].includes(task.job.status)?'重新分析':'开始拆书';
-    root.className=`report-workflow ${hasReport?'is-compact':''}`;
-    root.innerHTML=`<div>${hasReport?'':`<h2>${running?'正在整理人物与剧情':'把正文整理成人物与剧情'}</h2>`}<p class="report-workflow-status" role="status">${escapeHtml(message || '分析当前稿本，完成后自动显示报告。')}</p>${task.job?.kind==='report-v2' && task.job.status==='failed' && task.job.message?`<p class="report-workflow-error">${escapeHtml(task.job.message)}</p>`:''}</div><div class="report-workflow-action"><button class="button button-primary" type="button" data-action="open-report-confirm" ${block?'disabled':''}>${running?'拆书进行中':action}</button>${running && task.job?.kind==='report-v2'?`<button type="button" class="quiet-link" data-action="pause-report" ${task.controlling?'disabled':''}>暂停拆书</button>`:''}${block?`<span>${escapeHtml(block)}</span>`:'<span>模型分析 · 开始前确认费用</span>'}${task.pollError || task.budgetError?'<button class="quiet-link" type="button" data-action="refresh-report-status">刷新状态</button>':''}</div>`;
+    const job=task.job,running=['queued','running'].includes(job?.status);
+    const currentReport=hasReport && data.sourceMatch===true && data.effectiveStatus==='completed';
+    const unsettled=job?.kind==='report-v2' && ['running','paused','failed'].includes(job.status);
+    root.hidden=currentReport && !unsettled;
+    elements.deconstructionStatusPill.hidden=!root.hidden;
+    const message=job?.status==='completed' && !currentReport?'':reportJobMessage(job);
+    const action=job?.kind==='report-v2' && job.status==='paused'?'继续拆书':job?.kind==='report-v2' && ['completed','failed'].includes(job.status)?'重新分析':'开始拆书';
+    const reason=task.pollError || task.budgetError || (job?.kind==='report-v2' && job.status==='failed'?job.message:message || block);
+    root.className='report-workflow is-compact';
+    root.innerHTML=`${reason?`<p class="report-workflow-status${job?.status==='failed'?' report-workflow-error':''}" role="status">${escapeHtml(reason)}</p>`:''}<div class="report-workflow-action"><button class="button button-primary" type="button" data-action="open-report-confirm" ${block?'disabled':''}>${running?'拆书进行中':action}</button>${running && job?.kind==='report-v2'?`<button type="button" class="quiet-link" data-action="pause-report" ${task.controlling?'disabled':''}>暂停拆书</button>`:''}${task.pollError || task.budgetError?'<button class="quiet-link" type="button" data-action="refresh-report-status">刷新状态</button>':''}</div>`;
   }
   async function pauseReport() {
     const project=state.deconstructionProjectId,task=ensureReportTask(project);

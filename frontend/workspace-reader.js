@@ -21,7 +21,7 @@
 
   // Whole-report layout. Components and multi-hop paths use only supplied
   // endpoints; an isolated person stays isolated, never a made-up relation.
-  function graphLayout(items, edges, sequential=false,compactWidth=0) {
+  function graphLayout(items, edges, sequential=false,compactWidth=0,desktopWidth=920) {
     const ids=items.map(item=>String(item.id)), known=new Set(ids), positions=new Map();
     const valid=edges.filter(r=>known.has(String(r.from)) && known.has(String(r.to)));
     if(compactWidth>0) {
@@ -30,8 +30,27 @@
       return {positions,edges:valid,width,height:Math.max(220,ids.length*240+20)};
     }
     if(sequential) {
+      if(ids.length && ids.length<=7){
+        const width=Math.max(660,Math.min(1000,Math.floor(desktopWidth)));
+        ids.forEach((id,i)=>{const row=Math.floor(i/3),col=row%2?2-i%3:i%3;positions.set(id,{x:80+col*(width-160)/2,y:80+row*220});});
+        return {positions,edges:valid,width,height:Math.max(180,Math.ceil(ids.length/3)*220-40),nodeWidth:150,nodeHeight:94,labelWidth:110,labelHeight:52};
+      }
       ids.forEach((id,i)=>{const row=Math.floor(i/3),col=row%2?2-i%3:i%3;positions.set(id,{x:140+col*320,y:90+row*210});});
       return {positions,edges:valid,width:920,height:Math.max(220,Math.ceil(ids.length/3)*210)};
+    }
+    if(ids.length && ids.length<=7) {
+      const width=Math.max(660,Math.min(1000,Math.floor(desktopWidth))),columns=Math.min(3,ids.length);
+      const slots=ids.map((id,i)=>({x:columns===1?width/2:80+i%columns*(width-160)/(columns-1),y:80+Math.floor(i/columns)*220,col:i%columns,row:Math.floor(i/columns)}));
+      let best=ids,bestScore=Infinity;
+      const visit=(order,remaining)=>{
+        if(remaining.length){remaining.forEach((id,i)=>visit([...order,id],remaining.filter((_,j)=>j!==i)));return;}
+        const at=new Map(order.map((id,i)=>[id,slots[i]]));
+        const score=valid.reduce((sum,r)=>{const a=at.get(String(r.from)),b=at.get(String(r.to)),dx=Math.abs(a.col-b.col),dy=Math.abs(a.row-b.row);return sum+(dx+dy)*100+(dx&&dy?180:0)+(dx>1 || dy>1?300:0);},0);
+        if(score<bestScore){bestScore=score;best=order;}
+      };
+      visit([],ids);
+      best.forEach((id,i)=>positions.set(id,{x:slots[i].x,y:slots[i].y}));
+      return {positions,edges:valid,width,height:Math.max(180,Math.ceil(ids.length/columns)*220-40),nodeWidth:150,nodeHeight:94,labelWidth:110,labelHeight:52};
     }
     const adjacent=new Map(ids.map(id=>[id,new Set()]));
     valid.forEach(r=>{adjacent.get(String(r.from)).add(String(r.to));adjacent.get(String(r.to)).add(String(r.from));});
@@ -63,16 +82,59 @@
     return {positions,edges:valid,width:Math.max(600,maxX+160),height:Math.max(220,bottom)};
   }
 
-  function graphLabelPosition(layout,used,target) {
-    const nodes=[...layout.positions.values()];
-    const clear=p=>p.x>=78 && p.x<=layout.width-78 && p.y>=32 && p.y<=layout.height-32
-      && !nodes.some(n=>Math.abs(n.x-p.x)<185 && Math.abs(n.y-p.y)<92)
-      && !used.some(n=>Math.abs(n.x-p.x)<150 && Math.abs(n.y-p.y)<64);
-    for(let radius=0;radius<=8;radius++)for(const [dx,dy] of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]]) {
-      const p={x:target.x+dx*radius*90,y:target.y+dy*radius*65};
-      if(clear(p)){used.push(p);return p;}
+  function graphRoute(layout,edge,occupied=[]) {
+    const a=layout.positions.get(String(edge.from)),b=layout.positions.get(String(edge.to));
+    const nw=layout.nodeWidth || 210,nh=layout.nodeHeight || 94,lw=layout.labelWidth || 138,lh=layout.labelHeight || 52;
+    const nodes=[...layout.positions.values()].map(p=>({left:p.x-nw/2,right:p.x+nw/2,top:p.y-nh/2,bottom:p.y+nh/2}));
+    const overlaps=(a,b,pad=0)=>a.left<b.right+pad && a.right>b.left-pad && a.top<b.bottom+pad && a.bottom>b.top-pad;
+    const rect=p=>({left:p.x-lw/2,right:p.x+lw/2,top:p.y-lh/2,bottom:p.y+lh/2});
+    const segmentHits=(a,b,r)=>a.x===b.x?a.x>r.left+1 && a.x<r.right-1 && Math.max(a.y,b.y)>r.top+1 && Math.min(a.y,b.y)<r.bottom-1:a.y>r.top+1 && a.y<r.bottom-1 && Math.max(a.x,b.x)>r.left+1 && Math.min(a.x,b.x)<r.right-1;
+    const unique=values=>[...new Set(values)].sort((a,b)=>a-b);
+    const xs=unique([...layout.positions.values()].map(p=>p.x)),ys=unique([...layout.positions.values()].map(p=>p.y));
+    const xlanes=unique([18,layout.width-18,...xs.slice(1).map((x,i)=>(x+xs[i])/2)]);
+    const ylanes=unique([18,layout.height-18,...ys.slice(1).map((y,i)=>(y+ys[i])/2)]);
+    let best=null;
+    function consider(raw) {
+      const points=[];
+      raw.forEach(p=>{
+        if(points.length && p.x===points.at(-1).x && p.y===points.at(-1).y)return;
+        if(points.length>=2){const first=points.at(-2),last=points.at(-1);if(first.x===last.x && last.x===p.x || first.y===last.y && last.y===p.y)points.pop();}
+        points.push(p);
+      });
+      if(points.length<2)return;
+      if(points.some((p,i)=>i && nodes.some(n=>segmentHits(points[i-1],p,n))))return;
+      const length=points.reduce((sum,p,i)=>sum+(i?Math.abs(p.x-points[i-1].x)+Math.abs(p.y-points[i-1].y):0),0);
+      for(let i=1;i<points.length;i++) {
+        const start=points[i-1],end=points[i],horizontal=start.y===end.y;
+        const span=horizontal?Math.abs(end.x-start.x):Math.abs(end.y-start.y);
+        if(span<(horizontal?lw:lh)+14)continue;
+        for(const t of [.5,.35,.65]) {
+          const label={x:start.x+(end.x-start.x)*t,y:start.y+(end.y-start.y)*t},box=rect(label);
+          if(box.left<4 || box.top<4 || box.right>layout.width-4 || box.bottom>layout.height-4)continue;
+          if(nodes.some(n=>overlaps(box,n,6)) || occupied.some(n=>overlaps(box,n,8)))continue;
+          const crossed=points.reduce((sum,p,j)=>sum+(j?occupied.filter(n=>segmentHits(points[j-1],p,n)).length:0),0);
+          const score=length+(points.length-2)*20+crossed*400+Math.abs(.5-t)*60;
+          if(!best || score<best.score)best={points,label,box,score,direction:horizontal?(end.x>start.x?'→':'←'):(end.y>start.y?'↓':'↑')};
+        }
+      }
     }
-    const p={x:Math.min(layout.width-78,Math.max(78,target.x)),y:layout.height+40};layout.height+=100;used.push(p);return p;
+    if(a.x===b.x && a.y!==b.y){const direction=Math.sign(b.y-a.y);consider([{x:a.x,y:a.y+direction*nh/2},{x:b.x,y:b.y-direction*nh/2}]);}
+    if(a.y===b.y && a.x!==b.x){const direction=Math.sign(b.x-a.x);consider([{x:a.x+direction*nw/2,y:a.y},{x:b.x-direction*nw/2,y:b.y}]);}
+    for(const x of xlanes)consider([{x:a.x+(x>a.x?nw/2:-nw/2),y:a.y},{x,y:a.y},{x,y:b.y},{x:b.x+(x>b.x?nw/2:-nw/2),y:b.y}]);
+    for(const y of ylanes)consider([{x:a.x,y:a.y+(y>a.y?nh/2:-nh/2)},{x:a.x,y},{x:b.x,y},{x:b.x,y:b.y+(y>b.y?nh/2:-nh/2)}]);
+    if(!best) {
+      // Use a free horizontal corridor; its label remains ON its own route.
+      // Dense reports may grow, but neither nodes nor semantic edges disappear.
+      for(let extension=0;extension<occupied.length+3 && !best;extension++) {
+        if(extension)layout.height+=90;
+        const candidates=extension?[layout.height-38]:ylanes;
+        const near=p=>xlanes.filter(x=>Math.abs(x-p.x)>=nw/2).sort((x,y)=>Math.abs(x-p.x)-Math.abs(y-p.x)).slice(0,2);
+        for(const x1 of near(a))for(const x2 of near(b))for(const y of candidates)consider([{x:a.x+(x1>a.x?nw/2:-nw/2),y:a.y},{x:x1,y:a.y},{x:x1,y},{x:x2,y},{x:x2,y:b.y},{x:b.x+(x2>b.x?nw/2:-nw/2),y:b.y}]);
+      }
+    }
+    if(!best)throw new Error('关系图路由空间不足');
+    occupied.push(best.box);
+    return {...best,d:best.points.map((p,i)=>`${i?'L':'M'}${p.x},${p.y}`).join(' ')};
   }
 
   function mountModel(root, report, options) {
@@ -223,30 +285,21 @@
     function totalGraph(kind) {
       const character=kind==='characters',items=character?data.people:orderEvents();
       const compactWidth=root.clientWidth>0 && root.clientWidth<620?root.clientWidth-2:0;
-      const layout=graphLayout(items,character?list(data.personEdges):data.eventEdges,!character,compactWidth);
+      const layout=graphLayout(items,character?list(data.personEdges):data.eventEdges,!character,compactWidth,root.clientWidth?root.clientWidth-20:920);
       edgeChoices=layout.edges;
       if(!character && !items.some(e=>e.id===state().selected))state().selected=items[0]?.id || '';
       const marker=`totalArrow${++graphSerial}`,byId=character?people:events;
       const routes=new Map(),labelPositions=[];
       edgeChoices.forEach((r,i)=>{const pair=JSON.stringify([r.from,r.to]);if(!routes.has(pair))routes.set(pair,[]);routes.get(pair).push(i);});
-      const segments=[...routes.values()].map((indices,routeIndex)=>{
-        const r=edgeChoices[indices[0]],a=layout.positions.get(String(r.from)),b=layout.positions.get(String(r.to));
-        const same=a.y===b.y,dir=a.x<=b.x?1:-1,self=String(r.from)===String(r.to);
-        const start=same?[a.x+dir*105,a.y]:[a.x,a.y+(a.y<b.y?52:-52)];
-        const end=same?[b.x-dir*105,b.y]:[b.x,b.y+(a.y<b.y?-52:52)];
-        const lane=70+(routeIndex%3)*22;
-        const side=routeIndex%2?layout.width-18:18, offset=side<a.x?-105:105;
-        const d=self?`M${a.x-50},${a.y-52} C${a.x-110},${a.y-140} ${a.x+110},${a.y-140} ${a.x+50},${a.y-52}`:compactWidth?`M${a.x+offset},${a.y} C${side},${a.y} ${side},${b.y} ${b.x+offset},${b.y}`:same?`M${start} C${start[0]},${a.y+lane} ${end[0]},${b.y+lane} ${end}`:`M${start} C${a.x+lane},${start[1]} ${b.x+lane},${end[1]} ${end}`;
+      const segments=[...routes.values()].map(indices=>{
+        const r=edgeChoices[indices[0]],route=graphRoute(layout,r,labelPositions);
         const from=byId.get(String(r.from)),to=byId.get(String(r.to)),label=indices.map(i=>edgeChoices[i].label).join(' / ');
-        const target={x:self?a.x:compactWidth?side:(a.x+b.x)/2+(same?0:lane*.75),y:self?a.y-90:(a.y+b.y)/2+(same?lane*.75:0)};
-        const p=graphLabelPosition(layout,labelPositions,target),direction=a.x===b.x?(b.y>a.y?'↓':'↑'):(b.x>a.x?'→':'←');
-        const connector=Math.hypot(p.x-target.x,p.y-target.y)>20?`<path class="total-label-guide" d="M${p.x},${p.y} L${target.x},${target.y}"/>`:'';
-        return {path:`<path d="${d}" marker-end="url(#${marker})" data-total-from="${esc(r.from)}" data-total-to="${esc(r.to)}"/>${connector}`,label:`<button type="button" class="total-graph-edge" style="left:${p.x}px;top:${p.y}px" data-reader-edges="${indices.join(',')}" aria-label="${esc(`${from.name || from.title} → ${label} → ${to.name || to.title}`)}"><span>${esc(short(label,22))} ${direction}</span>${indices.length===1?badge(r.status):`<small>${indices.length} 项联系</small>`}</button>`};
+        return {path:`<path d="${route.d}" marker-end="url(#${marker})" data-total-from="${esc(r.from)}" data-total-to="${esc(r.to)}"/>`,label:`<button type="button" class="total-graph-edge" style="left:${route.label.x}px;top:${route.label.y}px" data-reader-edges="${indices.join(',')}" aria-label="${esc(`${from.name || from.title} → ${label} → ${to.name || to.title}`)}"><span>${esc(short(label,22))} ${route.direction}</span>${indices.length===1?badge(r.status):`<small>${indices.length} 项联系</small>`}</button>`};
       });
       const nodes=items.map(item=>{const p=layout.positions.get(String(item.id));
         return `<article class="total-graph-node ${character?'is-person':'is-event'}" style="left:${p.x}px;top:${p.y}px" ${character?`data-person-id="${esc(item.id)}"`:`data-event-id="${esc(item.id)}"`}><span class="eyebrow">${esc(character?item.group:item.label)}</span><h2>${link(kind,item.id,character?item.name:item.title,'total-graph-link')}</h2></article>`;
       }).join('');
-      root.innerHTML=`<div class="workspace-reader-index" data-reader-index="${kind}">${mapSwitch()}${character?'':orderSwitch()}<div ${character?'data-person-index':'data-event-index'}><div class="total-graph-meta"><span>${items.length} ${character?'个人物':'个事件'} · ${edgeChoices.length} 条联系</span>${character?'':`<span>${state().order==='story'?'故事顺序':'叙述顺序'}</span>`}</div>${items.length?`<div class="total-graph-scroll" role="region" tabindex="0" aria-label="${character?'人物关系总图':'事件关系总图'}，可滚动查看"><div class="total-graph-canvas" style="width:${layout.width}px;height:${layout.height}px"><svg class="total-graph-lines" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true">${arrow(marker)}${segments.map(s=>s.path).join('')}</svg>${segments.map(s=>s.label).join('')}${nodes}</div></div>`:'<p class="workspace-empty">报告中尚未记录'+(character?'人物':'事件')+'。</p>'}${items.length && !edgeChoices.length?`<p class="total-graph-empty">${character?'暂无已记录的语义关系，可点人物查看经历。':'暂无已记录的事件联系，可点节点查看经过。'}</p>`:''}</div><section data-edge-basis hidden></section></div>`;
+      root.innerHTML=`<div class="workspace-reader-index" data-reader-index="${kind}">${mapSwitch()}${character?'':orderSwitch()}<div ${character?'data-person-index':'data-event-index'}><div class="total-graph-meta"><span>${items.length} ${character?'个人物':'个事件'} · ${edgeChoices.length} 条联系</span>${character?'':`<span>${state().order==='story'?'故事顺序':'叙述顺序'}</span>`}</div>${items.length?`<div class="total-graph-scroll" role="region" tabindex="0" aria-label="${character?'人物关系总图':'事件关系总图'}，可滚动查看"><div class="total-graph-canvas" style="width:${layout.width}px;height:${layout.height}px;--graph-node-width:${layout.nodeWidth || 210}px;--graph-label-width:${layout.labelWidth || 138}px"><svg class="total-graph-lines" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true">${arrow(marker)}${segments.map(s=>s.path).join('')}</svg>${segments.map(s=>s.label).join('')}${nodes}</div></div>`:'<p class="workspace-empty">报告中尚未记录'+(character?'人物':'事件')+'。</p>'}${items.length && !edgeChoices.length?`<p class="total-graph-empty">${character?'暂无已记录的语义关系，可点人物查看经历。':'暂无已记录的事件联系，可点节点查看经过。'}</p>`:''}</div><section data-edge-basis hidden></section></div>`;
       if(!character)updatePlotFocus();
       sync(false);
     }
@@ -358,5 +411,5 @@
     sync(false);draw(!object && returning?.key===key && returning.section===section?'restore':'top');
     return {select(next){navigate(next==='characters'?'characters':'plot');}};
   }
-  window.XumaiWorkspaceReader=Object.freeze({mountModel,mountRule,personSlots,plotSlots,graphLayout});
+  window.XumaiWorkspaceReader=Object.freeze({mountModel,mountRule,personSlots,plotSlots,graphLayout,graphRoute});
 })();

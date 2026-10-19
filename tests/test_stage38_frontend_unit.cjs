@@ -85,4 +85,14 @@ for(const sequential of [true,false])for(const compactWidth of [0,358]){
  assert.equal(new Set([...all.positions.values()].map(p=>`${p.x},${p.y}`)).size,180);
  for(const p of all.positions.values()){assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y));assert.ok(p.x>0 && p.x<all.width && p.y>0 && p.y<all.height);}
 }
+// Labels belong to a real segment of their OWN route, never a remote guide.
+for(const compactWidth of [0,358]){
+ const all=R.graphLayout(nodes,edges,true,compactWidth),occupied=[];
+ const unique=[...new Map(all.edges.map(e=>[`${e.from}:${e.to}`,e])).values()];
+ for(const edge of unique){
+  const route=R.graphRoute(all,edge,occupied),p=route.label;
+  assert.ok(route.points.some((end,i)=>{if(!i)return false;const start=route.points[i-1];return start.x===end.x&&p.x===start.x&&p.y>=Math.min(start.y,end.y)&&p.y<=Math.max(start.y,end.y)||start.y===end.y&&p.y===start.y&&p.x>=Math.min(start.x,end.x)&&p.x<=Math.max(start.x,end.x);}));
+ }
+ assert.equal(occupied.length,180);
+}
 console.log('Stage 38 unit contracts passed: headings, native cards, multi-hop graphs, legacy fields, complete large graph.');
