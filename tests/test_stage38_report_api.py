@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from app import deconstruction_routes
 from app.agents import deconstruction_model
+from app.agents.llm_runtime import _collect_chat_stream
 from app.core.book_analysis import BookAnalysis
 from app.core.model_call_budget import DurableModelBudget
 from app.core.report_pipeline import object_hash, target_hashes
@@ -256,6 +257,156 @@ class ReportApiTest(unittest.TestCase):
         self.assertEqual((local["unknown_usage_calls"], shared["unknown_usage_calls"]), (1, 1))
         self.assertGreater(shared["accounted_spent_cny"], self.holds[0][1]["reserved_cny"])
         self.assertEqual(shared["pending_attempts"], {})
+
+    def assert_unknown_transport_guard(self, *, calls, stage):
+        self.assertEqual(self.start().status_code, 200)
+        final = self.wait()
+        self.assertEqual((final["status"], final["error_code"], final["stage"]),
+                         ("paused", "report_request_unknown", stage))
+        self.assertTrue(self.job()["inflight"])
+        self.assertEqual(len(self.calls), calls)
+        local = self.job()["budget"]
+        shared = self.deconstruction.model_budget.public(MODEL)
+        for ledger in (local, shared):
+            self.assertEqual(ledger["calls"], calls)
+            self.assertEqual(ledger["unknown_usage_calls"], 1)
+            self.assertEqual(ledger["pending_attempts"], {})
+            self.assertGreaterEqual(ledger["accounted_spent_cny"], wire_bound(self.calls[-1]))
+        records = json.loads(self.deconstruction.model_budget.path.read_text())["records"]
+        self.assertEqual(len(records), calls)
+        self.assertIs(records[-1]["usage_known"], False)
+        self.assertAlmostEqual(records[-1]["estimated_cost_cny"], wire_bound(self.calls[-1]), places=12)
+        before_job = deepcopy(self.job())
+        before_scope = self.deconstruction.model_budget.path.read_bytes()
+        recovered = BookAnalysis(self.deconstruction, runtime_factory=self.factory)
+        with patch.object(deconstruction_routes, "book_analysis", recovered):
+            self.assertEqual(self.client.portal.call(recovered.recover_pending), {"scheduled": 0, "invalid": 0})
+            self.assertEqual(self.client.get(self.url + "/book").json()["job"], final)
+            refused = self.start()
+            self.assertEqual(refused.status_code, 409, refused.text)
+            self.assertEqual(refused.json()["detail"]["code"], "report_request_unknown")
+        self.assertEqual(self.job(), before_job)
+        self.assertEqual(self.deconstruction.model_budget.path.read_bytes(), before_scope)
+        self.assertEqual(len(self.calls), calls)
+        self.unchanged()
+
+    def assert_known_transport_failure(self, *, code, calls):
+        self.assertEqual(self.start().status_code, 200)
+        final = self.wait()
+        self.assertEqual((final["status"], final["error_code"]), ("failed", code))
+        self.assertFalse(self.job()["inflight"])
+        before_job = deepcopy(self.job())
+        before_scope = self.deconstruction.model_budget.path.read_bytes()
+        recovered = BookAnalysis(self.deconstruction, runtime_factory=self.factory)
+        with patch.object(deconstruction_routes, "book_analysis", recovered):
+            self.assertEqual(self.client.portal.call(recovered.recover_pending), {"scheduled": 0, "invalid": 0})
+            self.assertEqual(self.client.get(self.url + "/book").json()["job"], final)
+            self.assertEqual(self.job(), before_job)
+            # Explicit retry is permitted for a complete response. Suppress
+            # scheduling only to examine that pre-dispatch admission boundary.
+            with patch.object(recovered, "ensure_task") as schedule:
+                restarted = self.start()
+                self.assertEqual(restarted.status_code, 200, restarted.text)
+                schedule.assert_called_once()
+            self.assertEqual(self.job()["budget"], before_job["budget"])
+        self.assertEqual(self.deconstruction.model_budget.path.read_bytes(), before_scope)
+        self.assertEqual(len(self.calls), calls)
+        self.unchanged()
+
+    @staticmethod
+    def timeout_on(expected):
+        def hook(index):
+            if index == expected:
+                raise TimeoutError("synthetic transport response unknown")
+        return hook
+
+    def test_actual_transport_timeout_pauses_draft_and_blocks_explicit_restart(self):
+        self.prepare()
+        self.scripted(hook=self.timeout_on(1))
+        self.assert_unknown_transport_guard(calls=1, stage="draft")
+
+    def test_actual_transport_timeout_pauses_review_and_retains_draft(self):
+        self.prepare()
+        self.scripted(hook=self.timeout_on(2))
+        self.assert_unknown_transport_guard(calls=2, stage="review")
+        self.assertIn("draft", self.job())
+
+    def test_actual_transport_timeout_pauses_verification_and_retains_revision(self):
+        self.prepare()
+        self.scripted([lambda: self.draft, self.revised_reply, {}], hook=self.timeout_on(3))
+        self.assert_unknown_transport_guard(calls=3, stage="verify")
+        self.assertIn("revised", self.job())
+
+    def test_actual_transport_timeout_in_draft_format_repair_is_not_bad_json(self):
+        self.prepare()
+        self.scripted([{}, {}], hook=self.timeout_on(2))
+        self.assert_unknown_transport_guard(calls=2, stage="draft")
+
+    def test_actual_transport_timeout_in_review_format_repair_is_not_bad_json(self):
+        self.prepare()
+        self.scripted([lambda: self.draft, {}, {}], hook=self.timeout_on(3))
+        self.assert_unknown_transport_guard(calls=3, stage="review")
+
+    def test_actual_transport_timeout_in_verification_format_repair_is_not_bad_json(self):
+        self.prepare()
+        self.scripted([lambda: self.draft, self.revised_reply, {}, {}], hook=self.timeout_on(4))
+        self.assert_unknown_transport_guard(calls=4, stage="verify")
+
+    def test_actual_transport_incomplete_stream_is_unknown_not_a_complete_bad_json(self):
+        self.prepare()
+        def incomplete(index):
+            _collect_chat_stream([b'data: {"choices":[{"index":0,"delta":{"content":"{"}}]}\n'], 5)
+        self.scripted(hook=incomplete)
+        self.assert_unknown_transport_guard(calls=1, stage="draft")
+
+    def test_actual_transport_complete_401_is_failed_not_unknown(self):
+        self.prepare()
+        transport = self.runtime._transport
+        def unauthorized(*args, **kwargs):
+            transport(*args, **kwargs)
+            return 401, b""
+        self.runtime._transport = unauthorized
+        self.assert_known_transport_failure(code="provider_unauthorized", calls=1)
+
+    def test_actual_transport_complete_429_is_failed_not_unknown(self):
+        self.prepare()
+        transport = self.runtime._transport
+        def rate_limited(*args, **kwargs):
+            transport(*args, **kwargs)
+            return 429, b""
+        self.runtime._transport = rate_limited
+        self.assert_known_transport_failure(code="provider_rate_limited", calls=1)
+
+    def test_actual_transport_complete_503_is_known_despite_unavailable_error_code(self):
+        self.prepare()
+        transport = self.runtime._transport
+        def unavailable(*args, **kwargs):
+            transport(*args, **kwargs)
+            return 503, b""
+        self.runtime._transport = unavailable
+        self.assert_known_transport_failure(code="provider_unavailable", calls=1)
+
+    def test_actual_transport_complete_repair_rejection_is_not_unknown(self):
+        self.prepare()
+        self.scripted([{}, {}])
+        transport = self.runtime._transport
+        def rejected_repair(*args, **kwargs):
+            answer = transport(*args, **kwargs)
+            return answer if len(self.calls) == 1 else (401, b"")
+        self.runtime._transport = rejected_repair
+        # The common runtime intentionally normalizes repair failures. That
+        # code alone must not make an explicit rejection an unknown request.
+        self.assert_known_transport_failure(code="provider_bad_json", calls=2)
+
+    def test_actual_transport_complete_bad_json_twice_is_failed_not_unknown(self):
+        self.prepare()
+        self.scripted([{}, {}])
+        transport = self.runtime._transport
+        def malformed(*args, **kwargs):
+            transport(*args, **kwargs)
+            return 200, b'{"choices":[{"message":{"content":"{"},"finish_reason":"stop"}]}'
+        self.runtime._transport = malformed
+        self.assert_known_transport_failure(code="provider_bad_json", calls=2)
 
     def test_duplicate_running_start_and_reload_do_not_restart_http(self):
         self.prepare()

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from app.agents.deconstruction_model import preview_max_tokens, report_messages
-from app.agents.llm_runtime import LLMRuntimeError
+from app.agents.llm_runtime import LLMRuntime, LLMRuntimeError
 from app.core.model_budget import BudgetLedger, ModelBudgetExceeded, pricing_for_model
 from app.core.report_pipeline import (
     ReportDraft, ReportReview, ReportVerification, ReviewAccept, ReviewBlocked,
@@ -20,6 +20,24 @@ class _Stopped(Exception):
 
 class _Rejected(Exception):
     pass
+
+
+class _ReportTransport:
+    """Observe completion, not error codes or usage, at the real HTTP boundary.
+
+    structured() normalizes even repair-time transport errors to bad JSON.
+    A complete HTTP rejection/bad JSON is known; an interrupted HTTP/stream is
+    not. No headers, payloads or provider exception text are retained here.
+    """
+    def __init__(self, transport):
+        self.transport = transport
+        self.unknown = False
+
+    def __call__(self, *args, **kwargs):
+        self.unknown = True
+        answer = self.transport(*args, **kwargs)
+        self.unknown = False
+        return answer
 
 
 async def run_report_job(runner, project, account):
@@ -48,6 +66,20 @@ async def run_report_job(runner, project, account):
                                error_code=code, message=message, inflight=unknown)
                 runner.save(current)
 
+    runtime = None
+    transport = None
+
+    def get_runtime():
+        nonlocal runtime, transport
+        if runtime is None:
+            runtime = runner.runtime_factory()
+            if isinstance(runtime, LLMRuntime):
+                transport = _ReportTransport(runtime._transport)
+                # Per-job observer only; old preview/book runtimes and the
+                # shared per-HTTP reservation/settlement adapter are unchanged.
+                runtime = LLMRuntime(runtime.settings, transport=transport, max_retries=0)
+        return runtime
+
     try:
         if job.get("inflight"):
             fail("report_request_unknown", "上次请求结果尚未确认，费用占用已保留；不会自动重发。", paused=True, unknown=True)
@@ -56,15 +88,12 @@ async def run_report_job(runner, project, account):
                                     expected_source_revision=job["source_revision"],
                                     expected_source_hash=job["source_hash"])
         _, material, bank, read_text = runner.service.report_material(project, account, payload)
-        runtime = None
-
         async def obtain(stage, key, schema, max_tokens, **context):
             nonlocal job, runtime
             guard()
             if key in job:
                 return job[key]
-            if runtime is None:
-                runtime = runner.runtime_factory()
+            runtime = get_runtime()
             if not runtime.available:
                 raise DeconstructionServiceError("model_unavailable", "拆书模型暂不可用，现有结果已保留。", status_code=503)
             if runtime.model != job["model"]:
@@ -102,9 +131,7 @@ async def run_report_job(runner, project, account):
             update(dict(stage="draft"), before_save=guard)
         if job["stage"] == "draft":
             # The same factory/cap rule as preview; no larger output allowance.
-            if runtime is None:
-                runtime = runner.runtime_factory()
-            raw = await obtain("draft", "draft_response", ReportDraft, preview_max_tokens(runtime))
+            raw = await obtain("draft", "draft_response", ReportDraft, preview_max_tokens(get_runtime()))
             draft, _ = validate_draft(raw, bank, read_text, producer=job["model"])
             update(dict(draft=draft, stage="review", cursor=1), before_save=guard)
         draft, _ = validate_draft(job["draft"], bank, read_text, producer=job["model"])
@@ -179,7 +206,10 @@ async def run_report_job(runner, project, account):
     except DeconstructionServiceError as exc:
         fail(exc.code, exc.message)
     except LLMRuntimeError as exc:
-        fail(exc.code, "模型未返回可用报告，现有报告与费用记录已保留。")
+        if transport is not None and transport.unknown:
+            fail("report_request_unknown", "请求返回尚未确认，费用占用已保留；不会自动重发。", paused=True, unknown=True)
+        else:
+            fail(exc.code, "模型未返回可用报告，现有报告与费用记录已保留。")
     except OSError:
         fail("analysis_task_unavailable", "任务或预算暂时无法保存，现有报告已保留。",
              paused=True, unknown=bool(job.get("inflight")))
