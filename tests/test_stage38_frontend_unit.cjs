@@ -121,3 +121,38 @@ for(const compactWidth of [0,358]){
  assert.equal(occupied.length,180);
 }
 console.log('Stage 38 unit contracts passed: headings, native cards, multi-hop graphs, legacy fields, complete large graph.');
+
+// Independent segment intersection arithmetic: no collinear trunks between
+// distinct endpoint pairs, including the previously observed 420 px overlap.
+const {denseFixture}=require('./test_stage38_frontend_route_fixture.cjs');
+const smallReport=structuredClone(require('./browser_stage37_fixture.cjs').report);
+smallReport.character_relations.push({from_id:'C0',to_id:'C1'});
+smallReport.relations.push({from_id:'E0',to_id:'E5'});
+const sharedLength=(a,b)=>a.start.x===a.end.x && b.start.x===b.end.x && a.start.x===b.start.x
+ ? Math.max(0,Math.min(Math.max(a.start.y,a.end.y),Math.max(b.start.y,b.end.y))-Math.max(Math.min(a.start.y,a.end.y),Math.min(b.start.y,b.end.y)))
+ : a.start.y===a.end.y && b.start.y===b.end.y && a.start.y===b.start.y
+ ? Math.max(0,Math.min(Math.max(a.start.x,a.end.x),Math.max(b.start.x,b.end.x))-Math.max(Math.min(a.start.x,a.end.x),Math.min(b.start.x,b.end.x))) : 0;
+const crossesBox=(s,r)=>s.start.x===s.end.x?s.start.x>r.left+1 && s.start.x<r.right-1 && Math.max(s.start.y,s.end.y)>r.top+1 && Math.min(s.start.y,s.end.y)<r.bottom-1
+ : s.start.y>r.top+1 && s.start.y<r.bottom-1 && Math.max(s.start.x,s.end.x)>r.left+1 && Math.min(s.start.x,s.end.x)<r.right-1;
+for(const raw of [denseFixture().response.result.report,smallReport])for(const width of [1108,728,356])for(const section of ['people','narrative','story']){
+ const people=section==='people',items=people?raw.characters:section==='story'?raw.story_order.map(id=>raw.events.find(e=>e.id===id)):raw.events;
+ const semantic=(people?raw.character_relations:raw.relations).map(r=>({from:r.from_id,to:r.to_id}));
+ const l=R.graphLayout(items,semantic,!people,width<620?width:0,width-20),positions=JSON.stringify([...l.positions]),originalHeight=l.height,occupied=[],routes=[];
+ for(const edge of semantic){const route=R.graphRoute(l,edge,occupied);routes.push(route);
+  assert.ok(route.segments.some(s=>s.start.x===s.end.x?route.label.x===s.start.x && route.label.y>=Math.min(s.start.y,s.end.y)&&route.label.y<=Math.max(s.start.y,s.end.y):route.label.y===s.start.y && route.label.x>=Math.min(s.start.x,s.end.x)&&route.label.x<=Math.max(s.start.x,s.end.x)));
+  for(const p of l.positions.values()){
+   const box={left:p.x-(l.nodeWidth||210)/2,right:p.x+(l.nodeWidth||210)/2,top:p.y-47,bottom:p.y+47};
+   assert.ok(!route.segments.some(s=>crossesBox(s,box)),'A route cannot pass through a node');
+   assert.ok(!(route.box.left<box.right&&route.box.right>box.left&&route.box.top<box.bottom&&route.box.bottom>box.top),'A label cannot cover a node');
+  }
+ }
+ for(let i=0;i<routes.length;i++)for(let j=i+1;j<routes.length;j++){
+  for(const a of routes[i].segments)for(const b of routes[j].segments)assert.equal(sharedLength(a,b),0,`${width}/${section}: distinct relationships must not share a trunk`);
+  assert.ok(!routes[i].segments.some(s=>crossesBox(s,routes[j].box)));
+  assert.ok(!routes[j].segments.some(s=>crossesBox(s,routes[i].box)));
+ }
+ assert.equal(JSON.stringify([...l.positions]),positions,'Routing must not relocate any node');
+ assert.equal(l.height,originalHeight,'These density fixtures need no canvas growth');
+ assert.equal(occupied.length,semantic.length);assert.equal(l.edges.length,semantic.length);
+}
+console.log('Stage 38 routes passed: 12/8 and legacy 6, 7/5 narrative/story, three widths; zero shared segments or label/node collisions.');

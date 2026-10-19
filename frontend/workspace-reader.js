@@ -91,6 +91,12 @@
     const overlaps=(a,b,pad=0)=>a.left<b.right+pad && a.right>b.left-pad && a.top<b.bottom+pad && a.bottom>b.top-pad;
     const rect=p=>({left:p.x-lw/2,right:p.x+lw/2,top:p.y-lh/2,bottom:p.y+lh/2});
     const segmentHits=(a,b,r)=>a.x===b.x?a.x>r.left+1 && a.x<r.right-1 && Math.max(a.y,b.y)>r.top+1 && Math.min(a.y,b.y)<r.bottom-1:a.y>r.top+1 && a.y<r.bottom-1 && Math.max(a.x,b.x)>r.left+1 && Math.min(a.x,b.x)<r.right-1;
+    const reserved=occupied.flatMap(r=>r.segments || []);
+    const segments=points=>points.slice(1).map((end,i)=>({start:points[i],end}));
+    const shared=(a,b)=>a.start.x===a.end.x && b.start.x===b.end.x && a.start.x===b.start.x
+      ? Math.min(Math.max(a.start.y,a.end.y),Math.max(b.start.y,b.end.y))-Math.max(Math.min(a.start.y,a.end.y),Math.min(b.start.y,b.end.y))>0
+      : a.start.y===a.end.y && b.start.y===b.end.y && a.start.y===b.start.y
+        && Math.min(Math.max(a.start.x,a.end.x),Math.max(b.start.x,b.end.x))-Math.max(Math.min(a.start.x,a.end.x),Math.min(b.start.x,b.end.x))>0;
     const unique=values=>[...new Set(values)].sort((a,b)=>a-b);
     const xs=unique([...layout.positions.values()].map(p=>p.x)),ys=unique([...layout.positions.values()].map(p=>p.y));
     const xlanes=unique([18,layout.width-18,...xs.slice(1).map((x,i)=>(x+xs[i])/2)]);
@@ -105,6 +111,11 @@
       });
       if(points.length<2)return;
       if(points.some((p,i)=>i && nodes.some(n=>segmentHits(points[i-1],p,n))))return;
+      const tracks=segments(points);
+      // Distinct endpoint pairs never share a trunk. A perpendicular crossing
+      // remains a single point; it does not imply a semantic junction.
+      if(tracks.some(s=>reserved.some(r=>shared(s,r))))return;
+      if(tracks.some(s=>occupied.some(box=>segmentHits(s.start,s.end,box))))return;
       const length=points.reduce((sum,p,i)=>sum+(i?Math.abs(p.x-points[i-1].x)+Math.abs(p.y-points[i-1].y):0),0);
       for(let i=1;i<points.length;i++) {
         const start=points[i-1],end=points[i],horizontal=start.y===end.y;
@@ -114,9 +125,9 @@
           const label={x:start.x+(end.x-start.x)*t,y:start.y+(end.y-start.y)*t},box=rect(label);
           if(box.left<4 || box.top<4 || box.right>layout.width-4 || box.bottom>layout.height-4)continue;
           if(nodes.some(n=>overlaps(box,n,6)) || occupied.some(n=>overlaps(box,n,8)))continue;
-          const crossed=points.reduce((sum,p,j)=>sum+(j?occupied.filter(n=>segmentHits(points[j-1],p,n)).length:0),0);
-          const score=length+(points.length-2)*20+crossed*400+Math.abs(.5-t)*60;
-          if(!best || score<best.score)best={points,label,box,score,direction:horizontal?(end.x>start.x?'→':'←'):(end.y>start.y?'↓':'↑')};
+          if(reserved.some(s=>segmentHits(s.start,s.end,box)))continue;
+          const score=length+(points.length-2)*20+Math.abs(.5-t)*60;
+          if(!best || score<best.score)best={points,segments:tracks,label,box,score,direction:horizontal?(end.x>start.x?'→':'←'):(end.y>start.y?'↓':'↑')};
         }
       }
     }
@@ -124,18 +135,40 @@
     if(a.y===b.y && a.x!==b.x){const direction=Math.sign(b.x-a.x);consider([{x:a.x+direction*nw/2,y:a.y},{x:b.x-direction*nw/2,y:b.y}]);}
     for(const x of xlanes)consider([{x:a.x+(x>a.x?nw/2:-nw/2),y:a.y},{x,y:a.y},{x,y:b.y},{x:b.x+(x>b.x?nw/2:-nw/2),y:b.y}]);
     for(const y of ylanes)consider([{x:a.x,y:a.y+(y>a.y?nh/2:-nh/2)},{x:a.x,y},{x:b.x,y},{x:b.x,y:b.y+(y>b.y?nh/2:-nh/2)}]);
+    // Try separate ports and parallel corridors before growing the canvas.
+    // Node positions and graph ordering stay exactly as supplied by layout.
+    const offsets=[0,-16,16,-32,32];
+    const nearby=(lanes,first,last,limit)=>unique(lanes.flatMap(v=>offsets.map(d=>v+d)).filter(v=>v>=10 && v<=limit-10))
+      .sort((x,y)=>Math.min(Math.abs(x-first),Math.abs(x-last))-Math.min(Math.abs(y-first),Math.abs(y-last))).slice(0,14);
+    const alternateX=unique([10,18,layout.width-18,layout.width-10,...nearby(xlanes,a.x,b.x,layout.width)]),alternateY=nearby(ylanes,a.y,b.y,layout.height);
+    if(!best)for(const da of offsets)for(const db of offsets) {
+      if(a.x===b.x && da===db){const d=Math.sign(b.y-a.y);consider([{x:a.x+da,y:a.y+d*nh/2},{x:b.x+db,y:b.y-d*nh/2}]);}
+      if(a.y===b.y && da===db){const d=Math.sign(b.x-a.x);consider([{x:a.x+d*nw/2,y:a.y+da},{x:b.x-d*nw/2,y:b.y+db}]);}
+      for(const x of alternateX)consider([{x:a.x+(x>a.x?nw/2:-nw/2),y:a.y+da},{x,y:a.y+da},{x,y:b.y+db},{x:b.x+(x>b.x?nw/2:-nw/2),y:b.y+db}]);
+      for(const y of alternateY)consider([{x:a.x+da,y:a.y+(y>a.y?nh/2:-nh/2)},{x:a.x+da,y},{x:b.x+db,y},{x:b.x+db,y:b.y+(y>b.y?nh/2:-nh/2)}]);
+    }
     if(!best) {
       // Use a free horizontal corridor; its label remains ON its own route.
       // Dense reports may grow, but neither nodes nor semantic edges disappear.
-      for(let extension=0;extension<occupied.length+3 && !best;extension++) {
-        if(extension)layout.height+=90;
+      for(let extension=0;extension<3 && !best;extension++) {
+        if(extension)layout.height+=160;
         const candidates=extension?[layout.height-38]:ylanes;
-        const near=p=>xlanes.filter(x=>Math.abs(x-p.x)>=nw/2).sort((x,y)=>Math.abs(x-p.x)-Math.abs(y-p.x)).slice(0,2);
-        for(const x1 of near(a))for(const x2 of near(b))for(const y of candidates)consider([{x:a.x+(x1>a.x?nw/2:-nw/2),y:a.y},{x:x1,y:a.y},{x:x1,y},{x:x2,y},{x:x2,y:b.y},{x:b.x+(x2>b.x?nw/2:-nw/2),y:b.y}]);
+        const near=p=>unique([
+          ...alternateX.filter(x=>Math.abs(x-p.x)>=nw/2+8).sort((x,y)=>Math.abs(x-p.x)-Math.abs(y-p.x)).slice(0,4),
+          ...[10,18,layout.width-18,layout.width-10].filter(x=>Math.abs(x-p.x)>=nw/2+8),
+        ]);
+        for(const da of offsets)for(const db of offsets)for(const x1 of near(a))for(const x2 of near(b))for(const y of candidates)consider([{x:a.x+(x1>a.x?nw/2:-nw/2),y:a.y+da},{x:x1,y:a.y+da},{x:x1,y},{x:x2,y},{x:x2,y:b.y+db},{x:b.x+(x2>b.x?nw/2:-nw/2),y:b.y+db}]);
+        // Two separate return rails also support a long back-edge whose
+        // endpoints are in one column. The bottom label corridor is bounded;
+        // neither its outbound nor return segment retraces another route.
+        if(extension && !best)for(const da of offsets)for(const db of offsets)for(const x1 of near(a))for(const x2 of near(b)) {
+          if(x1===x2)continue;
+          for(const x of [18,layout.width-18])consider([{x:a.x+(x1>a.x?nw/2:-nw/2),y:a.y+da},{x:x1,y:a.y+da},{x:x1,y:layout.height-118},{x,y:layout.height-118},{x,y:layout.height-38},{x:x2,y:layout.height-38},{x:x2,y:b.y+db},{x:b.x+(x2>b.x?nw/2:-nw/2),y:b.y+db}]);
+        }
       }
     }
     if(!best)throw new Error('关系图路由空间不足');
-    occupied.push(best.box);
+    occupied.push({...best.box,segments:best.segments});
     return {...best,d:best.points.map((p,i)=>`${i?'L':'M'}${p.x},${p.y}`).join(' ')};
   }
 
@@ -291,10 +324,10 @@
       edgeChoices=layout.edges;
       if(!character && !items.some(e=>e.id===state().selected))state().selected=items[0]?.id || '';
       const marker=`totalArrow${++graphSerial}`,byId=character?people:events;
-      const routes=new Map(),labelPositions=[];
+      const routes=new Map(),routeReservations=[];
       edgeChoices.forEach((r,i)=>{const pair=JSON.stringify([r.from,r.to]);if(!routes.has(pair))routes.set(pair,[]);routes.get(pair).push(i);});
       const segments=[...routes.values()].map(indices=>{
-        const r=edgeChoices[indices[0]],route=graphRoute(layout,r,labelPositions);
+        const r=edgeChoices[indices[0]],route=graphRoute(layout,r,routeReservations);
         const from=byId.get(String(r.from)),to=byId.get(String(r.to)),label=indices.map(i=>edgeChoices[i].label).join(' / ');
         return {path:`<path d="${route.d}" marker-end="url(#${marker})" data-total-from="${esc(r.from)}" data-total-to="${esc(r.to)}"/>`,label:`<button type="button" class="total-graph-edge" style="left:${route.label.x}px;top:${route.label.y}px" data-reader-edges="${indices.join(',')}" aria-label="${esc(`${from.name || from.title} → ${label} → ${to.name || to.title}`)}"><span>${esc(short(label,22))} ${route.direction}</span>${indices.length===1?badge(r.status):`<small>${indices.length} 项联系</small>`}</button>`};
       });
