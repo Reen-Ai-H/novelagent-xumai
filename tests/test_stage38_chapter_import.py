@@ -89,6 +89,15 @@ class NormalChapterImportTest(unittest.TestCase):
         self.assertFalse(preview["chapters"][0]["content"].startswith("首章原题"))
         self.assert_chapters(self.confirm(project, preview)["active_version"]["chapters"],
                              text, ["首章原题", *TITLES[1:]])
+        # An exported input may carry a missing title from stored metadata.
+        # This is newly constructed input, not the original uploaded file.
+        metadata_title = "第一章—原题"
+        exported = metadata_title + "\n" + text
+        project = self._project()
+        preview = self.upload(project, exported, "导出稿.txt")
+        self.assert_chapters(preview["chapters"], exported, [metadata_title, *TITLES[1:]])
+        self.assert_chapters(self.confirm(project, preview)["active_version"]["chapters"],
+                             exported, [metadata_title, *TITLES[1:]])
 
     def test_different_titles_and_encoding_are_not_a_sample_dictionary(self):
         titles = ["Chapter 7 Departure", "荒原手记", "新渡口", "异乡岁月", "春山行", "风中旧约"]
