@@ -151,6 +151,7 @@
     deconstructionRefreshButton: $("#deconstructionRefreshButton"),
     deconstructionNotice: $("#deconstructionNotice"),
     deconstructionPageContent: $("#deconstructionPageContent"),
+    reportWorkflow: $("#reportWorkflow"),
     deconstructionEvidenceDialog: $("#deconstructionEvidenceDialog"),
     deconstructionEvidenceTitle: $("#deconstructionEvidenceTitle"),
     deconstructionEvidenceContent: $("#deconstructionEvidenceContent"),
@@ -2859,7 +2860,6 @@
     state.deconstructionWorkspace = data;
     state.deconstructionProjectId = data.projectId || state.deconstructionProjectId;
     ensureReportTask(state.deconstructionProjectId);
-    renderReportWorkflow();
     elements.deconstructionProjectTitle.textContent = data.title || "—";
     const isRule = data.result?.analysisContractVersion === "2.0";
     const routeSection = new URLSearchParams(location.search).get("section");
@@ -2882,11 +2882,6 @@
     let content = [];
     if (hasDeconstructionResults(data) && (data.effectiveStatus === "completed" || readableRuleUpgrade) && data.sourceMatch) {
       content.push(renderDeconstructionResult(data));
-    } else if (data.effectiveStatus === "completed") {
-      const legacy = data.result?.analysisContractVersion === "1.0";
-      content.push(legacy
-        ? `<section class="deconstruction-working-panel is-upgrade-required"><div class="deconstruction-empty-mark">↗</div><h2>基础拆解已有，深度拆解可生成</h2><p>当前是分析合同 1.0 的基础结果，不会在六个视角中冒充完成。请从服务端提供的升级入口生成 2.0 深度报告；旧结果会保留为历史只读。</p>${data.actions.rebuild ? `<button class="button button-primary" type="button" data-action="deconstruction-rebuild">生成深度拆解 <span aria-hidden="true">→</span></button>` : ""}</section>`
-        : `<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>服务端还没有返回可引用内容</h2><p>当前响应没有正式结果，页面保留空白，不将不完整响应冒充分析完成。</p></section>`);
     }
     document.getElementById('workspaceSource').insertAdjacentHTML('beforeend',renderDeconstructionHistory(data));
     elements.deconstructionPageContent.innerHTML = (volumeBar ? volumeBar : "") + content.join("");
@@ -2896,6 +2891,7 @@
       state.deconstructionGuideMode = true;
       state.analysisView = null;
       setDeconstructionSectionCurrent("guide");
+      renderReportWorkflow();
       elements.deconstructionStatusPill.textContent = "全书导读";
       elements.deconstructionStatusPill.className = "deconstruction-status-pill is-completed";
       elements.deconstructionPageContent.innerHTML = (volumeBar ? volumeBar : "") + deconstructionGuideShell();
@@ -2942,6 +2938,7 @@
         if (questions) { questions.open = true; questions.scrollIntoView(); }
       }
     }
+    renderReportWorkflow();
     scheduleDeconstructionPoll(data);
   }
 
@@ -3084,8 +3081,9 @@
   }
 
   function renderDeconstructionLoading() {
-    $('#reportWorkflow').hidden = true;
-    $('#reportWorkflow').innerHTML = '';
+    // The retained workflow reference survives replacement of the reader DOM.
+    elements.reportWorkflow.hidden = true;
+    elements.reportWorkflow.innerHTML = '';
     elements.deconstructionProjectTitle.textContent = "正在读取…";
     elements.deconstructionStatusPill.hidden = false;
     elements.deconstructionStatusPill.textContent = "读取中";
@@ -3096,6 +3094,7 @@
   }
 
   function renderDeconstructionReadError(message) {
+    elements.reportWorkflow.hidden = true;
     elements.deconstructionStatusPill.hidden = false;
     elements.deconstructionStatusPill.textContent = "读取失败";
     elements.deconstructionStatusPill.className = "deconstruction-status-pill is-error";
@@ -4020,9 +4019,9 @@
     return `${stages[job.stage] || '正在分析正文'}，离开页面也会继续`;
   }
   function renderReportWorkflow() {
-    const root=$('#reportWorkflow'),data=state.deconstructionWorkspace,task=state.reportTask;
+    const root=elements.reportWorkflow,data=state.deconstructionWorkspace,task=state.reportTask;
     if(!root || !task || data?.projectId!==task.projectId)return;
-    const block=reportStartBlock(data,task),hasReport=data.result?.analysisContractVersion==='model.1';
+    const block=reportStartBlock(data,task),hasReport=data.result?.analysisContractVersion==='model.1' && hasDeconstructionResults(data);
     $$('[data-action="book-start"],[data-action="model-analyze"]').forEach(node=>node.disabled=Boolean(block || state.modelAnalysisBusy));
     const legacyPause=$('[data-action="book-pause"]');
     if(legacyPause)legacyPause.disabled=task.job?.kind==='report-v2' || task.job?.status!=='running';
@@ -4038,8 +4037,27 @@
     const message=job?.status==='completed' && !currentReport?'':reportJobMessage(job);
     const action=job?.kind==='report-v2' && job.status==='paused'?'继续拆书':job?.kind==='report-v2' && ['completed','failed'].includes(job.status)?'重新分析':'开始拆书';
     const reason=task.pollError || task.budgetError || (job?.kind==='report-v2' && job.status==='failed'?job.message:message || block);
-    root.className='report-workflow is-compact';
-    root.innerHTML=`${reason?`<p class="report-workflow-status${job?.status==='failed'?' report-workflow-error':''}" role="status">${escapeHtml(reason)}</p>`:''}<div class="report-workflow-action"><button class="button button-primary" type="button" data-action="open-report-confirm" ${block?'disabled':''}>${running?'拆书进行中':action}</button>${running && job?.kind==='report-v2'?`<button type="button" class="quiet-link" data-action="pause-report" ${task.controlling?'disabled':''}>暂停拆书</button>`:''}${task.pollError || task.budgetError?'<button class="quiet-link" type="button" data-action="refresh-report-status">刷新状态</button>':''}</div>`;
+    const empty=!hasDeconstructionResults(data) && new URLSearchParams(location.search).get('section')!=='guide';
+    const focused=root.contains?.(document.activeElement)?document.activeElement?.dataset?.action:null;
+    // Move, never clone, the existing safe controls; polling and confirmation
+    // continue to use the same task ownership and source checks.
+    const container=empty?elements.deconstructionPageContent:$('.deconstruction-header-actions');
+    if(root.parentElement!==container)container.appendChild?.(root);
+    root.className=`report-workflow ${empty?'is-empty':'is-compact'}`;
+    let heading='',steps='',detail=reason;
+    if(empty) {
+      const reportJob=job?.kind==='report-v2'?job:null;
+      const stage=reportJob && reportJob.status!=='completed'
+        ? ({queued:0,draft:0,review:1,revise:1,verify:1,adopt:1}[reportJob.stage] ?? -1) : -1;
+      heading=task.pollError?'状态暂不可读':!task.loaded?'正在读取状态':!reportJob?(running?'已有分析任务运行中':'尚未开始'):reportJob.status==='paused'?'拆书已暂停':reportJob.status==='failed'?'拆书未完成':reportJob.status==='completed'?'报告尚未载入':reportJob.stage==='adopt'?'正在保存报告':reportJob.stage==='queued'?'等待整理':stage===1?'正在核对':'正在整理';
+      steps=`<ol class="report-stage-list" aria-label="拆书阶段">${['整理','核对','完成'].map((label,index)=>`<li class="${index===stage?'is-current':index<stage?'is-done':''}"${index===stage?' aria-current="step"':''}><span aria-hidden="true">${String(index+1).padStart(2,'0')}</span><strong>${label}</strong></li>`).join('')}</ol>`;
+      // Running needs a stage, not the same long sentence in two places.
+      detail=task.pollError || task.budgetError || (reportJob?.error_code==='report_request_unknown'?block:reportJob?.status==='failed'?reportJob.message:!running?block:'');
+      if(detail===heading || (!task.loaded && !task.pollError))detail='';
+      elements.deconstructionPageContent.setAttribute('aria-busy',String(running));
+    }
+    root.innerHTML=`${steps}${heading?`<h2>${escapeHtml(heading)}</h2>`:''}${detail?`<p class="report-workflow-status${job?.status==='failed'?' report-workflow-error':''}" role="status">${escapeHtml(detail)}</p>`:''}<div class="report-workflow-action"><button class="button button-primary" type="button" data-action="open-report-confirm" ${block?'disabled':''}>${running?'拆书进行中':action}</button>${running && job?.kind==='report-v2'?`<button type="button" class="quiet-link" data-action="pause-report" ${task.controlling?'disabled':''}>暂停拆书</button>`:''}${task.pollError || task.budgetError?'<button class="quiet-link" type="button" data-action="refresh-report-status">刷新状态</button>':''}</div>`;
+    if(focused && !root.hidden)root.querySelector(`[data-action="${focused}"]:not(:disabled)`)?.focus({preventScroll:true});
   }
   async function pauseReport() {
     const project=state.deconstructionProjectId,task=ensureReportTask(project);

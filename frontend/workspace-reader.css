@@ -284,7 +284,7 @@
 .total-graph-edge small { color:var(--ink-soft); }
 .total-graph-empty { font:.85rem/1.8 var(--sans); color:var(--ink-soft); margin:14px 0; }
 .report-workflow,.report-workflow.is-compact { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:0; margin:0; border:0; background:transparent; max-width:420px; }
-.report-workflow[hidden] { display:none; }
+.report-workflow[hidden],.report-workflow.is-empty[hidden] { display:none; }
 .deconstruction-screen .deconstruction-status-pill[hidden] { display:none; }
 .deconstruction-screen .deconstruction-status-pill:not([hidden]) { display:inline-flex; }
 .report-workflow p { margin:0; font:.78rem/1.7 var(--sans); color:var(--ink-soft); max-width:220px; overflow-wrap:anywhere; }
@@ -292,12 +292,29 @@
 .report-workflow-action .button { min-height:38px; padding:8px 12px; font-size:.8rem; }
 .report-workflow-action button:disabled { color:#66758b; border-color:var(--line); background:#e6ebf2; cursor:not-allowed; box-shadow:none; }
 .report-workflow .report-workflow-error,#reportConfirmError { color:var(--red); }
+.report-workflow.is-empty { display:block; width:100%; max-width:720px; margin:54px auto 0; padding:40px 44px; border:1px solid var(--line); background:var(--paper); }
+.report-stage-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); list-style:none; margin:0; padding:0; }
+.report-stage-list li { position:relative; display:flex; align-items:center; gap:10px; color:var(--ink-soft); font:.85rem/1.5 var(--sans); }
+.report-stage-list li:not(:last-child)::after { content:''; position:absolute; height:1px; background:var(--line); left:100px; right:16px; top:16px; }
+.report-stage-list span { display:grid; place-items:center; flex:none; width:32px; height:32px; border:1px solid var(--line); border-radius:50%; font:.7rem/1 var(--mono); }
+.report-stage-list strong { font-weight:500; }
+.report-stage-list :is(.is-current,.is-done) { color:var(--cobalt); }
+.report-stage-list .is-current span { color:var(--paper); border-color:var(--cobalt); background:var(--cobalt); }
+.report-stage-list .is-done span { border-color:var(--cobalt); }
+.report-workflow.is-empty h2 { margin:36px 0 0; font:500 1.8rem/1.5 var(--serif); }
+.report-workflow.is-empty p { margin:14px 0 0; max-width:none; font:.9rem/1.8 var(--sans); }
+.report-workflow.is-empty .report-workflow-action { margin-top:28px; flex-wrap:wrap; gap:20px; }
+.report-workflow.is-empty .report-workflow-action .button { min-height:44px; padding:10px 20px; font-size:.9rem; }
 .report-confirm-dialog { max-width:min(620px,calc(100vw - 24px)); }
 .report-confirm-dialog h2 { font:500 1.65rem/1.5 var(--serif); }
 .report-confirm-dialog p { font:.9rem/1.9 var(--sans); overflow-wrap:anywhere; }
 @media(max-width:700px) {
   .report-workflow,.report-workflow.is-compact { gap:8px; flex:1 1 100%; max-width:none; }
   .report-workflow p { max-width:none; }
+  .report-workflow.is-empty { margin-top:28px; padding:28px 22px; }
+  .report-stage-list li { flex-direction:column; align-items:flex-start; gap:8px; }
+  .report-stage-list li:not(:last-child)::after { left:42px; right:12px; }
+  .report-workflow.is-empty h2 { margin-top:28px; font-size:1.6rem; }
   .deconstruction-screen .deconstruction-header { flex-wrap:wrap; }
   .deconstruction-screen .deconstruction-header-actions { flex-wrap:wrap; justify-content:flex-end; max-width:100%; }
   :is(.editor-spine,.deconstruction-spine) .spine-bottom { display:flex; position:fixed; inset:auto 0 0; z-index:12; flex-direction:row; align-items:center; justify-content:space-between; gap:12px; min-height:64px; padding:10px 16px calc(10px + env(safe-area-inset-bottom)); }
