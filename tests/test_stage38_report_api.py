@@ -13,7 +13,9 @@ from app.agents import deconstruction_model
 from app.agents.llm_runtime import _collect_chat_stream
 from app.core.book_analysis import BookAnalysis
 from app.core.model_call_budget import DurableModelBudget
+from app.core.model_budget import BudgetLedger, pricing_for_model
 from app.core.report_pipeline import object_hash, target_hashes
+from app.core.source_report import LEGACY_REPORT_WIRE
 from schemas.analysis_report import ReportTaskPublic
 from stage38_report_fixtures import report_case, acceptance
 import test_stage31_deconstruction as base
@@ -30,7 +32,7 @@ class ReportApiTest(unittest.TestCase):
     _project = base.Stage31DeconstructionApiTest._project
     _encoded = staticmethod(base.Stage31DeconstructionApiTest._encoded)
 
-    def prepare(self, count=2, *, bulk=False):
+    def prepare(self, count=2, *, bulk=False, legacy=True):
         self.project = self._project()
         _, _, texts = report_case(count, bulk=bulk)
         content = "\n\n".join(f"# 第{n}章 渡口验货\n{text}" for n, text in texts.items())
@@ -60,6 +62,20 @@ class ReportApiTest(unittest.TestCase):
         self.scripted()
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
+        self._legacy_fixture = None
+        if legacy:
+            # These original assertions exercise the OLD wire, including its
+            # early rejection semantics. New production starts are separately
+            # tested without this persisted legacy fixture. No runtime branch
+            # is patched to infer a wire from fake/model output.
+            self._legacy_fixture = dict(project_id=self.project, account_id=self.account,
+                source_version=source.version_id, source_revision=source.source_revision,
+                source_hash=source.source_hash, model=MODEL, kind="report-v2",
+                report_wire_version=LEGACY_REPORT_WIRE, run_id="legacy-fixture",
+                status="paused", stage="queued", cursor=0, total=2,
+                message="旧合同待继续", error_code=None, document_id=None,
+                budget=BudgetLedger(budget_cny=5, reserve_cny=0, pricing=pricing_for_model(MODEL)).public(),
+                inflight=False, report_history=[])
 
     def factory(self):
         self.factory_calls += 1
@@ -93,6 +109,14 @@ class ReportApiTest(unittest.TestCase):
         self.runtime._transport = transport
 
     def start(self, body=None):
+        if body is None and self._legacy_fixture is not None:
+            # Fixture setup happens after any test's pre-existing scope costs
+            # are installed, just as a historical job carries those costs.
+            shared = self.deconstruction.model_budget.public(MODEL)
+            self._legacy_fixture["budget"] = BudgetLedger(budget_cny=shared["budget_cny"], reserve_cny=0,
+                spent_cny=shared["accounted_spent_cny"], pricing=pricing_for_model(MODEL)).public()
+            self.runner.save(self._legacy_fixture)
+            self._legacy_fixture = None
         return self.client.post(self.url + "/book/start-report", json=body if body is not None else self.body)
 
     def wait(self):

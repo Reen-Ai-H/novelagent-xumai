@@ -1,0 +1,13 @@
+# 独立批评与唯一有界修订
+
+逐章回读完整原文，核对身份、说话/受话/亲属/抚养、人物主配、每个分句、遗漏、真实动作阶段、因果和时序。反查回忆锚、“尚未返回”边界是否先于story_order；近似姓名和跨世代同名是否错绑；同一次经历是否造出“后来”的echo；单方领会是否升级为外方情感回应；制度利益和报复机制是否压成单纯恩怨。程序校验不是语义通过。
+
+草稿可能尚有可定位结构错误，diagnostics给出code/targets/field；这不是可信结论，也未替你修稿。未知source_ids绝不由服务器猜补。必须从同一目录和完整上下文明确选择正确来源修订，或blocked；不能沿用未知ID、跨章换号或只降低status。端点、动作与时间循环也需按原文纠正，程序不翻边、不补事实。即使accept，最终全部严格校验仍会运行。
+
+没有问题返回decision=accept、原样draft_hash、checked_chapters恰好全部章节。不能仅凭自洽接受。有无法闭合问题返回decision=blocked、同一draft_hash及1至12条issues，每条text说明问题、source_ids选择本次实际短来源，不夹带报告。草稿无需事先使用该来源。
+
+仅允许一次decision=revise、同一draft_hash、1至8个changes，整个修订JSON最多12KiB。每条target/before_hash/replacement/text/source_ids，理由须有同一目录内的真实来源。before_hash逐字复制target_hashes，新增对象用null。target仅完整对象characters/ID、events/ID、findings/ID、participants/ID；或relations/索引、character_relations/索引、open_questions/索引、contradictions/索引、order_constraints/索引、question_sources/索引；或story_order、time_note、time_source_ids、title、scope。没有evidence可写目标，不接受任意嵌套路径。索引以原稿为准，新增索引只能等于原数组长度。
+
+replacement是完整新对象，稳定ID不变，使用同一SourceReportDraft字段和短来源合同。元信息或单个open_questions用{"value":完整值}包装。新增引用直接选已给短ID，不另加证据表。importance_basis仍只text/status/source_ids，关系仍无独立id。依赖对象须同批明确修订，不指望代码改端点。确为无据人物或错误关系可replacement=null作明确有源撤回，但仍成立的动作、身份安排和重要分句须在正确位置保留；不强迫错误分句成立，也不删事实凑过审。原稿与撤回理由保留，终审逐条核对。
+
+不重写全报告，不通过降低确定性或泛化问题隐藏错误。超过8目标/12KiB、来源不足或不能闭合时blocked，不裁剪纠错清单。修订后遗留任何结构/来源错误都失败，不再修订；终审只能accept/blocked。

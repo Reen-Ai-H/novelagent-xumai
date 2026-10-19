@@ -176,7 +176,9 @@ class BookAnalysis:
 
     @classmethod
     def _same_job(cls, left, right):
-        return cls._same_source(left, right) and left.get("run_id") == right.get("run_id")
+        return (cls._same_source(left, right) and left.get("run_id") == right.get("run_id")
+                and left.get("report_wire_version") == right.get("report_wire_version")
+                and left.get("source_directory") == right.get("source_directory"))
 
     def _resume_replaced_job(self, project, previous):
         current = self.load(project, previous["account_id"])
@@ -191,6 +193,11 @@ class BookAnalysis:
             expected_source_revision=job["source_revision"], expected_source_hash=job["source_hash"])
         if not source.sufficient or source.pending_changes:
             raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        if job.get("kind") == "report-v2":
+            from app.core.source_report import SOURCE_REPORT_WIRE, check_source_directory, report_wire
+            if report_wire(job) == SOURCE_REPORT_WIRE:
+                read_text = {c.chapter_number: c.content for c in source.chapters}
+                check_source_directory(job, source_bank(read_text), read_text)
         return source
 
     def recover_pending(self) -> dict[str, int]:
@@ -267,10 +274,15 @@ class BookAnalysis:
         from app.core.deconstruction_service import DeconstructionServiceError
         # Account, exact source, pending changes and the COMPLETE size limit
         # precede the factory, budget and scheduling boundary.
-        source, _, _, _ = self.service.report_material(project, account, payload)
+        source, _, bank, read_text = self.service.report_material(project, account, payload)
         previous = self.load(project, account)
         source_key = dict(source_hash=source.source_hash, source_version=source.version_id,
                           source_revision=source.source_revision)
+        from app.core.source_report import SOURCE_REPORT_WIRE, freeze_source_directory
+        try:
+            directory = freeze_source_directory(dict(project_id=project, account_id=account, **source_key), bank, read_text)
+        except ValueError:
+            raise DeconstructionServiceError("report_scope_invalid", "当前正文没有完整可定位的来源，本次未发送请求。", status_code=422) from None
         if previous and previous.get("kind") == "report-v2" and self._same_source(previous, source_key):
             if previous["status"] in {"running", "completed"}:
                 self.ensure_task(previous)
@@ -308,6 +320,7 @@ class BookAnalysis:
                 history.append({key: value for key, value in previous.items() if key != "report_history"})
             job = dict(project_id=project, account_id=account, **source_key,
                        kind="report-v2", run_id=uuid4().hex, model=runtime.model,
+                       report_wire_version=SOURCE_REPORT_WIRE, source_directory=directory,
                        status="running", stage="queued", cursor=0, total=2,
                        message="拆书已开始，可以离开此页", error_code=None, document_id=None,
                        budget=budget, inflight=False, report_history=history)
