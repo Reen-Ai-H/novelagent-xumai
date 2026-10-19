@@ -18,7 +18,7 @@ findings保留少量跨人物、跨事件的综合发现，不作人物卡或事
 
 先建立characters、participants和events，再填写relations与character_relations；JSON可按此依赖顺序输出，不必照schema属性展示顺序。events是同一故事时段、连续情境与行动目标的大剧情，不按每章或每句机械分节点。每事件action/consequence/sub_events并列，不填写chapter_number/chapter_end。actor_ids只列实际动作中的已建卡参与者，不借无关ID，已显示的行动主体不能漏掉。回忆中行动与当下讲述区分，重要前史可单列，不同年代不挤在同一事件。events按正文揭示次序，但叙述顺序≠故事时间：先核对回忆锚、当下位置及“尚未返回”等边界，再排story_order覆盖每个事件一次，不能按首次叙述位置排序；无从定序者保留未定说明，不伪造时间精度。
 
-relations的from_id/to_id只选events.id，不能选characters或participants.id。from_action/to_action须指向各自端点事件的实际Claim，格式EventId.action、EventId.consequence或EventId.sub_events.0。人物身份揭示不是事件边，不能仅凭人物身份关系制造reveal连线。basis=cause/purpose/before/reveal/echo分别对应kind=causes/enables/follows/reveals/foreshadow_payoff。原因指向结果，手段指向实际目的实现；计划、请求、否定、未遂不能升级为已发生因果，归返不能代替此前出发。仅先后只能before/follows，不证明原因或目的。echo须有不同经历或动作及其先后依据，不能把同一次经历造为“后来”的echo。连接证据须支持实际机制，不只证明两端存在。主要冲突的关键前因、制度利益与报复机制须保留在事件细节及有据关系中，不压成单纯恩怨。无据不造边，也不漏明确主干躲检查；未完成目的保留在细节或有源未解项。
+relations的from_id/to_id只选events.id，不能选characters或participants.id。from_action/to_action须指向各自端点事件的实际Claim，格式EventId.action、EventId.consequence或EventId.sub_events.0。人物之间的身份关系不能直接当事件边；真实身份揭示事件仍可按合法事件端点、动作和来源表达。basis=cause/purpose/before/reveal/echo分别对应kind=causes/enables/follows/reveals/foreshadow_payoff。原因指向结果，手段指向实际目的实现；计划、请求、否定、未遂不能升级为已发生因果，归返不能代替此前出发。仅先后只能before/follows，不证明原因或目的。echo须有不同经历或动作及其先后依据，不能把同一次经历造为“后来”的echo。连接证据须支持实际机制，不只证明两端存在。主要冲突的关键前因、制度利益与报复机制须保留在事件细节及有据关系中，不压成单纯恩怨。无据不造边，也不漏明确主干躲检查；未完成目的保留在细节或有源未解项。
 
 character_relations的from_id/to_id只选characters.id，不选events或participants.id。action_ref须指向报告中一个有向Claim，其subject/object与from_id/to_id同向，来源须与该Claim对应。label表示from对to的身份或行为；单方情感不反向共享，单方领会或揣测不升级为对方情感回应，双方各有情感须各有来源。收徒可放identity，不需复制反向事实。有据关键亲属、师徒、养育、职能关系保留，同场不推成关系。
 

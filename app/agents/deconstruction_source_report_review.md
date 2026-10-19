@@ -4,7 +4,7 @@
 
 将标题、正文、主体/对象ID所指人物、阶段和故事顺序合成完整主张，再对照原文；同一事实的跨字段副本一并核对，不能只检查正文或引用是否存在。
 
-先核对characters、participants、events，再查两类边：relations只连接events.id及所属事件的合法动作路径，不连接characters/participants；character_relations只连接characters.id及同向人物Claim。人物身份揭示不是事件边。只选直接必要有源机制，不两两枚举或补传递闭包；同键多机制合并保留事实，不固定截断节点或边。逐项核对status仅fact/reported/inferred/unknown，phase仅actual/planned/requested/negated/unknown；planned绝不能填status，也不能由程序映射成fact。
+先核对characters、participants、events，再查两类边：relations只连接events.id及所属事件的合法动作路径，不连接characters/participants；character_relations只连接characters.id及同向人物Claim。人物之间的身份关系不能直接当事件边；真实身份揭示事件仍可按合法事件端点、动作和来源表达。只选直接必要有源机制，不两两枚举或补传递闭包；同键多机制合并保留事实，不固定截断节点或边。逐项核对status仅fact/reported/inferred/unknown，phase仅actual/planned/requested/negated/unknown；planned绝不能填status，也不能由程序映射成fact。
 
 草稿可能尚有可定位结构错误，diagnostics给出code/targets/field；这不是可信结论，也未替你修稿。未知source_ids绝不由服务器猜补。必须从同一目录和完整上下文明确选择正确来源修订，或blocked；不能沿用未知ID、跨章换号或只降低status。端点、动作与时间循环也需按原文纠正，程序不翻边、不补事实。即使accept，最终全部严格校验仍会运行。
 

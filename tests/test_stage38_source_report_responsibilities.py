@@ -25,7 +25,8 @@ V2_NON_DESCRIPTION_HASH = "83cdd912bbffca531eab28ca2a837a88c90d206c4170ed6f3462c
 CONTRACT_MARKER = "只返回一个 JSON 对象，严格符合以下 schema，不要 Markdown 或解释："
 PROMPT_RULES = (
     "先建立characters、participants和events", "relations的from_id/to_id只选events.id",
-    "character_relations的from_id/to_id只选characters.id", "人物身份揭示不是事件边",
+    "character_relations的from_id/to_id只选characters.id", "人物之间的身份关系不能直接当事件边",
+    "真实身份揭示事件仍可按合法事件端点、动作和来源表达",
     "两两枚举", "传递闭包", "同一合法关系键", "固定节点/边截断",
     "status仅fact/reported/inferred/unknown", "phase仅actual/planned/requested/negated/unknown",
     "planned绝不能填status", "不能由程序",
@@ -58,7 +59,8 @@ class SourceV2ResponsibilitiesTest(unittest.TestCase):
         schema = SourceReportDraftV2.model_json_schema()
         root = schema["description"]
         for rule in ("先建立characters、participants和events", "relations只连接events.id",
-                     "character_relations只连接characters.id", "人物身份揭示不是事件边",
+                     "character_relations只连接characters.id", "人物之间的身份关系不能直接当事件边",
+                     "真实身份揭示事件仍可按合法事件端点、动作和来源表达",
                      "两两枚举", "传递闭包", "同键多机制合并保留事实", "不固定截断节点或边",
                      "status仅fact/reported/inferred/unknown", "phase仅actual/planned/requested/negated/unknown",
                      "planned绝不能填status", "不能由程序映射成fact"):
@@ -91,6 +93,7 @@ class SourceV2ResponsibilitiesTest(unittest.TestCase):
                 review = system.split("# 独立批评与唯一有界修订", 1)[1]
                 for rule in ("先核对characters、participants、events", "relations只连接events.id",
                              "character_relations只连接characters.id", "合法动作路径", "传递闭包",
+                             "人物之间的身份关系不能直接当事件边", "真实身份揭示事件仍可按合法事件端点、动作和来源表达",
                              "planned绝不能填status", "不能由程序映射成fact"):
                     self.assertIn(rule, review)
             for person in case.draft["characters"]:
@@ -165,3 +168,27 @@ class SourceV2ResponsibilitiesTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_source_candidate(bad, entries, bank, texts, producer="synthetic", wire=SOURCE_REPORT_V2_WIRE)
                 self.assertEqual(bad, before)
+
+    def test_actual_identity_revelation_between_sourced_events_still_passes(self):
+        _, _, texts, _ = source_case(1)
+        texts[1] = ("林客与许守核对来船记录，林客将旧名册递给许守，许守接过名册。"
+                    "许守读名册，得知林客就是当年的记账人。" + texts[1])
+        draft, bank, texts, binding = source_case(texts=texts)
+        first, second = draft["events"]
+        first.update(title="递交名册", actor_ids=["Lin", "Xu"], sub_events=[])
+        first["action"].update(text="林客将旧名册递给许守。", source_ids=["C1P001"])
+        first["consequence"].update(text="许守接过名册。", subject_id="Xu", object_id=None, source_ids=["C1P001"])
+        second.update(title="名册揭示旧身份", actor_ids=["Xu"], sub_events=[])
+        second["action"].update(text="许守读名册，得知林客就是当年的记账人。", subject_id="Xu", object_id="Lin",
+                                kind="knowledge", source_ids=["C1P002"])
+        second["consequence"] = deepcopy(second["action"])
+        edge = draft["relations"][0]
+        edge.update(kind="reveals", basis="reveal", text="递交的名册向许守揭示林客的旧身份。",
+                    source_ids=["C1P001", "C1P002"])
+        before = deepcopy(draft)
+        normalized, report = validate_source_candidate(draft, binding["source_directory"]["entries"], bank, texts,
+                                                       producer="synthetic", wire=SOURCE_REPORT_V2_WIRE)
+        self.assertEqual(normalized, before)
+        self.assertEqual(draft, before)
+        self.assertEqual((report.relations[0].from_id, report.relations[0].to_id, report.relations[0].kind),
+                         (first["id"], second["id"], "reveals"))
