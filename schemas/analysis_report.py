@@ -60,6 +60,14 @@ class Relation(Claim):
     kind: Literal["causes", "enables", "reveals", "foreshadow_payoff", "follows"]
 
 
+class CharacterRelation(Claim):
+    """Directed, model-authored character semantics, never inferred from co-occurrence."""
+
+    from_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    to_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    label: str = Field(min_length=1, max_length=40)
+
+
 class ReportEvidence(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     chapter_number: int = Field(ge=1)
@@ -76,6 +84,7 @@ class AnalysisReport(StrictModel):
     characters: list[Character] = Field(min_length=1, max_length=100)
     events: list[Event] = Field(min_length=1, max_length=300)
     relations: list[Relation] = Field(max_length=600)
+    character_relations: list[CharacterRelation] = Field(default_factory=list, max_length=600)
     story_order: list[str] = Field(min_length=1, max_length=300)
     time_note: str = Field(min_length=1, max_length=500)
     evidence: list[ReportEvidence] = Field(min_length=1, max_length=500)
@@ -93,7 +102,7 @@ class AnalysisReport(StrictModel):
         evidence_ids = {x.id for x in self.evidence}
         character_ids = {x.id for x in self.characters}
         event_ids = {x.id for x in self.events}
-        claims = [*self.findings, *self.relations, *self.contradictions]
+        claims = [*self.findings, *self.relations, *self.character_relations, *self.contradictions]
         for person in self.characters:
             claims.extend((person.identity, person.motivation, person.change))
             claims.extend(person.insights)
@@ -112,9 +121,20 @@ class AnalysisReport(StrictModel):
             raise ValueError("证据超出已读范围")
         if any(x.from_id not in event_ids or x.to_id not in event_ids or x.from_id == x.to_id for x in self.relations):
             raise ValueError("剧情连线端点无效")
+        validate_character_relations(self.character_relations, character_ids)
         if len(self.story_order) != len(event_ids) or set(self.story_order) != event_ids:
             raise ValueError("故事时间线必须覆盖每个事件一次")
         return self
+
+
+def validate_character_relations(relations, character_ids):
+    keys = []
+    for edge in relations:
+        if edge.from_id not in character_ids or edge.to_id not in character_ids or edge.from_id == edge.to_id:
+            raise ValueError("人物关系端点无效")
+        keys.append((edge.from_id, edge.to_id, edge.label))
+    if len(keys) != len(set(keys)):
+        raise ValueError("人物关系键重复")
 
 
 class AnalysisImport(StrictModel):

@@ -12,8 +12,11 @@ from app import entry_routes
 from app.core.independent_service import IndependentServiceError, IndependentWorkspaceService
 from schemas.independent import (
     CompleteChapterRequest,
+    ConfirmChapterPartitionRequest,
+    CorrectChapterPartitionRequest,
     ImportPreviewRequest,
     ResolveChangesRequest,
+    ResegmentChaptersRequest,
     SaveDraftRequest,
     StartIndependentRequest,
     TrialSketchRequest,
@@ -107,6 +110,68 @@ async def add_independent_chapter(project_id: str, request: Request, title: str 
     except IndependentServiceError as exc:
         _raise_service_error(exc)
     raise AssertionError("unreachable")
+
+
+@router.post("/projects/{project_id}/chapter-previews/import")
+async def preview_chapter_import(project_id: str, request: Request, payload: ImportPreviewRequest) -> dict:
+    account = _current_independent_account(request, project_id)
+    try:
+        return {"preview": independent_service.preview_chapter_import(
+            project_id, account.account_id, filename=payload.filename, content_base64=payload.content_base64)}
+    except IndependentServiceError as exc:
+        _raise_service_error(exc)
+
+
+@router.post("/projects/{project_id}/chapter-previews/resegment")
+async def preview_chapter_resegment(project_id: str, request: Request, payload: ResegmentChaptersRequest) -> dict:
+    account = _current_independent_account(request, project_id)
+    try:
+        return {"preview": independent_service.preview_chapter_resegment(
+            project_id, account.account_id, **payload.model_dump())}
+    except IndependentServiceError as exc:
+        _raise_service_error(exc)
+
+
+@router.get("/projects/{project_id}/chapter-previews/{preview_id}")
+async def read_chapter_preview(project_id: str, preview_id: str, request: Request) -> dict:
+    account = _current_independent_account(request, project_id)
+    try:
+        return {"preview": independent_service.read_chapter_preview(project_id, account.account_id, preview_id)}
+    except IndependentServiceError as exc:
+        _raise_service_error(exc)
+
+
+@router.put("/projects/{project_id}/chapter-previews/{preview_id}")
+async def correct_chapter_preview(project_id: str, preview_id: str, request: Request,
+                                  payload: CorrectChapterPartitionRequest) -> dict:
+    account = _current_independent_account(request, project_id)
+    try:
+        return {"preview": independent_service.correct_chapter_preview(
+            project_id, account.account_id, preview_id, **payload.model_dump())}
+    except IndependentServiceError as exc:
+        _raise_service_error(exc)
+
+
+@router.post("/projects/{project_id}/chapter-previews/{preview_id}/confirm")
+async def confirm_chapter_preview(project_id: str, preview_id: str, request: Request,
+                                  payload: ConfirmChapterPartitionRequest) -> dict:
+    account = _current_independent_account(request, project_id)
+    try:
+        return independent_service.confirm_chapter_preview(
+            project_id, account.account_id, preview_id, **payload.model_dump())
+    except IndependentServiceError as exc:
+        _raise_service_error(exc)
+
+
+@router.get("/projects/{project_id}/versions/{version_id}/source")
+async def read_version_source(project_id: str, version_id: str, request: Request,
+                               chapter_id: str | None = None) -> dict:
+    account = _current_independent_account(request, project_id)
+    try:
+        return {"snapshot": independent_service.read_source_snapshot(
+            project_id, account.account_id, version_id, chapter_id)}
+    except IndependentServiceError as exc:
+        _raise_service_error(exc)
 
 
 @router.put("/projects/{project_id}/chapters/{chapter_id}/draft")

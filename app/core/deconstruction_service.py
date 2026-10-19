@@ -33,6 +33,7 @@ from schemas.deconstruction import (
     DeconstructionActiveRun,
     DeconstructionCandidate,
     DeconstructionDocument,
+    DeconstructionDepthReport,
     DeconstructionDocumentPublic,
     DeconstructionError,
     DeconstructionHistoryItem,
@@ -111,10 +112,15 @@ class DeconstructionService:
         *,
         independent: IndependentWorkspaceService,
         store: DeconstructionStore | None = None,
+        model_budget_cny: float = 10.0,
+        model_budget_scope: str = "default",
     ) -> None:
         self.independent = independent
         self.store = store or DeconstructionStore()
         self._lock = RLock()
+        from app.core.model_call_budget import DurableModelBudget
+        self.model_budget = DurableModelBudget(self.store.base_dir / "model-budgets",
+                                              scope=model_budget_scope, budget_cny=model_budget_cny)
 
     @staticmethod
     def _now() -> datetime:
@@ -311,10 +317,10 @@ class DeconstructionService:
                     data=ensure_exc.data,
                 ) from None
 
-    def _source(self, project_id: str, account_id: str) -> _Source:
+    def _source(self, project_id: str, account_id: str, *, version_id: str | None = None) -> _Source:
         record = self._load_independent_record(project_id, account_id)
         version = next(
-            (item for item in record.versions if item.version_id == record.active_version_id),
+            (item for item in record.versions if item.version_id == (version_id or record.active_version_id)),
             None,
         )
         if version is None:
@@ -376,9 +382,30 @@ class DeconstructionService:
             source_revision=max((chapter.server_revision for chapter in analysis_chapters), default=0),
             source_hash=source_hash,
             chapters=tuple(chapters),
-            pending_changes=record.pending_changes is not None,
+            pending_changes=record.pending_changes is not None if version.version_id == record.active_version_id else False,
             character_names=archive_names,
         )
+
+    def _historical_source(self, project_id: str, account_id: str, version_id: str) -> _Source:
+        """Read Ampere's immutable source seam, without chapter-number fallback."""
+        reader = getattr(self.independent, "read_source_snapshot", None)
+        if reader is None:
+            # Existing installations retain version records; their formal text
+            # is still a safe fallback until the snapshot helper is integrated.
+            return self._source(project_id, account_id, version_id=version_id)
+        try:
+            snapshot = reader(project_id, account_id, version_id)
+        except IndependentServiceError as exc:
+            raise DeconstructionServiceError(exc.code, exc.message, status_code=exc.status_code) from None
+        if snapshot["project_id"] != project_id or snapshot["source_version_id"] != version_id:
+            raise DeconstructionServiceError("historical_source_invalid", "历史来源绑定不一致。", status_code=409)
+        chapters = tuple(_SourceChapter(chapter_id=c["chapter_id"], chapter_number=c["chapter_number"],
+                                        title=c["title"], content=c["content"], server_revision=c["server_revision"])
+                         for c in sorted(snapshot["chapters"], key=lambda c: c["chapter_number"]))
+        return _Source(project_id=project_id, account_id=account_id, title="历史稿本",
+                       version_id=snapshot["source_version_id"], source_revision=snapshot["source_revision"],
+                       source_hash=snapshot["source_hash"], chapters=chapters,
+                       pending_changes=False, character_names=())
 
     def _record(self, project_id: str, account_id: str) -> DeconstructionProjectRecord | None:
         try:
@@ -788,37 +815,79 @@ class DeconstructionService:
         }
     async def analyze_preview(self, project_id: str, account_id: str, payload: AnalysisRequest, runtime) -> AnalysisImport:
         """Read a bounded source snapshot; model failure never replaces the current result."""
-        from app.agents.deconstruction_model import analysis_messages
+        from app.agents.deconstruction_model import chapter_fact_messages, chapter_checked_messages, preview_max_tokens
         from app.agents.llm_runtime import LLMRuntimeError
+        from app.core.analysis_grounding import source_bank
+        from app.core.chapter_preview import (
+            ChapterFacts, ChapterOutcome, ChapterBlocked, CHAPTER_MAX_TOKENS,
+            freeze_chapter, chapter_index, bind_chapter_outcome,
+        )
+        from app.core.model_call_budget import budgeted_structured
+        from app.core.model_budget import ModelBudgetExceeded
         source = self._source(project_id, account_id)
         bindings = payload.model_dump(exclude={"chapter_numbers"})
         self._check_source_precondition(source, **bindings)
         if not source.sufficient or source.pending_changes:
             raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        if not getattr(runtime, "available", True):
+            raise DeconstructionServiceError("model_unavailable", "请先配置作品拆解模型。", status_code=503)
         requested = set(payload.chapter_numbers)
         chapters = [c for c in source.chapters if c.chapter_number in requested]
         if len(requested) != len(payload.chapter_numbers) or len(chapters) != len(requested):
             raise DeconstructionServiceError("report_scope_invalid", "请选择当前稿本中不重复的章节。", status_code=422)
+        if sorted(requested) != list(range(min(requested), max(requested) + 1)):
+            raise DeconstructionServiceError("report_scope_invalid", "请选择连续章节。", status_code=422)
         if sum(len(c.content) for c in chapters) > 30000:
             raise DeconstructionServiceError("report_scope_large", "本轮请缩小章节范围至约三万字以内。", status_code=422)
+        read_text = {c.chapter_number: c.content for c in chapters}
+        bank = source_bank(read_text)
+        def check_source():
+            current = self._source(project_id, account_id)
+            self._check_source_precondition(current, **bindings)
+            if current.pending_changes:
+                raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        material = [dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters]
+        call_id = f"deconstruction:{project_id}:{source.source_hash}"
         try:
-            result = await asyncio.wait_for(runtime.structured(
-                call_id=f"deconstruction:{project_id}:{source.source_hash}",
-                messages=analysis_messages([dict(chapter_number=c.chapter_number, title=c.title, content=c.content) for c in chapters]),
-                response_model=AnalysisReport, max_tokens=8192, temperature=0.3,
-            ), timeout=1220)
+            frozen = ()
+            for chapter in material:
+                number = chapter["chapter_number"]
+                chapter_bank = {key: passage for key, passage in bank.items() if passage.chapter_number == number}
+                first = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
+                    call_id=call_id + f":chapter-{number}:facts", messages=chapter_fact_messages(chapter, chapter_bank),
+                    response_model=ChapterFacts, max_tokens=CHAPTER_MAX_TOKENS, temperature=0.3)
+                check_source()
+                try:
+                    packet = freeze_chapter(first.data, chapter_bank, {number: read_text[number]})
+                    frozen = (*frozen, packet)
+                    chapter_index(frozen)
+                except ValueError:
+                    raise DeconstructionServiceError("report_facts_invalid", "模型章级事实、身份或来源未通过校验，现有结果已保留。", status_code=422) from None
+            check_source()
+            result = await budgeted_structured(runtime, self.model_budget, check_source=check_source,
+                call_id=call_id + ":checked", messages=chapter_checked_messages(material, bank, frozen),
+                response_model=ChapterOutcome, max_tokens=preview_max_tokens(runtime), temperature=0.3)
+        except ModelBudgetExceeded:
+            raise DeconstructionServiceError("model_budget_exceeded", "已达到本轮模型总预算上限，现有结果已保留。", status_code=409,
+                                            data={"budget": self.model_budget.public(runtime.model)}) from None
         except TimeoutError:
             raise DeconstructionServiceError("model_timeout", "本轮拆解等待超时，请缩小范围后重试；现有结果已保留。", status_code=504) from None
         except LLMRuntimeError as exc:
             raise DeconstructionServiceError(exc.code, "模型拆解未完成，请稍后重试；现有结果已保留。", status_code=exc.status_code) from None
-        report = AnalysisReport.model_validate(result.data)
-        report.producer = runtime.model
+        except (OSError, ValueError):
+            raise DeconstructionServiceError("model_budget_unavailable", "模型预算账暂不可用，未采用本次结果。", status_code=503) from None
+        try:
+            check_source()
+            report = bind_chapter_outcome(result.data, frozen, bank, read_text, producer=runtime.model)
+        except ValueError:
+            raise DeconstructionServiceError("report_evidence_invalid", "模型来源编号、引用或结构未通过校验，现有结果已保留。", status_code=422) from None
+        if isinstance(report, ChapterBlocked):
+            check_source()
+            raise DeconstructionServiceError("report_source_blocked", "冻结章包存在有源问题，本轮未生成可采用报告；现有结果已保留。", status_code=422,
+                                            data={"issues": [issue.model_dump(mode="json") for issue in report.issues]})
         if set(report.chapter_numbers) != requested:
             raise DeconstructionServiceError("report_scope_invalid", "模型返回的章节范围不一致，现有结果已保留。", status_code=422)
-        by_number = {c.chapter_number: c for c in chapters}
-        if any(by_number[e.chapter_number].content.count(e.quote) != 1 for e in report.evidence):
-            raise DeconstructionServiceError("report_evidence_invalid", "模型引文未逐字匹配正文，现有结果已保留。", status_code=422)
-        self._check_source_precondition(self._source(project_id, account_id), **bindings)
+        check_source()
         return AnalysisImport(**bindings, report=report)
 
     def import_report(self, project_id: str, account_id: str, payload: AnalysisImport) -> dict[str, object]:
@@ -841,7 +910,20 @@ class DeconstructionService:
                 if scope_hash is None:
                     raise DeconstructionServiceError("report_scope_invalid", "拆解范围的章节在当前稿本中不完整。", status_code=422)
                 digest = hashlib.sha256(report.model_dump_json().encode("utf-8")).hexdigest()
-                document_id = self._slug(f"analysis-scope:{project_id}:{scope_start}-{scope_end}:{scope_hash}:{digest}")
+                record = self._record(project_id, account_id) or DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
+                # Equal text in a new manuscript version has different chapter/evidence bindings.
+                document_id = self._slug(f"analysis-scope:{project_id}:{source.version_id}:{scope_start}-{scope_end}:{scope_hash}:{digest}")
+                legacy_id = self._slug(f"analysis-scope:{project_id}:{scope_start}-{scope_end}:{scope_hash}:{digest}")
+                legacy = self._document(record, legacy_id)
+                # Keep already-persisted IDs stable for exact same-version retries only.
+                # Never migrate an old document or replace its frozen evidence bindings.
+                if (legacy is not None and legacy.analysis_contract_version == "model.1"
+                        and legacy.status == "completed"
+                        and legacy.project_id == project_id and legacy.account_id == account_id
+                        and legacy.source_version_id == source.version_id
+                        and legacy.scope_start == scope_start and legacy.scope_end == scope_end
+                        and legacy.scope_hash == scope_hash and legacy.report == report):
+                    document_id = legacy_id
                 evidence = []
                 for item in report.evidence:
                     chapter = chapters[item.chapter_number]
@@ -857,7 +939,6 @@ class DeconstructionService:
                         end_offset=len(chapter.content[:start + len(item.quote)].encode("utf-16-le")) // 2,
                         excerpt=item.quote, label="拆解依据",
                     ))
-                record = self._record(project_id, account_id) or DeconstructionProjectRecord(project_id=project_id, account_id=account_id)
                 if self._document(record, document_id) is None:
                     now = self._now()
                     record.documents.append(DeconstructionDocument(
@@ -1116,7 +1197,7 @@ class DeconstructionService:
         if position < 0:
             position = 0
         end = min(len(content), position + MAX_EXCERPT)
-        excerpt = content[position:end].strip()
+        excerpt = content[position:end]
         evidence_id = self._slug(
             f"evidence:{document.document_id}:{source.version_id}:{chapter.chapter_id}:{label}:{position}:{excerpt}"
         )
@@ -1748,6 +1829,92 @@ class DeconstructionService:
     async def process_background_tasks_async(self, *, limit: int = 8) -> int:
         return await asyncio.to_thread(self.process_background_tasks, limit=limit)
 
+    def _evidence_source_matches(self, source: _Source, document: DeconstructionDocument) -> bool:
+        """Validate the original version, using exactly the report's scope.
+
+        A scoped model report survives appending outside its read range, even
+        when that version subsequently becomes historical. Whole-book reports
+        still require the complete source hash; a missing scope hash is never
+        treated as permission to bypass source verification.
+        """
+        if (source.project_id != document.project_id or source.account_id != document.account_id
+                or source.version_id != document.source_version_id):
+            return False
+        if document.analysis_contract_version == "model.1" and self._scoped(document):
+            return bool(document.scope_hash and document.scope_start <= document.scope_end
+                        and self._scope_hash(source, document.scope_start, document.scope_end) == document.scope_hash)
+        return bool(source.source_hash and source.source_hash == document.source_hash)
+
+    def _verified_evidence(self, source: _Source, document: DeconstructionDocument,
+                           item: EvidenceRef) -> EvidenceRef | None:
+        """Exact source-bound projection; legacy whitespace repair is read-only.
+
+        Never search by current chapter number or fuzzy-match a quote. Recovery
+        is limited to the old strip-only bug at the *same* stored UTF-16 span,
+        backed by a validated canonical report or the legacy producer's exact
+        ID/position/length formula. The returned quote must equal the raw slice.
+        """
+        if (not self._evidence_source_matches(source, document)
+                or item.document_id != document.document_id
+                or item.source_version_id != document.source_version_id
+                or item.source_revision != document.source_revision
+                or item.source_hash != document.source_hash):
+            return None
+        if (document.analysis_contract_version == "model.1" and self._scoped(document)
+                and not document.scope_start <= item.chapter_number <= document.scope_end):
+            return None
+        chapter = next((c for c in source.chapters if c.chapter_id == item.chapter_id
+                        and c.chapter_number == item.chapter_number), None)
+        if chapter is None:
+            return None
+        try:
+            raw = chapter.content.encode("utf-16-le")
+            if not 0 <= item.start_offset < item.end_offset <= len(raw) // 2:
+                return None
+            prefix = raw[:item.start_offset * 2].decode("utf-16-le")
+            quote = raw[item.start_offset * 2:item.end_offset * 2].decode("utf-16-le")
+        except UnicodeError:
+            return None
+        canonical = None
+        if isinstance(document.report, DeconstructionDepthReport):
+            canonical = next((e for e in document.report.evidence if e.evidence_id == item.evidence_id), None)
+        if canonical is not None:
+            if (canonical.granularity != "span" or canonical.excerpt != quote or any(
+                getattr(canonical, key) != getattr(item, key) for key in
+                ("document_id", "source_version_id", "source_revision", "source_hash", "chapter_id",
+                 "chapter_number", "start_offset", "end_offset", "offset_unit")
+            )):
+                return None
+        if quote == item.excerpt:
+            return item
+        if not item.excerpt or item.excerpt != quote.strip() or document.analysis_contract_version == "model.1":
+            return None
+        if canonical is not None:
+            if canonical.granularity != "span" or canonical.excerpt != quote:
+                return None
+            try:
+                validate_depth_report_source(
+                    document.report,
+                    source=DepthSource(project_id=source.project_id, document_id=document.document_id,
+                                       source_version_id=document.source_version_id,
+                                       source_revision=document.source_revision, source_hash=document.source_hash),
+                    chapters={c.chapter_id: c.content for c in source.chapters},
+                )
+            except ValueError:
+                return None
+        else:
+            # The stage-31 producer clipped MAX_EXCERPT code points and then
+            # stripped the quote without updating its end offset. Its stable
+            # ID proves this precise old projection; arbitrary IDs/spans fail.
+            position = len(prefix)
+            end = min(len(chapter.content), position + MAX_EXCERPT)
+            legacy_id = self._slug(f"evidence:{document.document_id}:{source.version_id}:"
+                                   f"{chapter.chapter_id}:{item.label}:{position}:{item.excerpt}")
+            if (item.evidence_id != legacy_id
+                    or item.end_offset != self._utf16_length(chapter.content[:end])):
+                return None
+        return EvidenceRef.model_validate({**item.model_dump(), "excerpt": quote})
+
     def evidence(self, project_id: str, account_id: str, evidence_id: str, *, document_id: str | None = None) -> dict[str, object]:
         source = self._source(project_id, account_id)
         record = self._record(project_id, account_id)
@@ -1768,6 +1935,7 @@ class DeconstructionService:
             for item in document.evidence:
                 if item.evidence_id != evidence_id:
                     continue
+                verified = self._verified_evidence(source, document, item)
                 depth_current = bool(
                     active_depth
                     and active is not None
@@ -1776,6 +1944,7 @@ class DeconstructionService:
                     and item.source_version_id == source.version_id
                     and item.source_revision == source.source_revision
                     and item.source_hash == source.source_hash
+                    and verified is not None
                 )
                 chapter = next((chapter for chapter in source.chapters if chapter.chapter_id == item.chapter_id), None)
                 scope_current = bool(
@@ -1789,23 +1958,27 @@ class DeconstructionService:
                     and item.source_hash == document.source_hash
                     and chapter is not None
                     and chapter.chapter_number == item.chapter_number
-                    and 0 <= item.start_offset < item.end_offset <= len(chapter.content.encode("utf-16-le")) // 2
-                    and chapter.content.encode("utf-16-le")[item.start_offset * 2:item.end_offset * 2] == item.excerpt.encode("utf-16-le")
+                    and verified is not None
                 )
                 source_matches_current = depth_current or scope_current
                 if not source_matches_current or chapter is None:
-                    # 历史稿本不再是当前正文时，返回最小历史定位；不把旧证据
-                    # 默认跳到当前同编号章节，也不复制历史正文。
+                    historical = self._historical_source(project_id, account_id, item.source_version_id)
+                    old_chapter = next((c for c in historical.chapters if c.chapter_id == item.chapter_id
+                                        and c.chapter_number == item.chapter_number), None)
+                    verified = self._verified_evidence(historical, document, item)
+                    available = verified is not None and old_chapter is not None
                     return {
                         "project_id": project_id,
                         "title": source.title,
-                        "evidence": item.model_dump(mode="json"),
+                        "evidence": (verified or item).model_dump(mode="json"),
                         "chapter": {
                             "chapter_id": item.chapter_id,
                             "chapter_number": item.chapter_number,
-                            "title": "历史稿本章节",
+                            "title": old_chapter.title if available else "历史稿本章节",
                             "read_only": True,
-                            "source_available": False,
+                            "source_available": available,
+                            "source_version_id": item.source_version_id,
+                            "content": old_chapter.content if available else None,
                         },
                         "source_matches_current": False,
                         "historical": True,
@@ -1813,7 +1986,7 @@ class DeconstructionService:
                 return {
                     "project_id": project_id,
                     "title": source.title,
-                    "evidence": item.model_dump(mode="json"),
+                    "evidence": verified.model_dump(mode="json"),
                     "chapter": {
                         "chapter_id": chapter.chapter_id,
                         "chapter_number": chapter.chapter_number,

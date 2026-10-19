@@ -1,8 +1,12 @@
 # 叙脉文档索引
 
+2026-10-20：8057当前副本已重启，正文六章可查看/编辑，模型调用保持关闭。Notion改用独立“验收状态”（未验收/验收未通过/已通过）及“验收台”；未通过项按意见修改、自测后再回到未验收，原意见保留。开发进度与作者结论分开，详见[验收规则](ACCEPTANCE.md)和[最新进度](../PROGRESS.md)。
+
+2026-10-18 当前实施为[阶段37 · 独立创作本机完整可用版](goals/STAGE_37_USABLE_WORKSPACE.md)：正式六章、A版分层与状态页已复核，[章级事实预览](STAGE_37_CHAPTER_PREVIEW_CONTRACT.md)通过免费工程门禁，但六章实跑和单章推理对照均未通过内容/绑定检查，未采用。8057保留可编辑副本、试验调用关闭；新增5元轮估算已用1.7907元、余3.2093元，独立于旧2元账。先评估有源纠错与核对负担，不继续盲跑。Notion仅作者选择已验收；子Agent只用Sol。下方阶段36是继承基线，不再代表当前目标；决定和结果分别见[DECISIONS](DECISIONS.md)与[PROGRESS](../PROGRESS.md)。
+
 2026-10-16 网页端接手见 [CODEX_WEB_HANDOFF](CODEX_WEB_HANDOFF.md)：当前最新进度在阶段36分支，尚未合并到 `main`；含基线、环境、验证及本机私有材料边界。
 
-> 当前实施为 [阶段 36 · 工作台减法与结构化阅读](goals/STAGE_36_VISUAL_READING.md)，落实Notion验收反馈：人物/剧情图形阅读、章内目录、隐藏历史恢复入口。阶段35是继承基线；用户认可主配区分，不代表界面和导入已验收。研究依据见[图形阅读设计](research/STAGE_36_VISUAL_READING_2026-10-13.md)。
+> 继承基线为 [阶段 36 · 工作台减法与结构化阅读](goals/STAGE_36_VISUAL_READING.md)。用户认可主配区分，不代表界面和导入已验收。研究依据见[图形阅读设计](research/STAGE_36_VISUAL_READING_2026-10-13.md)。
 
 阶段 35 的外部机制参考、真实问题与受控试跑口径见 [识别与阅读组织](research/STAGE_35_RECOGNITION_AND_READING_2026-10-13.md)。
 

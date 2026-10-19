@@ -26,7 +26,9 @@ const node = id => {
     value: '', textContent: '', innerHTML: '', dataset: {}, open: false,
     classList: {add() {}, remove() {}, toggle() {}},
     setAttribute(name, value) { this[name] = value; }, removeAttribute(name) { delete this[name]; },
+    insertAdjacentHTML(position, html) { this.innerHTML += html; },
     querySelector(selector) { return node(`${id} ${selector}`); }, querySelectorAll() { return []; },
+    closest(selector) { return node(`${id} parent ${selector}`); },
     focus() { document.activeElement = this; }, select() {}, getClientRects() { return [{}]; },
     showModal() { this.open = true; }, close() { this.open = false; }, addEventListener() {},
   });
@@ -51,7 +53,10 @@ source = source.replace('  start();\n})();', `  globalThis.api = {
   state, elements, normalizeResult, normalizeDeconstructionResponse, hasDeconstructionResults,
   isModelAnalysisReport, renderDeconstructionEvidence, deconstructionEvidenceMatchesSource,
   deconstructionEvidenceIdentityMatches, deconstructionApi, chooseActiveChapter,
-  updateChapterUrl, flushPendingSave, navigate, previewVersion, openRestoreVersionConfirm
+  updateChapterUrl, flushPendingSave, navigate, previewVersion, openRestoreVersionConfirm,
+  renderDeconstructionEvidenceDialog, refreshModelBudget, renderChapterList,
+  parseModelChapterRange, previewModelAnalysis, renderEditorWorkspace, handleCompleteButtonClick,
+  renderCompleteChapterAction, nextIndependentChapter, chapterStateLabel
 };\n})();`);
 vm.runInNewContext(source, sandbox);
 const api = sandbox.api;
@@ -114,6 +119,26 @@ const modelPayload = () => ({project_id: 'p', title: '合同样本', effective_s
             result = self.run_js("console.log('正文输入与输出🧭'); console.error('错误诊断中文🧭');")
         self.assertEqual(result.stdout, "正文输入与输出🧭\n")
         self.assertEqual(result.stderr, "错误诊断中文🧭\n")
+
+    def test_model_preview_only_accepts_contiguous_chapters_before_any_request(self):
+        self.run_js(r'''
+assert.equal(JSON.stringify(api.parseModelChapterRange('1-6')), '[1,2,3,4,5,6]');
+assert.equal(JSON.stringify(api.parseModelChapterRange('3，1,2')), '[1,2,3]');
+assert.equal(JSON.stringify(api.parseModelChapterRange('6')), '[6]');
+assert.equal(api.parseModelChapterRange('1-20').length,20);
+for(const value of ['1,3','1-2,4-6','1,1','1-21','0','6-1','', '9007199254740992','9'.repeat(400)]) {
+  assert.throws(()=>api.parseModelChapterRange(value));
+  node('#modelAnalysisChapters').value=value;
+  api.state.modelAnalysisBusy=false;
+  api.state.modelAnalysisCandidate={projectId:'p',candidate:{id:'keep'}};
+  let calls=0;fetchHandler=async()=>{calls++;throw new Error('Must not request');};
+  const button={disabled:false};await api.previewModelAnalysis(button);
+  assert.equal(calls,0);assert.equal(button.disabled,false);assert.equal(api.state.modelAnalysisBusy,false);
+  assert.equal(api.state.modelAnalysisCandidate.candidate.id,'keep');
+  assert.ok(node('#modelAnalysisStatus').textContent);
+}
+assert.match(node('#modelAnalysisStatus').textContent,/连续章节/);
+''')
 
     def test_model_contract_accepts_both_versions_and_scoped_revision(self):
         self.run_js(r'''
@@ -236,6 +261,116 @@ api.openRestoreVersionConfirm('selected'); assert.equal(api.elements.restoreVers
 assert.deepEqual(methods,['GET','GET']);
 ''')
 
+
+    def test_historical_content_never_enables_current_editor_navigation(self):
+        self.run_js(r'''
+const chapter={chapter_id:'c1',chapter_number:1,title:'第一章',read_only:true,
+ source_available:true,source_version_id:'v',content:'正文\r\n  😀旧稿\r\n'};
+const payload={historical:true,source_matches_current:false,chapter,evidence};
+api.renderDeconstructionEvidenceDialog(payload,null,true);
+assert.equal(api.state.pendingEvidence,null);
+assert.equal(api.elements.locateDeconstructionEvidenceButton.disabled,true);
+assert.match(api.elements.deconstructionEvidenceContent.innerHTML,/readonly aria-label="历史来源正文"/);
+assert.equal(api.elements.deconstructionEvidenceContent.querySelector('.historical-source textarea').value,chapter.content);
+for(const changed of [{source_available:false},{source_version_id:'other'},{chapter_id:'other'},{content:null},{read_only:false}]) {
+ api.renderDeconstructionEvidenceDialog({...payload,chapter:{...chapter,...changed}},null,false);
+ assert.ok(!api.elements.deconstructionEvidenceContent.innerHTML.includes('historical-source'));
+ assert.equal(api.state.pendingEvidence,null);
+ assert.equal(api.elements.locateDeconstructionEvidenceButton.disabled,true);
+}
+api.renderDeconstructionEvidenceDialog({...payload,historical:false,source_matches_current:true},null,true);
+assert.equal(api.elements.locateDeconstructionEvidenceButton.disabled,false);
+assert.equal(api.state.pendingEvidence.chapterId,'c1');
+assert.ok(!api.elements.deconstructionEvidenceContent.innerHTML.includes('historical-source'));
+''')
+
+    def test_shared_budget_displays_real_cap_and_preserves_zero(self):
+        self.run_js(r'''
+api.state.deconstructionProjectId='p';
+const calls=[];
+fetchHandler=async url=>{calls.push(url);return reply({budget:{budget_cny:2,estimated_spent_cny:1.25,reserved_cny:.75,remaining_cny:0,unknown_usage_calls:1}});};
+await api.refreshModelBudget('p');
+const text=node('#modelSharedBudget').textContent;
+assert.match(text,/共用预算 ¥2.0000/);assert.match(text,/剩余 ¥0.0000/);
+assert.match(text,/在途 ¥0.7500/);assert.match(text,/保守上限/);assert.ok(!text.includes('10.00'));
+assert.deepEqual(calls,['/api/independent/projects/p/deconstruction/model-budget']);
+fetchHandler=async()=>({ok:false,status:503,json:async()=>({detail:{message:'账本不可读'}})});
+await api.refreshModelBudget('p');assert.match(node('#modelSharedBudget').textContent,/账本不可读/);
+''')
+
+    def test_confirmed_chapters_are_not_claimed_as_analyzed(self):
+        self.run_js(r'''
+const chapters=Array.from({length:6},(_,i)=>({chapter_id:`c${i+1}`,chapter_number:i+1,
+ title:`第${i+1}章`,content:'正式正文',status:'ready',server_revision:1}));
+Object.assign(api.state,{workspace:{mode:'independent',initialized:true,active_version:{version_id:'new',chapters},tasks:[]},
+ editorProjectId:'p',activeChapterId:'c1',editorAnalysis:{sourceMatch:false,result:{sourceVersionId:'old'}}});
+location.search='?chapter=c1';api.renderEditorWorkspace();
+assert.equal(api.elements.editorAnalysisState.textContent,'正式稿');
+assert.ok(!api.elements.chapterList.innerHTML.includes('已分析'));
+assert.equal((api.elements.chapterList.innerHTML.match(/正式稿/g)||[]).length,6);
+assert.equal(api.elements.completeChapterButton.textContent,'下一章 →');
+assert.equal(api.nextIndependentChapter().chapter_id,'c2');
+api.state.activeChapterId='c6';location.search='?chapter=c6';api.renderEditorWorkspace();
+assert.equal(api.elements.completeChapterButton.textContent,'新建章节 →');
+assert.equal(api.elements.completeChapterButton.dataset.nextChapter,'true');
+assert.equal(api.nextIndependentChapter(),null);
+api.state.editorDirty=true;api.renderCompleteChapterAction(chapters[5]);
+assert.equal(api.elements.completeChapterButton.dataset.nextChapter,'false');
+assert.equal(api.elements.completeChapterButton.textContent,'完成本章 →','Keep the existing last-chapter edit confirmation barrier');
+api.state.editorDirty=false;
+api.state.workspace.mode='ai_assisted';assert.equal(api.chapterStateLabel(chapters[0]),'已分析');
+api.renderCompleteChapterAction(chapters[5]);assert.equal(api.elements.completeChapterButton.textContent,'新建下一章 →');
+''')
+
+    def test_next_existing_chapter_saves_without_appending_or_analyzing(self):
+        self.run_js(r'''
+const chapters=Array.from({length:6},(_,i)=>({chapter_id:`c${i+1}`,chapter_number:i+1,
+ title:`第${i+1}章`,content:'原文',status:'ready',server_revision:1}));
+const workspace={mode:'independent',initialized:true,active_version:{version_id:'v',chapters},tasks:[]};
+Object.assign(api.state,{workspace,editorProjectId:'p',activeChapterId:'c1',editorRevision:1});
+location.search='?chapter=c1';api.renderEditorWorkspace();let calls=[];
+fetchHandler=async(url,options)=>{calls.push([url,options?.method]);throw new Error('Unexpected request');};
+await api.handleCompleteButtonClick();assert.equal(api.state.activeChapterId,'c2');assert.equal(calls.length,0);
+const exact='  开头 😀\n\n结尾空白  \n';
+Object.assign(api.state,{editorDirty:true,editorBuffer:exact,editorTitleBuffer:'第二章—原题',editorChangeToken:1});
+api.renderCompleteChapterAction(chapters[1]);assert.equal(api.elements.completeChapterButton.textContent,'下一章 →');
+fetchHandler=async(url,options)=>{calls.push([url,options?.method]);assert.equal(url,'/api/independent/projects/p/chapters/c2/draft');
+ const body=JSON.parse(options.body);assert.equal(body.content,exact);assert.equal(body.expected_revision,1);
+ chapters[1]={...chapters[1],content:body.content,title:body.title,server_revision:2};
+ return reply({workspace,chapter:chapters[1]});};
+await api.handleCompleteButtonClick();assert.equal(api.state.activeChapterId,'c3');
+assert.equal(location.searchParams.get('chapter'),'c3');assert.equal(chapters.length,6);
+assert.equal(chapters[1].content,exact);assert.equal(calls.length,1);assert.equal(calls[0][1],'PUT');
+''')
+
+    def test_next_existing_chapter_stops_at_failed_save_and_conflict(self):
+        self.run_js(r'''
+for(const status of [503,409]) {
+ const chapters=Array.from({length:6},(_,i)=>({chapter_id:`c${i+1}`,chapter_number:i+1,title:'章题',content:'原文',status:'ready',server_revision:1}));
+ Object.assign(api.state,{workspace:{mode:'independent',initialized:true,active_version:{version_id:'v',chapters},tasks:[]},
+  editorProjectId:'p',activeChapterId:'c1',editorDirty:true,editorSaving:false,editorSaveFailed:false,editorConflict:null,
+  editorBuffer:'  必须保留 😀\n',editorTitleBuffer:'第一章—原题',editorRevision:1});
+ location.search='?chapter=c1';let calls=0;
+ fetchHandler=async(url,options)=>{calls++;assert.ok(url.endsWith('/c1/draft'));assert.equal(options.method,'PUT');
+  return {ok:false,status,json:async()=>({detail:{code:status===409?'save_conflict':'unavailable',message:'保存被拒绝',data:{chapter:chapters[0]}}})};};
+ await api.handleCompleteButtonClick();assert.equal(api.state.activeChapterId,'c1');assert.equal(chapters.length,6);
+ assert.equal(api.state.editorBuffer,'  必须保留 😀\n');assert.equal(api.state.editorDirty,true);assert.equal(calls,1);
+ assert.equal(api.elements.completeChapterButton.disabled,true);
+ await api.handleCompleteButtonClick();assert.equal(calls,1,'Navigation must not implicitly retry a failed save');
+}
+''')
+
+    def test_official_chapter_navigation_avoids_double_numbering(self):
+        self.run_js(r'''
+api.state.activeChapterId='c1';
+api.renderChapterList({chapters:[{chapter_id:'c1',chapter_number:1,title:'第一章 潮声',status:'ready'},
+ {chapter_id:'c2',chapter_number:2,title:'无编号题',status:'draft'}]});
+const html=api.elements.chapterList.innerHTML;
+assert.match(html,/正式章节，共 2 章/);assert.match(html,/<option value="c1" selected>第一章 潮声/);
+assert.match(html,/aria-hidden="true"><\/span><span class="chapter-list-copy"><strong>第一章 潮声/);
+assert.match(html,/aria-hidden="true">02<\/span>/);
+assert.ok(!html.includes('select-section'));assert.ok(!html.includes('chapter-section-list'));
+''')
 
 if __name__ == "__main__":
     unittest.main()

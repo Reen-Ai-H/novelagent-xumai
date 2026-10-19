@@ -8,15 +8,16 @@ from unittest.mock import AsyncMock, patch
 
 from app.agents.llm_runtime import LLMUsage
 from app.core.analysis_delta import compact_index, merge_delta
+from app.core.analysis_grounding import GroundedDelta, source_id
 from app.core.book_analysis import BookAnalysis
 from app.core.model_budget import BudgetLedger, pricing_for_model
 from schemas.analysis_delta import AnalysisDelta, RelationKey
-from test_stage32_analysis_import import AnalysisImportTest
+from test_stage32_analysis_import import AnalysisImportTest, selector_report
 
 
 def first_delta(report):
     return {
-        "new_evidence": report["evidence"], "new_findings": report["findings"],
+        "new_evidence": selector_report(report)["evidence"], "new_findings": report["findings"],
         "new_characters": report["characters"], "new_events": report["events"],
         "story_order": report["story_order"], "time_note": report["time_note"],
     }
@@ -261,14 +262,14 @@ class Stage34RunnerTest(unittest.IsolatedAsyncioTestCase):
         project, _ = self.prepare()
         account = self.independent.store.load(project).account_id
         first = first_delta(self.payload["report"])
-        second = {"new_evidence": [{"id": "later", "chapter_number": 1, "quote": "他把钥匙交给陆川。"}]}
+        second = {"new_evidence": [{"id": "later", "source_id": source_id(1, "他把钥匙交给陆川。")}]}
         final = {"revised_findings": [{"id": "F1", "title": "行动中的否定",
                                         "text": "她保留选择，随后交出钥匙。", "status": "inferred",
                                         "evidence_ids": ["Q1", "Q2"]}]}
         responses = iter([first, second, final])
 
         async def respond(**kwargs):
-            self.assertIs(kwargs["response_model"], AnalysisDelta)
+            self.assertIs(kwargs["response_model"], GroundedDelta)
             return SimpleNamespace(data=next(responses), call_id=kwargs["call_id"],
                                    usage=LLMUsage(prompt_tokens=200, completion_tokens=100,
                                                   total_tokens=300))
@@ -668,7 +669,7 @@ class Stage34RunnerTest(unittest.IsolatedAsyncioTestCase):
         replies = iter([first, corrected])
 
         async def respond(**kwargs):
-            self.assertIs(kwargs["response_model"], AnalysisDelta)
+            self.assertIs(kwargs["response_model"], GroundedDelta)
             return SimpleNamespace(data=next(replies), call_id=kwargs["call_id"], usage=LLMUsage(known=False))
 
         runtime = SimpleNamespace(available=True, model="mimo-v2.6-flash",

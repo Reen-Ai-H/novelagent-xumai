@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from schemas.analysis_delta import AnalysisDelta
-from schemas.analysis_report import AnalysisReport
+from schemas.analysis_report import AnalysisReport, CharacterRelation, validate_character_relations
 
 
 GROUPS = {"evidence": "Q", "findings": "F", "characters": "C", "events": "E"}
@@ -22,6 +22,8 @@ def compact_index(draft: dict | None) -> dict:
         "findings": [{"id": x["id"], "title": x["title"]} for x in draft.get("findings", [])],
         "relations": [{key: x[key] for key in ("from_id", "to_id", "kind")}
                       for x in draft.get("relations", [])],
+        "character_relations": [{key: x[key] for key in ("from_id", "to_id", "label")}
+                                for x in draft.get("character_relations", [])],
         "recent_evidence": [{"id": x["id"], "chapter_number": x["chapter_number"], "quote": x["quote"]}
                             for x in draft.get("evidence", [])[-30:]],
     }
@@ -80,7 +82,9 @@ def _validate_draft(draft: dict, read_text: dict[int, str]) -> None:
     evidence_ids = {item["id"] for item in draft["evidence"]}
     character_ids = {item["id"] for item in draft["characters"]}
     event_ids = {item["id"] for item in draft["events"]}
-    claims = [*draft["findings"], *draft["relations"], *draft["contradictions"]]
+    claims = [*draft["findings"], *draft["relations"], *draft["character_relations"], *draft["contradictions"]]
+    validate_character_relations([CharacterRelation.model_validate(x, strict=True)
+                                  for x in draft["character_relations"]], character_ids)
     for character in draft["characters"]:
         claims.extend(character[key] for key in ("identity", "motivation", "change"))
         claims.extend(character.get("insights", []))
@@ -103,7 +107,8 @@ def _validate_draft(draft: dict, read_text: dict[int, str]) -> None:
     if len(order) != len(set(order)) or not set(order) <= event_ids:
         raise ValueError("故事时间线引用无效")
     if any(item["chapter_number"] not in chapters or
-           read_text[item["chapter_number"]].count(item["quote"]) != 1
+           (read_text[item["chapter_number"]].find(item["quote"]) < 0 or
+            read_text[item["chapter_number"]].find(item["quote"], read_text[item["chapter_number"]].find(item["quote"]) + 1) >= 0)
            for item in draft["evidence"]):
         raise ValueError("引文不在已读正文中唯一出现")
 
@@ -114,7 +119,7 @@ def merge_delta(previous: dict | None, change: AnalysisDelta, *, chapters: list[
     """Apply declarations atomically; validate all references and quotes before publication."""
     if not set((previous or {}).get("chapter_numbers", [])) <= set(chapters):
         raise ValueError("已读章节范围不能缩小")
-    draft = {key: list((previous or {}).get(key, [])) for key in (*GROUPS, "relations", "story_order", "open_questions", "contradictions")}
+    draft = {key: list((previous or {}).get(key, [])) for key in (*GROUPS, "relations", "character_relations", "story_order", "open_questions", "contradictions")}
     draft.update(schema_version="1", producer=producer, title=(previous or {}).get("title", "全书拆解"),
                  scope=scope, chapter_numbers=chapters, time_note=(previous or {}).get("time_note", "时间顺序待全书核对。"))
     withdrawn_keys = [(item.from_id, item.to_id, item.kind) for item in change.withdrawn_relations]
@@ -126,6 +131,12 @@ def merge_delta(previous: dict | None, change: AnalysisDelta, *, chapters: list[
         raise ValueError("撤回连线必须引用已有的 from_id/to_id/kind")
     draft["relations"] = [edge for edge in draft["relations"]
                           if (edge["from_id"], edge["to_id"], edge["kind"]) not in withdrawn_key_set]
+    character_keys = [(x.from_id, x.to_id, x.label) for x in change.withdrawn_character_relations]
+    existing_character_keys = {(x["from_id"], x["to_id"], x["label"]) for x in draft["character_relations"]}
+    if len(character_keys) != len(set(character_keys)) or not set(character_keys) <= existing_character_keys:
+        raise ValueError("撤回人物关系必须引用唯一的已有端点与标签")
+    draft["character_relations"] = [x for x in draft["character_relations"]
+                                    if (x["from_id"], x["to_id"], x["label"]) not in character_keys]
     ids: dict[str, str] = {}
     # Resolve all object IDs before resolving claims/edges between new objects.
     planned: dict[str, list[tuple[dict, str]]] = defaultdict(list)
@@ -173,6 +184,19 @@ def merge_delta(previous: dict | None, change: AnalysisDelta, *, chapters: list[
         draft["relations"] = [x for x in draft["relations"]
                               if (x["from_id"], x["to_id"], x["kind"]) != key]
         draft["relations"].append(edge)
+    new_character_keys = set()
+    for item in change.new_character_relations:
+        edge = item.model_dump(mode="json")
+        edge["from_id"] = ids.get(edge["from_id"], edge["from_id"])
+        edge["to_id"] = ids.get(edge["to_id"], edge["to_id"])
+        _remap_claim(edge, ids)
+        key = (edge["from_id"], edge["to_id"], edge["label"])
+        if key in new_character_keys:
+            raise ValueError("本轮人物关系键重复")
+        new_character_keys.add(key)
+        draft["character_relations"] = [x for x in draft["character_relations"]
+                                        if (x["from_id"], x["to_id"], x["label"]) != key]
+        draft["character_relations"].append(edge)
     withdrawn = set(change.withdrawn_ids)
     if withdrawn:
         known = {item["id"] for key in GROUPS for item in draft[key]}
@@ -182,6 +206,8 @@ def merge_delta(previous: dict | None, change: AnalysisDelta, *, chapters: list[
             draft[group] = [item for item in draft[group] if item["id"] not in withdrawn]
         draft["relations"] = [edge for edge in draft["relations"]
                               if edge["from_id"] not in withdrawn and edge["to_id"] not in withdrawn]
+        draft["character_relations"] = [edge for edge in draft["character_relations"]
+                                        if edge["from_id"] not in withdrawn and edge["to_id"] not in withdrawn]
     if change.story_order is not None:
         draft["story_order"] = [ids.get(value, value) for value in change.story_order]
     else:

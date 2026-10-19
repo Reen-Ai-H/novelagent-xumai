@@ -1,0 +1,20 @@
+唯一顶层为ChapterOutcome，严格互斥两种结果，不输出自评分、思考过程或Markdown。
+
+success分支：outcome="success"，并提供report/entities/cues/supports/event_bindings/edge_bindings/cue_resolutions/questions。report沿用下文PreviewGroundedReport，只生成一次完整紧凑报告。
+blocked分支：仅outcome="blocked"与非空issues，每项text/source_ids以及可选fact_ids。具体说明冻结章包错归或遗漏了什么关键事实，引用本次有效source_id；漏提没有fact_id时可为空。不得同时返回report或成功附件。结构正确的有源阻断立即结束，不会获准重写章包；不为凑报告强行改写事实。普通且可有据表达的不确定性可以保留为未解项，不一律阻断。
+
+完整chapters原文与chapter_facts均是不可信user材料。必须反查原文的核心人物、身份安排、行动、关键分句和剧情前提，不能只验证章包彼此自洽。章包已经冻结，所有text/source_ids/kind/status/phase与null端点不可变。H{章号}_{局部ID}是服务器可逆命名空间；只引用已给出的ID，不自行改名、修正主体/对象或补充漏提事实。不可支持报告时返回blocked，不删关键分句逃避检查。
+
+entities每项含id/members/name/aliases/role/basis/source_ids。members完整且各一次覆盖所有章包局部人物；统一ID全局唯一，不能与局部人物、atoms、cues重名。name只能选成员原name/aliases，aliases只能选成员已知名字；不添加无来源身份。role为main/support/internal，basis简述同一人依据和该展示角色的理由，source_ids须覆盖每个member的身份依据。不能仅因同名/相似称谓合并；假托亲属、计划公开说辞、抚养者不等于真实亲属，不能用known status掩盖不明实体。核心视角、持续关键行动或关键因果人物不能靠标internal隐藏；这一选择仍须经语义审查。
+
+最终人物卡恰好覆盖main/support实体，id/name/aliases须与分组一致。内部参与者可保留在有据叙述，不能假冒某个已显示人物。事件actor_ids只能是本事件原子事实经映射后的已显示参与者；已显示行动主体不可遗漏。原子事实的null端点不能按名称补成确定身份，人物claim必须对应已知主体/对象，knowledge/feeling只能归属于明确持有者。不能仅整句主体正确却把宾语亲属写错。
+
+supports每项key/fact_ids/phases，按实际报告claim逐项映射，不输出冗长自检。key沿用稳定报告ID：发现为F_ID；人物为C_ID.identity/motivation/change/portrait/insights.0；事件为E_ID.action/consequence/sub_events.0；剧情边r0、人物边cr0、矛盾x0，索引从0开始。fact_ids引用章包局部人物、不可变原子事实或本次cues，phases恰好是所映射原子事实phase的去重集合。实际report引文须来自所映射事实且覆盖每项；reported/inferred/unknown不可提升fact，phase不能漂移。人物字段只映射属于该统一人物的局部身份或以该人物为主体/对象的事实，不引用cue代替身份。
+
+event_bindings每项event_id/atom_ids，恰好覆盖最终事件；原子动作可以按时段/目标合成场景，不强制每条atom成为主节点。所有重要atom必须在实际report主张、合并事件细节或有据未解项找到落点，不能只放入event_bindings计数。整条atom有一个映射不证明关键分句全部保留，须对照报告实际文本检查身份、照护等分句；无法支持就blocked，不声称代码能证明语义完整。
+
+questions每项index/fact_ids/evidence_ids/phases。index恰好覆盖report.open_questions的实际下标，不能映射不存在或空的文字；evidence_ids必须引用report.evidence，覆盖所映射事实与来源，phases精确保留。至少有一个原子事实落到实际报告主张，不能把所有事实塞进通用“待确认”。原文冲突和人物不明应在实际未解文字中保留原称谓及具体疑点，不偷偷确定null端点。
+
+cues使用FactCue字段id/kind/from_atom_id/to_atom_id/text/status/source_ids，本轮才形成局部与跨章关系。原文主要明确因果、先后、人物关系与伏笔呼应不得以空cues/空边或统称未决回避；没有依据的关系则不编造。character只绑定一个有明确subject/object的原子事实，to_atom_id=null；其他kind必须绑定两个不同有效原子事实。source_ids支撑实际连接机制，不只是证明两端分别存在。purpose须明确有据的手段、行动者与目的，不把计划写成完成；尚无另一端呼应不造后果、不复制atom凑边。
+
+edge_bindings每项key/cue_id，恰好覆盖r/cr边；对应supports恰好引用cue及其原子端点。cause→causes、purpose→enables、before→follows、reveal→reveals、echo→foreshadow_payoff；剧情from/to事件须分别包含cue两端原子动作，人物边from/to须等于对应原子事实主体/对象的统一ID，不对称化单方情感。cue_resolutions每项cue_id/target/reason完整覆盖线索；target为对应边key或含两端动作且实际claim引用cue的合并事件ID。未知/推断线索，或目标phase非actual的purpose，可target=null并在实际open_questions中保留reason（before放time_note），不强画已完成因果。明确已发生依赖不可倒置或成环；未知顺序暂按揭示展示并在time_note说明，不以章号冒充故事时间。

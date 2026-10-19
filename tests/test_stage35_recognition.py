@@ -198,7 +198,12 @@ class PersonRecognitionTest(unittest.TestCase):
         self.assertEqual([m["role"] for m in messages], ["system", "user"])
         for phrase in ("完整姓名边界", "群体", "复姓", "否定行动不否定人物存在", "固定人数", "不同姓名"):
             self.assertIn(phrase, messages[0]["content"])
-        self.assertEqual(json.loads(messages[1]["content"].split("\n", 1)[1]), chapters)
+        source_payload = json.loads(messages[1]["content"].split("\n", 1)[1])
+        self.assertEqual(set(source_payload), {"chapters"})
+        serialized = source_payload["chapters"][0]
+        self.assertEqual(serialized["chapter_number"], chapters[0]["chapter_number"])
+        self.assertEqual("".join(s["text"] for s in serialized["segments"]), chapters[0]["content"])
+        self.assertTrue(any("source_id" in s for s in serialized["segments"]))
 
 
 class RecognitionServiceTest(unittest.TestCase):

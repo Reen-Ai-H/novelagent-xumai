@@ -3,8 +3,30 @@ import copy
 import unittest
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
+from app.core.analysis_grounding import source_bank
+from preview_fixtures import preview_pair
 
 from test_stage31_deconstruction import Stage31DeconstructionApiTest
+
+
+def selector_report(report):
+    """Model wire response for this synthetic fixture, using server source IDs."""
+    data = copy.deepcopy(report)
+    bank = source_bank({1: "灯亮了。😀沈禾没有开门。他把钥匙交给陆川。"})
+    data["evidence"] = [{"id": e["id"], "source_id": next(
+        (p.id for p in bank.values() if e["quote"] in p.quote), "S1_" + "0" * 20)}
+        for e in data["evidence"]]
+    data.pop("producer", None)
+    return data
+
+
+def preview_selector_report(report):
+    """Author the new preview wire from this synthetic fixture, not a candidate repair."""
+    data = selector_report(report)
+    for event in data["events"]:
+        event.pop("chapter_number")
+        event.pop("chapter_end", None)
+    return data
 
 
 class AnalysisImportTest(unittest.TestCase):
@@ -107,12 +129,14 @@ class AnalysisImportTest(unittest.TestCase):
     def test_model_preview_uses_source_and_does_not_replace_report(self):
         self.prepare()
         before = self.client.get(self.url).json()["result"]["document_id"]
-        runtime = SimpleNamespace(model="fake-deepseek", structured=AsyncMock(return_value=SimpleNamespace(data=self.payload["report"])))
+        replies = preview_pair(preview_selector_report(self.payload["report"]))
+        runtime = SimpleNamespace(model="fake-deepseek", structured=AsyncMock(side_effect=[SimpleNamespace(data=x) for x in replies]))
         request = {k: v for k, v in self.payload.items() if k != "report"}
         request["chapter_numbers"] = [1]
         with patch("app.deconstruction_routes.create_runtime", return_value=runtime):
             response = self.client.post(self.url + "/analyze-preview", json=request)
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(runtime.structured.call_count, 2)
         self.assertEqual(response.json()["report"]["producer"], "fake-deepseek")
         self.assertIn("沈禾没有开门", runtime.structured.call_args.kwargs["messages"][1]["content"])
         self.assertEqual(self.client.get(self.url).json()["result"]["document_id"], before)
@@ -123,7 +147,9 @@ class AnalysisImportTest(unittest.TestCase):
         before = self.client.get(self.url).json()["result"]["document_id"]
         bad = copy.deepcopy(self.payload["report"])
         bad["evidence"][0]["quote"] = "沈禾打开门走了出去。"
-        runtime = SimpleNamespace(model="fake", structured=AsyncMock(return_value=SimpleNamespace(data=bad)))
+        facts, checked = preview_pair(preview_selector_report(self.payload["report"]))
+        checked["report"] = preview_selector_report(bad)
+        runtime = SimpleNamespace(model="fake", structured=AsyncMock(side_effect=[SimpleNamespace(data=x) for x in (facts, checked)]))
         request = {k: v for k, v in self.payload.items() if k != "report"}
         request["chapter_numbers"] = [1]
         with patch("app.deconstruction_routes.create_runtime", return_value=runtime):

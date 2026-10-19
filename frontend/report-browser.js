@@ -35,6 +35,7 @@
       pages.innerHTML = `<button type="button" data-browser-page="${state.page - 1}" ${state.page === 1 ? 'disabled' : ''}>上一页</button><label for="${id}Page">第 <select id="${id}Page" aria-label="${esc(config.label)}页码" data-browser-page-select>${Array.from({length:count}, (_, i) => `<option value="${i + 1}" ${state.page === i + 1 ? 'selected' : ''}>${i + 1}</option>`).join("")}</select> / ${count} 页</label><button type="button" data-browser-page="${state.page + 1}" ${state.page === count ? 'disabled' : ''}>下一页</button>`;
       pages.hidden = count === 1;
       config.afterRender?.(results, visible);
+      config.onState?.(state);
     }
     const belongs = event => event.target.closest(".report-browser") === root;
     const focusResults = () => {

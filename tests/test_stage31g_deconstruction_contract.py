@@ -175,7 +175,7 @@ class Stage31GDeconstructionContractTest(unittest.TestCase):
         self.assertEqual(type(evidence.chapter).__name__, "DeconstructionEvidenceChapter")
         self.assertEqual(
             set(evidence.chapter.model_dump()),
-            {"chapter_id", "chapter_number", "title", "read_only", "source_available"},
+            {"chapter_id", "chapter_number", "title", "read_only", "source_available", "source_version_id", "content"},
         )
 
         invalid = response.json()
