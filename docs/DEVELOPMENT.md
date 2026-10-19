@@ -19,7 +19,7 @@ Windows PowerShell 的等价步骤见 [`docs/WINDOWS_MIGRATION.md`](WINDOWS_MIGR
 
 阶段 34 增加显式 `LLM_PROVIDER=mimo`、`MIMO_API_KEY`、`MIMO_BASE_URL` 和 `MIMO_MODEL`。选择 MiMo 后只读取该供应商凭据，不回退旧 OpenAI/DeepSeek 配置；默认官方按量端点和 `mimo-v2.6-pro`。用户授权的 macOS RTF 凭据可通过 `scripts/configure_mimo.py <文件路径>` 安全配置，不输出密钥并保留其他配置。
 
-有 Key 的开发测试会显示“模型已连接·开发测试，不结算创作积分”。供应商错误必须进入 failed/retryable，不得悄悄回退模板。自动化测试使用 fake runtime，不调用真实模型。
+有 Key 的开发测试会显示“模型已连接·开发测试，不结算创作积分”。供应商错误必须显示真实状态，不得悄悄回退模板。普通report-v2拆书中，完整错误回应属于已知失败；真实传输超时/断流（含格式修复）则保留双账占用，暂停为report_request_unknown，重启及显式启动都不得重新发送。自动化测试使用fake runtime，不调用真实模型。
 
 ## 检查命令
 
