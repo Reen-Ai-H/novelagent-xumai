@@ -13,6 +13,9 @@ const archive={characters:[],storylines:[],foreshadowing:[],questions:[],snapsho
 const titles=['潮声','开蒙前','第三章 故人','第四章 来信','归航','赏与罚'];
 function fixture(){
  const report=structuredClone(template);
+ report.characters[0].importance='main';
+ report.characters[0].role='在旧港记录来往船只并见证众人选择的普通人'.repeat(4).slice(0,80);
+ report.characters[3].importance='support';report.characters[3].role='主要人物的导师';
  report.character_relations.push({from_id:'C0',to_id:'C1',label:'相识',text:'合成关系，仅供界面验收。',status:'reported',evidence_ids:['Q4']});
  report.relations.push({from_id:'E0',to_id:'E5',kind:'follows',text:'合成顺序，不作因果判断。',status:'fact',evidence_ids:['Q5']});
  const chapters=titles.map((title,i)=>({chapter_id:`c${i+1}`,chapter_number:i+1,title,status:'ready',server_revision:1,content:`  😀${template.evidence[i].quote}\r\n\r\n合成正文，测试不能改写它。\n`,word_count:50}));
@@ -113,6 +116,8 @@ if(require.main===module)(async()=>{
     await page.goto(peopleUrl);await page.locator('.total-graph-scroll').waitFor();
     await checkAccount(primary);
     assert.equal(await page.locator('.total-graph-node').count(),6);
+    assert.equal(await page.locator('[data-person-id=C0] .eyebrow').innerText(),'主要人物');
+    assert.equal(await page.locator('[data-person-id=C3] .eyebrow').innerText(),'配角');
     assert.equal(await page.locator('[data-total-from]').count(),4);
     assert.ok(await page.locator('[data-total-from=C0][data-total-to=C1]').count());
     assert.ok(await page.locator('[data-total-from=C4][data-total-to=C1]').count());
@@ -140,7 +145,7 @@ if(require.main===module)(async()=>{
     if(width>=1024){assert.ok(diagram.top<260);assert.equal(diagram.allVisible,true);assert.equal(diagram.scrollX,0);assert.equal(diagram.scrollY,0);}
     assert.equal(await page.locator('#reportWorkflow').isVisible(),false,'A current valid report has no redundant workflow bar');
     const assets=await page.evaluate(()=>[...document.querySelectorAll('script[src],link[rel=stylesheet]')].map(n=>n.src || n.href));
-    assert.equal(assets.length,13);assert.ok(assets.every(url=>new URL(url).searchParams.get('v')==='stage38-platform2'));
+    assert.equal(assets.length,13);assert.ok(assets.every(url=>new URL(url).searchParams.get('v')==='stage38-platform3'));
     await capture('people-total');
     await page.locator('.total-graph-edge').first().focus();await page.keyboard.press('Enter');
     assert.equal(await page.locator('[data-edge-basis]').isVisible(),true);
@@ -153,6 +158,9 @@ if(require.main===module)(async()=>{
     await page.locator('[data-reader-back]').click();await page.locator('.total-graph-scroll').waitFor();
     assert.equal(await page.locator('[data-reader-open=C0]').evaluate(n=>n===document.activeElement),true);
     await page.locator('[data-reader-map=index]').click();await page.locator('.workspace-person-row').first().waitFor();
+    await page.locator('[data-browser-filter=group]').selectOption('配角');
+    assert.equal(await page.locator('[data-person-id=C3]').count(),1);assert.equal(await page.locator('[data-person-id=C0]').count(),0);
+    await page.locator('[data-browser-filter=group]').selectOption('');
     await page.locator('[data-person-index] input[type=search]').fill('林舟');
     assert.equal(await page.locator('.workspace-person-row').count(),1);
     await page.locator('[data-reader-open=C0]').click();await page.locator('[data-reader-back]').click();

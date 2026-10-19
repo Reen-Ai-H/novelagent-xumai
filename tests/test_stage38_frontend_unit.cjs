@@ -7,7 +7,7 @@ const root=path.resolve(__dirname,'..');
 const source=fs.readFileSync(path.join(root,'frontend/app.js'),'utf8').replace(/\r\n/g,'\n');
 const hook='  start();\n})();';assert.ok(source.includes(hook));
 const ctx={window:{},document:{querySelector:()=>null,querySelectorAll:()=>[]},URL,URLSearchParams};
-vm.runInNewContext(source.replace(hook,'  globalThis.api={chapterTitle,chapterPrefix,chapterNumber,projectCard,reportStartBlock,reportJobMessage};\n})();'),ctx);
+vm.runInNewContext(source.replace(hook,'  globalThis.api={chapterTitle,chapterPrefix,chapterEditTitle,chapterNumber,projectCard,reportStartBlock,reportJobMessage};\n})();'),ctx);
 const {api}=ctx;
 const headings=['死婴','开蒙前','第三章 潮声','第四章 来信','归来','赏与罚'];
 const chapters=headings.map((title,i)=>({title,chapter_number:i+1,content:'  😀原文\r\n\r\n不可变。\n'}));
@@ -23,6 +23,13 @@ assert.equal(api.chapterTitle({title:'前言'}),'前言');
 assert.equal(api.chapterNumber(101),'一百零一');assert.equal(api.chapterNumber(1001),'一千零一');
 assert.equal(api.chapterNumber(10),'十');assert.equal(api.chapterNumber(20),'二十');
 assert.equal(JSON.stringify(chapters),frozen,'Display must not rewrite title or body');
+for(const [title,number,expected] of [
+ ['Chapter 7 Departure',1,'第一章 Departure'],['第七章 启程',1,'第一章 启程'],['第 9 章：归航',2,'第二章 归航'],
+ ['第一百零一章 归来',1,'第一章 归来'],['Chapter 7 Departure',7,'Chapter 7 Departure'],['第九章—归航',9,'第九章—归航']]){
+ const chapter={title,chapter_number:number,content:'  😀逐字原稿\r\n'},before=JSON.stringify(chapter);
+ assert.equal(api.chapterTitle(chapter),expected);assert.equal(api.chapterEditTitle(chapter),expected);
+ assert.equal(JSON.stringify(chapter),before);
+}
 const scope={source:{versionId:'v1',revision:1,contentHash:'a',wordCount:100}};
 const ready={loaded:true,budget:{remaining_cny:3},available:true};
 assert.equal(api.reportStartBlock(scope,ready),'');
@@ -63,9 +70,27 @@ report.character_relations=[
 const before=JSON.stringify(report),options={claim:JSON.stringify,evidence:()=>''};
 const data=R.mountModel({},report,options);
 assert.equal(data.people[0].group,'主要人物');assert.equal(data.people[3].group,'配角');
-const ungraded=structuredClone(report);
-ungraded.characters[0].role='身份尚待整理';ungraded.characters[0].importance='main';
-assert.equal(R.mountModel({},ungraded,options).people[0].group,'未分级','An uncontracted importance hint must not become a guessed role');
+const explicit=structuredClone(report),longRole='在旧港记录来往船只并见证众人选择的普通人'.repeat(4).slice(0,80);
+assert.equal(longRole.length,80);
+explicit.characters[0].role=longRole;explicit.characters[0].importance='main';
+explicit.characters[3].role='主要人物的导师';explicit.characters[3].importance='support';
+const explicitBefore=JSON.stringify(explicit),adapted=R.mountModel({},explicit,options);
+assert.equal(adapted.people[0].group,'主要人物');assert.equal(adapted.people[3].group,'配角');
+assert.equal(adapted.people[0].role,longRole);assert.equal(adapted.people[3].role,'主要人物的导师');
+assert.equal(JSON.stringify(explicit),explicitBefore,'Explicit importance must not rewrite any role or report field');
+for(const importance of [undefined,null])for(const [role,expected] of [
+ ['主要人物的导师','未分级'],['主要人物 · 旧版拼接身份','未分级'],['身份尚待整理','未分级'],
+ ['主要人物：旧港见证人','主要人物'],['配角:旧港记录员','配角'],['主角','主要人物']]){
+ const legacyRole=structuredClone(report);legacyRole.characters[0].role=role;legacyRole.characters[0].importance=importance;
+ const item=R.mountModel({},legacyRole,options).people[0];assert.equal(item.group,expected);assert.equal(item.role,role);
+}
+const precedence=structuredClone(report);
+precedence.characters[0].role='主要人物：导师';precedence.characters[0].importance='support';
+assert.equal(R.mountModel({},precedence,options).people[0].group,'配角');
+for(const invalid of ['MAIN','supporting','']){
+ precedence.characters[0].importance=invalid;
+ assert.equal(R.mountModel({},precedence,options).people[0].group,'未分级');
+}
 assert.equal(data.personEdges.length,3);assert.equal(data.personEdges[2].status,'inferred');
 assert.match(data.personEdges[1].body(),/Q1/);
 const layout=R.graphLayout(data.people,data.personEdges);

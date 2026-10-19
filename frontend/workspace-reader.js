@@ -8,7 +8,9 @@
   const statusLabels = {fact:'正文可证', reported:'人物说法', inferred:'分析推断', unknown:'尚未确定'};
   const badge = value => `<span class="analysis-badge is-${statusLabels[value] ? value : 'unknown'}">${statusLabels[value] || statusLabels.unknown}</span>`;
   const groups = ['主要人物', '配角', '未分级'];
-  const modelGroup = p => /^(主角|主要人物|主人公)(\s*[：:]|$)/u.test(p.role || '') ? groups[0]
+  const modelGroup = p => p.importance==='main' ? groups[0] : p.importance==='support' ? groups[1]
+    : p.importance!=null ? groups[2]
+    : /^(主角|主要人物|主人公)(\s*[：:]|$)/u.test(p.role || '') ? groups[0]
     : /^(配角|次要人物|实质配角)(\s*[：:]|$)/u.test(p.role || '') ? groups[1] : groups[2];
   const chapterLabel = e => e.chapter_end && e.chapter_end !== e.chapter_number ? `第 ${e.chapter_number}–${e.chapter_end} 章` : `第 ${e.chapter_number} 章`;
   const details = (title, body) => `<details class="analysis-details"><summary>${esc(title)}</summary><div class="analysis-details-body">${body}</div></details>`;
