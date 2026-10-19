@@ -116,6 +116,13 @@ async def run_report_job(runner, project, account):
                 return apply_source_revision(review, candidate, entries, bank, read_text, producer=job["model"], wire=wire)
             return apply_revision(review, candidate, bank, read_text, producer=job["model"])
 
+        def same_json(left, right):
+            # JSON bool/int/float distinctions matter for v2 provenance.
+            # Canonical hashes also tolerate harmless object-key reordering.
+            if wire == SOURCE_REPORT_V2_WIRE:
+                return object_hash(left) == object_hash(right)
+            return left == right  # Preserve historical wire behavior.
+
         def cached_response(key, schema):
             if wire != SOURCE_REPORT_V2_WIRE:
                 return job[key]
@@ -125,7 +132,7 @@ async def run_report_job(runner, project, account):
             if not isinstance(text, str):
                 raise ValueError("缓存缺少安全的原始响应")
             raw = dict(LLMRuntime._decode_json_object(text))
-            if raw != job[key]:
+            if not same_json(raw, job[key]):
                 raise ValueError("缓存原始文本与响应JSON不一致")
             schema.model_validate(raw, strict=True)
             return raw
@@ -170,7 +177,7 @@ async def run_report_job(runner, project, account):
                 # response separately from the normalized frozen draft/revision.
                 # This is decoding only, never patching a failed candidate.
                 response = dict(LLMRuntime._decode_json_object(answer.text))
-                if schema.model_validate(response, strict=True).model_dump(mode="json") != answer.data:
+                if not same_json(schema.model_validate(response, strict=True).model_dump(mode="json"), answer.data):
                     raise ValueError("原始响应与结构化结果不一致")
             # Persist a returned response even when the author paused during
             # HTTP. It can be validated on explicit resume without paying again.
@@ -200,13 +207,13 @@ async def run_report_job(runner, project, account):
                 values["draft_diagnostics"] = diagnostics
             update(values, before_save=guard)
         draft, diagnostics = prepare(job["draft"])
-        if wire == SOURCE_REPORT_V2_WIRE and draft != job["draft"]:
+        if wire == SOURCE_REPORT_V2_WIRE and not same_json(draft, job["draft"]):
             raise ValueError("冻结草稿不是本版本的规范化结果")
         if wire == SOURCE_REPORT_V2_WIRE:
             raw = cached_response("draft_response", source_report_model(wire))
-            if source_report_model(wire).model_validate(raw, strict=True).model_dump(mode="json") != draft:
+            if not same_json(source_report_model(wire).model_validate(raw, strict=True).model_dump(mode="json"), draft):
                 raise ValueError("冻结草稿与原始响应不一致")
-        if source_wire and diagnostics != job["draft_diagnostics"]:
+        if source_wire and not same_json(diagnostics, job["draft_diagnostics"]):
             raise ValueError("草稿诊断与冻结原稿不一致")
         if job["stage"] == "review":
             raw = await obtain("review", "review_response", ReportReview, REVIEW_MAX_TOKENS, draft=draft)
@@ -227,9 +234,9 @@ async def run_report_job(runner, project, account):
             update(dict(revised=revised, stage="verify"), before_save=guard)
         if job["stage"] == "verify":
             revised, _ = validate(job["revised"])
-            if wire == SOURCE_REPORT_V2_WIRE and revised != job["revised"]:
+            if wire == SOURCE_REPORT_V2_WIRE and not same_json(revised, job["revised"]):
                 raise ValueError("冻结修订不是本版本的规范化结果")
-            if wire == SOURCE_REPORT_V2_WIRE and revise(check_review(review_response(), draft), draft) != revised:
+            if wire == SOURCE_REPORT_V2_WIRE and not same_json(revise(check_review(review_response(), draft), draft), revised):
                 raise ValueError("冻结修订与原始审查不一致")
             raw = await obtain("verify", "verification_response", ReportVerification, VERIFY_MAX_TOKENS,
                                draft=revised, original=draft, revision=review_response())
@@ -245,7 +252,7 @@ async def run_report_job(runner, project, account):
             candidate = draft
             if isinstance(review, ReviewRevise):
                 candidate = revise(review, draft)
-                if candidate != job.get("revised"):
+                if not same_json(candidate, job.get("revised")):
                     raise ValueError("持久修订与审查不一致")
                 verdict = check_review(cached_response("verification_response", ReportVerification), candidate, final=True)
                 if not isinstance(verdict, ReviewAccept):

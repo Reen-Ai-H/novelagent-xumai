@@ -4,6 +4,7 @@ No historical manuscript/diagnostic is loaded. Older source/legacy contracts
 stay strict, and actual raw content remains distinct from normalized drafts.
 """
 from copy import deepcopy
+from dataclasses import replace
 import json
 import unittest
 from unittest.mock import patch
@@ -310,6 +311,75 @@ class SourceV2ApiTest(unittest.TestCase):
     def test_v2_raw_and_cached_json_mismatch_is_rejected_before_review(self):
         def corrupt(job): job["draft_response"]["characters"][0]["insights"][0]["title"] = "补充信息"
         self.reject_corrupt_cache(corrupt)
+
+    def test_cached_chapter_integer_cannot_be_substituted_with_boolean(self):
+        def corrupt(job):
+            raw = json.loads(job["draft_response_text"])
+            self.assertIs(type(raw["chapter_numbers"][0]), int)
+            job["draft_response"]["chapter_numbers"][0] = True
+            self.assertEqual(raw, job["draft_response"])  # Python's unsafe equality.
+            self.assertNotEqual(object_hash(raw), object_hash(job["draft_response"]))
+        self.reject_corrupt_cache(corrupt)
+
+    def test_cached_chapter_integer_cannot_be_substituted_with_float(self):
+        def corrupt(job):
+            raw = json.loads(job["draft_response_text"])
+            job["draft_response"]["chapter_numbers"][0] = 1.0
+            self.assertEqual(raw, job["draft_response"])
+            self.assertNotEqual(object_hash(raw), object_hash(job["draft_response"]))
+        self.reject_corrupt_cache(corrupt)
+
+    def test_cached_review_checked_chapter_integer_cannot_be_boolean(self):
+        def corrupt(job):
+            raw = json.loads(job["review_response_text"])
+            job["review_response"]["checked_chapters"][0] = True
+            self.assertEqual(raw, job["review_response"])
+            self.assertNotEqual(object_hash(raw), object_hash(job["review_response"]))
+        self.reject_corrupt_cache(corrupt, stage="adopt")
+
+    def test_cached_verification_integer_cannot_be_boolean(self):
+        def corrupt(job):
+            raw = acceptance(job["revised"])
+            job["verification_response_text"] = json.dumps(raw, ensure_ascii=False)
+            job["verification_response"] = deepcopy(raw)
+            job["verification_response"]["checked_chapters"][0] = True
+            self.assertEqual(raw, job["verification_response"])
+        self.reject_corrupt_cache(corrupt, stage="verify")
+
+    def test_actual_structured_data_boolean_mismatch_with_text_is_rejected(self):
+        case = self.case()
+        add_insight(case.draft)
+        original = case.runner._call
+        async def corrupt_data(*args, **kwargs):
+            answer = await original(*args, **kwargs)
+            data = deepcopy(answer.data)
+            data["chapter_numbers"][0] = True
+            self.assertEqual(data, answer.data)
+            return replace(answer, data=data)
+        with patch.object(case.runner, "_call", side_effect=corrupt_data):
+            case.start(); final = case.wait()
+        self.assertEqual((final["status"], final["error_code"]), ("failed", "report_evidence_invalid"), final)
+        self.assertEqual(len(case.calls), 1)
+        self.assertNotIn("draft", case.job())
+        case.unchanged()
+
+    def test_raw_cache_object_key_reordering_is_safe_but_array_order_is_not(self):
+        case = self.case()
+        add_insight(case.draft)
+        with case.checkpoint("review"):
+            case.start(); self.assertEqual(case.wait()["status"], "paused")
+        job = case.job()
+        raw = deepcopy(job["draft_response"])
+        job["draft_response"] = dict(reversed(list(raw.items())))
+        self.assertEqual(object_hash(raw), object_hash(job["draft_response"]))
+        changed_order = deepcopy(raw)
+        changed_order["chapter_numbers"].reverse()
+        self.assertNotEqual(object_hash(raw), object_hash(changed_order))
+        case.runner.save(job)
+        case.start(); final = case.wait()
+        self.assertEqual(final["status"], "completed", final)
+        self.assertEqual(len(case.calls), 2)
+        self.assertEqual(case.independent.store.load(case.project).model_dump(mode="json"), case.old_author)
 
     def test_frozen_normalized_facts_cannot_diverge_from_actual_raw(self):
         def corrupt(job): job["draft"]["characters"][0]["role"] = "另一种身份"

@@ -430,7 +430,8 @@ def _review_sources(refs, entries, bank, read_text):
 def validate_source_review(data, draft, entries, bank, read_text, *, final=False, wire=SOURCE_REPORT_WIRE):
     check_source_entries(entries, bank, read_text)
     if wire == SOURCE_REPORT_V2_WIRE:
-        if source_report_model(wire).model_validate(draft, strict=True).model_dump(mode="json") != draft:
+        normalized = source_report_model(wire).model_validate(draft, strict=True).model_dump(mode="json")
+        if object_hash(normalized) != object_hash(draft):
             raise ValueError("审查对象必须是同版本的规范化草稿")
     else:
         source_report_model(wire)
