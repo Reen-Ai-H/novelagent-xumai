@@ -100,10 +100,33 @@ class SourceInsight(SourceDetail):
 
 
 SourceCharacterV2 = _source_model("SourceCharacterV2", SourceCharacter, insights=list[SourceInsight])
+
+
+def _v2_field(key, description):
+    # Guidance only: copy every old field constraint/default unchanged. Never
+    # mutate a shared FieldInfo or make these descriptions into new validators.
+    field = deepcopy(SourceReportDraft.model_fields[key])
+    field.description = description
+    return field
+
+
 SourceReportDraftV2 = create_model("SourceReportDraftV2", __base__=SourceReportDraft,
     __doc__=SourceReportDraft.__doc__ + "\n编号限制仅针对编号冲突，不禁止其他schema结构修复。"
-                                     "仅source-report-v2人物insights缺title时使用补充信息；其他标题仍必填。",
-    characters=(list[SourceCharacterV2], deepcopy(SourceReportDraft.model_fields["characters"])))
+        "仅source-report-v2人物insights缺title时使用补充信息；其他标题仍必填。"
+        "\n先建立characters、participants和events，再填写两类边。relations只连接events.id及所属事件的合法动作路径，"
+        "不连接characters/participants；character_relations只连接characters.id及同向人物Claim。人物身份揭示不是事件边。"
+        "选择直接必要有源机制，不两两枚举或补传递闭包；同键多机制合并保留事实，不固定截断节点或边。"
+        "\nstatus仅fact/reported/inferred/unknown；phase仅actual/planned/requested/negated/unknown。"
+        "planned绝不能填status，不能由程序映射成fact。",
+    characters=(list[SourceCharacterV2], _v2_field("characters", "先建立有据人物，供人物关系引用；人物ID不能作为relations的事件端点。")),
+    participants=(list[SourceParticipant], _v2_field("participants", "先建立未上卡的有据个体；参与者ID不能作为两类图谱的端点。")),
+    events=(list[SourceEvent], _v2_field("events", "先建立事件及其action/consequence/sub_events，供relations引用；不要用人物ID代替事件ID。")),
+    relations=(list[SourceRelation], _v2_field("relations", "from_id/to_id只选events.id，不能选characters/participants。"
+        "from_action/to_action分别属于各自事件，格式EventId.action、EventId.consequence或EventId.sub_events.索引。"
+        "人物身份揭示不是事件边；只选直接必要有源机制，不两两枚举或补传递闭包，同一(from_id,to_id,kind)多机制合并保留事实。")),
+    character_relations=(list[SourceCharacterRelation], _v2_field("character_relations", "from_id/to_id只选characters.id，不能选events/participants。"
+        "action_ref指向已有有向人物Claim，其subject/object与两端同向；人物身份关系不能冒充relations事件边。"
+        "不两两枚举或补传递闭包，同一(from_id,to_id,label)多机制合并保留事实。")))
 
 
 def source_report_model(wire=SOURCE_REPORT_WIRE):
