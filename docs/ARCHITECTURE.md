@@ -4,6 +4,8 @@
 
 叙脉是 FastAPI + 原生 HTML/CSS/JavaScript 的本地开发版。`main.py` 创建应用、挂载静态前端、注册新 API 与旧 `/novel` 兼容路由，并在生命周期内启动可恢复的后台 AI worker。当前实现不是生产部署，也没有云端同步、支付或管理员平面。
 
+阶段38新请求来源协议已决定、待实现，见[来源合同](STAGE_38_SOURCE_REPORT_CONTRACT.md)：私有版本化SourceReportDraft与冻结短来源目录，唯一有界核对处理可定位草稿问题，最终确定性装配并完整严格验证。公开报告和旧任务合同不变，不迁移旧失败候选；部署状态以PROGRESS为准。
+
 ## 分层
 
 ```text

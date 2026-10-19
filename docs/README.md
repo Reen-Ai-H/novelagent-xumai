@@ -6,6 +6,8 @@ Notion使用独立“验收状态”（未验收/验收未通过/已通过）及
 
 历史基线：[阶段37](goals/STAGE_37_USABLE_WORKSPACE.md)正式分章和A版分层进入阶段38；[章级事实预览](STAGE_37_CHAPTER_PREVIEW_CONTRACT.md)曾通过免费门禁，但六章与单章实跑未通过，失败记录保留。当前正常入口改为report-v2，旧章级流程仅兼容，不以历史工程通过替代实稿质量。
 
+新请求的[来源引用合同](STAGE_38_SOURCE_REPORT_CONTRACT.md)已决定、待实现：服务器冻结短来源目录，模型不重复声明证据表；可定位草稿问题交唯一一次核对，最终严格校验不变。旧任务和旧失败候选不迁移采用。
+
 网页端接手见 [CODEX_WEB_HANDOFF](CODEX_WEB_HANDOFF.md)：从阶段38最新远端候选继续，尚未合并到`main`；本机私人材料不随Git上传。
 
 > 继承基线为 [阶段 36 · 工作台减法与结构化阅读](goals/STAGE_36_VISUAL_READING.md)。用户认可主配区分，不代表界面和导入已验收。研究依据见[图形阅读设计](research/STAGE_36_VISUAL_READING_2026-10-13.md)。
