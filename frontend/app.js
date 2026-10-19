@@ -3048,6 +3048,7 @@
       state.deconstructionGuideMode = true;
       state.analysisView = null;
       setDeconstructionSectionCurrent("guide");
+      renderReportWorkflow();
       elements.deconstructionStatusPill.textContent = "全书导读";
       elements.deconstructionStatusPill.className = "deconstruction-status-pill is-completed";
       const volumeBar = renderDeconstructionVolumeBar(state.deconstructionWorkspace || {});
