@@ -162,6 +162,51 @@ class SourceReportDraftV3(SourceReportDraftV2):
     participants: list[SourceParticipant] = Field(max_length=100,
         description="仅实际Claim的subject_id/object_id引用且不上卡的有据个体；名字声明或正文提及不算引用，不凑上限。")
 
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        # Export-only guidance: shared FieldInfo, validators and old wires stay
+        # untouched. The per-call repair subclass inherits this same exporter.
+        schema = deepcopy(super().model_json_schema(*args, **kwargs))
+        name_source = (
+            "所选来源须至少一段字面包含name的原称谓；编号有效和同一性有据不能替代字面命中，"
+            "字面命中本身也不证明同一性。")
+        holder = (
+            "kind为knowledge/feeling时subject_id不可为null，须指向原文实际持有者。"
+            "在characters的人物分析字段中，主张必须关于本人，知情/情感主体必须本人。"
+            "先从原文纠正主张主体，不用‘本人的卡片’替代真正行动者。")
+        descriptions = {
+            "SourceCharacterV3": {"name_source_ids": name_source},
+            "SourceParticipant": {"name_source_ids": name_source},
+            "SourceAliasBasis": {"source_ids":
+                "所选来源须至少一段字面包含本项name的原称谓；编号有效和同一性有据不能替代字面命中，"
+                "字面命中本身也不证明同一性；须与aliases逐项对应。"},
+            "SourceDraftClaim": {"subject_id": holder},
+            "SourceFinding": {"subject_id": holder},
+            "SourceDetail": {"subject_id": holder},
+            "SourceInsightV3": {"subject_id": holder},
+            "SourceEvent": {"actor_ids":
+                "令P为已建卡人物，S/O为本事件action、consequence、sub_events的结构主体/客体并集："
+                "S∩P ⊆ actor_ids ⊆ (S∪O)∩P且不得重复。文字提及不代替结构引用；"
+                "应回读并完整表达真实参与和必要经历，不机械清名单、错绑主体或把主角藏到背景凑过关。"},
+            "SourceRelation": {
+                "from_id": "仅events.id；from_action须属于此事件，不用人物ID代替。",
+                "to_id": "仅events.id；to_action须属于此事件，不用人物ID代替。",
+                "from_action": "须属于from_id事件：EventId.action、EventId.consequence或EventId.sub_events.索引。",
+                "to_action": "须属于to_id事件：EventId.action、EventId.consequence或EventId.sub_events.索引。",
+                "status": "fact须以两端所引Claim均为fact为前提，不升格推断/传闻。",
+                "basis": "cause/purpose须以两端所引Claim的phase均为actual为前提，不把计划、请求或否定当实际因果。"},
+            "SourceCharacterRelation": {
+                "from_id": "仅characters.id，须为action_ref所引Claim的subject_id。",
+                "to_id": "仅characters.id，须为action_ref所引Claim的object_id，方向不得反转。",
+                "action_ref": "须定位非null有向Claim，其subject_id/object_id与from_id/to_id同向；来源须与本边有交集。",
+                "source_ids": "须与action_ref所引Claim的source_ids至少有一项交集；编号有效不代替原文支持。",
+                "status": "fact须以action_ref所引Claim为fact为前提，不升格推断/传闻；仍须核对计划、请求与实际的区别。"},
+        }
+        for model, fields in descriptions.items():
+            for field, description in fields.items():
+                schema["$defs"][model]["properties"][field]["description"] = description
+        return schema
+
 
 def source_report_model(wire=SOURCE_REPORT_WIRE):
     if wire == SOURCE_REPORT_WIRE:

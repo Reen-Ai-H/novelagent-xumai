@@ -19,3 +19,5 @@ events按同一故事时段、情境与行动目标组织，不逐句或逐章�
 relations只连接events.id，from_action/to_action须是各自事件内EventId.action、EventId.consequence或EventId.sub_events.索引；人物身份不能直接作事件边。basis=cause/purpose/before/reveal/echo对应kind=causes/enables/follows/reveals/foreshadow_payoff。原因指向结果，手段指向实际目的实现；计划/请求/否定不能作已发生因果，先后不冒充目的，归返不代替此前出发，同一次经历不造“后来”的echo。证据支持具体机制及重要制度/利益前因，不能只证明端点存在。有据order_constraints与关系不得成环或倒置story_order。
 
 character_relations只连接characters.id，action_ref定位非null有向Claim，subject/object必须与from_id/to_id同向且有对应来源；单方情感不反向共享，同场不推成亲属/敌友。两类边都无独立id，只选直接必要有源机制，不两两枚举或补传递闭包；同一合法键多机制合并保留重要事实及限定，不固定截断节点/边，不删有效关系减量。来源、人物同一性、方向与时序均须回读原文，结构合格不代表语义成立。
+
+输出前依次自检：称谓来源及真实主体→事件名单→边的方向/来源/状态。姓名/别名的来源须至少一段字面包含对应原称谓；编号有效和同一性有据不能替代字面命中，字面命中本身也不证明同一性。kind为knowledge/feeling时subject_id不可为null，须指向原文实际持有者。在characters的人物分析字段中，主张必须关于本人，知情/情感主体必须本人。先从原文纠正主张主体，不用“本人的卡片”替代真正行动者。令P为已建卡人物，S/O为本事件action、consequence、sub_events的结构主体/客体并集：S∩P ⊆ actor_ids ⊆ (S∪O)∩P且不得重复。文字提及不代替结构引用；应回读并完整表达真实参与和必要经历，不机械清名单、错绑主体或把主角藏到背景凑过关。核对事件边动作各属其事件；人物边Claim非null、端点同向且来源有交集；fact边须有fact依据，cause/purpose两端须actual，不升格推断/传闻、计划和请求。
