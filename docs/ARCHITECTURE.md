@@ -2,6 +2,8 @@
 
 ## 现状边界
 
+10/22实施中的[新稀疏合同](STAGE_38_SPARSE_ANALYSIS_CONTRACT.md)采用显式私有`source-report-v3`、公开schema `2`与`model.2`包络。只在新版本允许人物motivation/change为null，identity仍严格；participants必须被事实主张端点实际引用。版本分流贯穿生成、缓存、最终采用、持久读取、导读和导出导入，不能拓宽旧公共基础Character。空字段不能成为有效动作路径，修订仍绑定原值hash。当前运行仍为下方v2候选，工程与真实效果尚待验证。
+
 叙脉是 FastAPI + 原生 HTML/CSS/JavaScript 的本地开发版。`main.py` 创建应用、挂载静态前端、注册新 API 与旧 `/novel` 兼容路由，并在生命周期内启动可恢复的后台 AI worker。当前实现不是生产部署，也没有云端同步、支付或管理员平面。
 
 阶段38采用私有版本化SourceReportDraft与冻结短来源目录，见[来源合同](STAGE_38_SOURCE_REPORT_CONTRACT.md)：唯一有界核对处理可定位草稿问题，最终确定性装配并完整严格验证。新任务v2仅将缺省人物经历标题规范化为固定展示标签；原始响应与规范化草稿分别保留，hash及恢复按同版本核验。公开报告和旧任务合同不变，不迁移旧失败候选；审查及部署状态以PROGRESS为准。
