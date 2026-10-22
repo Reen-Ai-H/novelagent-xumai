@@ -104,7 +104,7 @@ class Stage31CDeconstructionFrontendContractTest(unittest.TestCase):
         self.assertIn('evidence.offsetUnit === DECONSTRUCTION_OFFSET_UNIT', self.app_source)
         self.assertIn("evidence.charStart >= 0", self.app_source)
         self.assertIn("evidence.charEnd <= content.length", self.app_source)
-        self.assertIn("章节级回看", self.app_source)
+        self.assertIn("仅可回看章节", self.app_source)
         self.assertNotIn("|| version?.chapters?.find((item) => evidence.chapterNumber", self.app_source)
 
     def test_status_actions_follow_server_capabilities(self) -> None:

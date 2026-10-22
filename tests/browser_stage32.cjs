@@ -105,7 +105,7 @@ async function oneViewport(browser, width) {
     await currentEvidenceButton.click();
     await page.locator('#deconstructionEvidenceDialog[open]').waitFor();
     await page.locator('.deconstruction-evidence-dialog-card.is-current').waitFor();
-    assert.equal(await page.locator('#deconstructionEvidenceTitle').textContent(), '证据回链');
+    assert.equal(await page.locator('#deconstructionEvidenceTitle').textContent(), '原文回看');
     assert.equal(await page.locator('#locateDeconstructionEvidenceButton').isEnabled(), true);
     await page.locator('#locateDeconstructionEvidenceButton').click();
     await page.locator('#chapterEditor').waitFor({state: 'visible'});
@@ -190,7 +190,7 @@ async function oneViewport(browser, width) {
     await staleEvidenceButton.click();
     await stalePage.locator('#deconstructionEvidenceDialog[open]').waitFor();
     await stalePage.locator('.deconstruction-evidence-dialog-card.is-historical').waitFor();
-    assert.equal(await stalePage.locator('#deconstructionEvidenceTitle').textContent(), '历史证据回链');
+    assert.equal(await stalePage.locator('#deconstructionEvidenceTitle').textContent(), '历史原文');
     assert.equal(await stalePage.locator('#locateDeconstructionEvidenceButton').isDisabled(), true);
     await stalePage.close();
     await layout(page, width, 'rebuilt');
