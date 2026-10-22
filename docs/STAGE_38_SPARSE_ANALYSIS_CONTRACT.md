@@ -2,6 +2,8 @@
 
 状态：2026-10-22已集成，工程复核及真实效果状态以PROGRESS为准，尚未验证真实生成效果。继承[来源合同](STAGE_38_SOURCE_REPORT_CONTRACT.md)，仅以下显式新版本不同。
 
+10/23增量仅澄清模型可见的v3字段职责，见DECISIONS：姓名来源字面命中、主张实际持有者、事件名单与结构主客体的对应、边方向/来源/状态。导出schema只增加description，不修改数据接受集合；不提高诊断/修订边界、不改旧schema和旧失败候选。
+
 ## 版本与数据
 
 - source-report-v3：人物motivation/change键必填，值为严格SourceDraftClaim或null；identity不可空。其余字段约束继承v2。人物insights展示标题的既有缺省继续保留真实原文响应。
