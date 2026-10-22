@@ -1,5 +1,7 @@
 # 叙脉架构说明
 
+10/23实施中的[派生索引合同](STAGE_38_DERIVED_ACTORS_CONTRACT.md)为新任务引入source-report-v4：私有事件不再含actor_ids，最终严格投影从Claim主客体生成公共索引；raw/规范稿/hash保持无派生字段。公共schema2/model.2、旧wire、来源/恢复/预算与最终完整校验不变，尚未集成或验证真实效果。
+
 ## 现状边界
 
 10/22实施中的[新稀疏合同](STAGE_38_SPARSE_ANALYSIS_CONTRACT.md)采用显式私有`source-report-v3`、公开schema `2`与`model.2`包络。只在新版本允许人物motivation/change为null，identity仍严格；participants必须被事实主张端点实际引用。版本分流贯穿生成、缓存、最终采用、持久读取、导读和导出导入，不能拓宽旧公共基础Character。空字段不能成为有效动作路径，修订仍绑定原值hash。当前运行仍为下方v2候选，工程与真实效果尚待验证。
