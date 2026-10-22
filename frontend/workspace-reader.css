@@ -21,6 +21,17 @@
 .independent-screen .chapter-list-copy strong { font-size:.9rem; line-height:1.6; color:inherit; }
 .independent-screen .chapter-list-copy small { display:none; }
 .independent-screen .chapter-list-number { color:inherit; }
+/* Desktop manuscript spine: give the chapter list the vertical space first.
+   Preserve the A typography, account footer and existing mobile disclosure. */
+@media (min-width:701px) {
+  .independent-screen .editor-brand { min-height:78px; padding-block:14px; }
+  .independent-screen .editor-spine-links .spine-link { min-height:44px; padding-block:9px; }
+  .independent-screen .editor-spine .chapter-column { margin-top:12px; }
+  .independent-screen .chapter-column-head { padding-block:8px; }
+  .independent-screen .chapter-management { margin-bottom:6px; }
+  .independent-screen .chapter-management summary { padding-block:6px; }
+  .independent-screen .chapter-list-item { min-height:44px; padding-block:8px; }
+}
 .independent-screen .editor-main { padding:0; max-width:none; }
 .independent-screen .editor-header { flex-direction:row; padding:18px 32px; gap:16px; margin:0; min-height:82px; border-bottom:1px solid var(--line); }
 .independent-screen .editor-heading h1 { display:none; }
