@@ -190,6 +190,25 @@ class SourceV3ContractTest(unittest.TestCase):
         for wire in (SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE):
             self.assertIs(source_response_model(wire), source_report_model(wire))
 
+    def test_stable_id_claim_protection_does_not_require_a_string_name(self):
+        original = sparse_case(nulls=False)[0]
+        for name in (None, False, 7, [], {}):
+            for field in ("motivation", "change"):
+                with self.subTest(name=name, field=field):
+                    first = deepcopy(original)
+                    first["characters"][0]["name"] = name
+                    cleared = deepcopy(original)
+                    cleared["characters"][0][field] = None
+                    guard = source_response_model(SOURCE_REPORT_V3_WIRE)
+                    with self.assertRaises(ValidationError):
+                        guard.model_validate(first, strict=True)
+                    with self.assertRaisesRegex(ValidationError, "格式修复不能清空"):
+                        guard.model_validate(cleared, strict=True)
+                    control = source_response_model(SOURCE_REPORT_V3_WIRE)
+                    with self.assertRaises(ValidationError):
+                        control.model_validate(first, strict=True)
+                    self.assertEqual(control.model_validate(original, strict=True).model_dump(mode="json"), original)
+
     def test_participants_name_declaration_or_text_mention_is_not_claim_use(self):
         draft, bank, texts, entries = with_background()
         draft["characters"][0]["identity"]["text"] += "程伯与陈姨也出现在原文。"
@@ -516,6 +535,54 @@ class SourceV3ApiTest(unittest.TestCase):
         self.assertEqual(len(records), 2)
         self.assertTrue(all(r["status"] == "settled" for r in records))
         case.unchanged()
+
+    def test_missing_name_format_repair_cannot_clear_stable_id_claim(self):
+        for field in ("motivation", "change"):
+            with self.subTest(field=field):
+                case = self.case(nulls=False)
+                original = deepcopy(case.draft)
+                first = deepcopy(original)
+                del first["characters"][0]["name"]
+                before = deepcopy(first)
+                repaired = deepcopy(original)
+                repaired["characters"][0][field] = None
+                case.scripted([first, repaired, lambda: acceptance(case.job()["draft"])])
+                case.start(); final = case.wait()
+                self.assertEqual((final["status"], final["error_code"]), ("failed", "provider_bad_json"), final)
+                self.assertEqual(len(case.calls), 2)
+                previous = json.loads(case.calls[1]["messages"][-1]["content"])["untrusted_previous_output"]
+                self.assertEqual(json.loads(previous), before)
+                self.assertEqual(first, before)
+                self.assertEqual(case.draft, original)
+                self.assertNotIn("draft", case.job())
+                self.assertNotIn("review_response", case.job())
+                self.assertNotIn("verification_response", case.job())
+                self.assertEqual(case.job()["budget"]["calls"], 2)
+                case.unchanged()
+                case.doCleanups()
+
+    def test_missing_name_format_repair_only_restores_name_and_preserves_claims(self):
+        case = self.case(nulls=False)
+        original = deepcopy(case.draft)
+        first = deepcopy(original)
+        del first["characters"][0]["name"]
+        before = deepcopy(first)
+        case.scripted([first, original, lambda: acceptance(case.job()["draft"])])
+        case.start(); final = case.wait()
+        self.assertEqual((final["status"], final["total"]), ("completed", 2), final)
+        self.assertEqual(len(case.calls), 3)
+        self.assertEqual(first, before)
+        self.assertEqual(case.job()["draft_response"], original)
+        self.assertEqual(case.job()["draft"], original)
+        self.assertEqual(json.loads(case.job()["draft_response_text"]), original)
+        self.assertNotIn("revised", case.job())
+        self.assertNotIn("verification_response", case.job())
+        person = case.client.get(case.url).json()["result"]["report"]["characters"][0]
+        self.assertEqual(person["id"], original["characters"][0]["id"])
+        for field in ("motivation", "change"):
+            self.assertIsNotNone(person[field])
+            self.assertEqual(person[field]["text"], original["characters"][0][field]["text"])
+        self.assertEqual(case.independent.store.load(case.project).model_dump(mode="json"), case.old_author)
 
     def test_format_repair_cannot_clear_sourced_claim_with_missing_action_annotation(self):
         case = self.case(nulls=False)

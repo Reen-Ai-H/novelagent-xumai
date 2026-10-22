@@ -192,8 +192,7 @@ def source_response_model(wire):
         people = [p for p in value["characters"] if isinstance(p, dict)]
         ids.update(p["id"] for p in people if isinstance(p.get("id"), str))
         for person in people:
-            if not isinstance(person.get("name"), str):
-                continue
+            name = person["name"].strip() if isinstance(person.get("name"), str) else None
             for field in ("motivation", "change"):
                 claim = person.get(field)
                 if not isinstance(claim, dict):
@@ -207,9 +206,13 @@ def source_response_model(wire):
                     continue
                 # Names are only exact repair anchors, never aliases or entity
                 # inference. Counts preserve separate same-name individuals.
-                counts[(person["name"].strip(), field)] += 1
+                if name is not None:
+                    counts[(name, field)] += 1
                 if isinstance(person.get("id"), str) and ids[person["id"]] == 1:
-                    anchors[(person["id"], field)] = person["name"].strip()
+                    # A unique ID protects the Claim even when name is the
+                    # schema defect. None marks unavailable name metadata,
+                    # not an absent Claim; membership must be checked below.
+                    anchors[(person["id"], field)] = name
         return counts, anchors, ids
 
     def preserve_analysis(cls, value):
@@ -221,7 +224,9 @@ def source_response_model(wire):
             prior_counts, prior_anchors = protected
             # Stable IDs prevent shuffling null between same-name people. An
             # explicitly repaired ID still has the exact-name count backstop.
-            lost = any(key[0] in ids and anchors.get(key) != name for key, name in prior_anchors.items())
+            lost = any((key[0] in ids or name is None)
+                       and (key not in anchors or (name is not None and anchors[key] != name))
+                       for key, name in prior_anchors.items())
             if lost or prior_counts - counts:
                 raise ValueError("格式修复不能清空已有分析主张，须经有源修订和终审")
         return value
