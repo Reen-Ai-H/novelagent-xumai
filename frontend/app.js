@@ -3497,10 +3497,10 @@
   }
 
   function renderDeconstructionEvidenceLoading() {
-    elements.deconstructionEvidenceTitle.textContent = "正在读取证据";
-    elements.deconstructionEvidenceContent.innerHTML = `<div class="deconstruction-evidence-dialog-loading" role="status">正在从服务端读取这条证据……</div>`;
+    elements.deconstructionEvidenceTitle.textContent = "正在读取原文";
+    elements.deconstructionEvidenceContent.innerHTML = `<div class="deconstruction-evidence-dialog-loading" role="status">正在读取原文……</div>`;
     elements.locateDeconstructionEvidenceButton.disabled = true;
-    elements.locateDeconstructionEvidenceButton.textContent = "等待证据校验";
+    elements.locateDeconstructionEvidenceButton.textContent = "读取中";
   }
 
   function renderDeconstructionEvidenceDialog(payload, fallbackEvidence = null, current = false, reason = "") {
@@ -3531,23 +3531,23 @@
       && evidence.charEnd !== null
       && evidence.charEnd >= evidence.charStart,
     );
-    elements.deconstructionEvidenceTitle.textContent = sourceIsCurrent ? "证据回链" : "历史证据回链";
-    elements.deconstructionEvidenceContent.innerHTML = `<article class="deconstruction-evidence-dialog-card ${sourceIsCurrent ? "is-current" : "is-historical"}"><div class="depth-card-topline"><span class="depth-card-label">${sourceIsCurrent ? "当前稿本 · 只读" : "历史稿本 · 只读"}</span><span class="mono">${chapterNumber === null ? "章节待定位" : `第 ${escapeHtml(chapterNumber)} 章`}</span></div><h3>${escapeHtml(evidence?.label || "正文证据")}</h3><p class="deconstruction-evidence-dialog-chapter">${escapeHtml(chapterTitle)}</p>${evidence?.excerpt ? `<blockquote>“${escapeHtml(evidence.excerpt)}”</blockquote>` : `<p class="depth-empty-note">这条证据只提供章节级定位，没有保留正文片段。</p>`}<dl class="depth-fact-list"><div><dt>定位精度</dt><dd>${precise ? "UTF-16 字符位移已校验" : "章节级回看"}</dd></div>${precise ? `<div><dt>字符范围</dt><dd>${escapeHtml(`${evidence.charStart}–${evidence.charEnd}`)} · UTF-16 code unit</dd></div>` : ""}<div><dt>回看边界</dt><dd>${sourceIsCurrent ? "仅可定位到当前稿本，不会改写正文" : "历史来源只读，不跳转当前同编号章节"}</dd></div></dl>${reason ? `<p class="depth-evidence-reason">${escapeHtml(reason)}</p>` : ""}</article>`;
+    elements.deconstructionEvidenceTitle.textContent = sourceIsCurrent ? "原文回看" : "历史原文";
+    elements.deconstructionEvidenceContent.innerHTML = `<article class="deconstruction-evidence-dialog-card ${sourceIsCurrent ? "is-current" : "is-historical"}"><div class="depth-card-topline"><span class="depth-card-label">${sourceIsCurrent ? "当前稿本" : "历史稿本 · 只读"}</span><span class="mono">${chapterNumber === null ? "章节待定位" : `第 ${escapeHtml(chapterNumber)} 章`}</span></div><h3>${escapeHtml(chapterTitle)}</h3>${evidence?.excerpt ? `<blockquote>“${escapeHtml(evidence.excerpt)}”</blockquote>` : `<p class="depth-empty-note">未保留原句，仅可回看章节。</p>`}${reason ? `<p class="depth-evidence-reason">${escapeHtml(reason)}</p>` : ""}</article>`;
     elements.locateDeconstructionEvidenceButton.disabled = !precise;
-    elements.locateDeconstructionEvidenceButton.textContent = precise ? "在当前正文中定位" : "当前仅可章节级回看";
-    elements.locateDeconstructionEvidenceButton.title = precise ? "按 UTF-16 字符位移在当前稿本定位" : "历史或章节级证据不能定位当前正文";
+    elements.locateDeconstructionEvidenceButton.textContent = precise ? "在正文中定位" : sourceIsCurrent ? "仅可回看章节" : "历史稿本不可定位";
+    elements.locateDeconstructionEvidenceButton.title = precise ? "在正文中选中原句" : sourceIsCurrent ? "这条引用暂不能在正文中定位" : "历史稿本只读，不能定位当前正文";
     if (historicalContent !== null) {
       elements.deconstructionEvidenceContent.insertAdjacentHTML('beforeend', '<section class="historical-source"><h3>来源旧稿</h3><textarea readonly aria-label="历史来源正文" spellcheck="false"></textarea></section>');
       const source = elements.deconstructionEvidenceContent.querySelector('.historical-source textarea');
       source.value = historicalContent;
       if (historicalSpan) window.XumaiChapterSections?.locate(source, {start:evidence.charStart,end:evidence.charEnd}, historicalContent);
-      elements.locateDeconstructionEvidenceButton.textContent = '历史来源仅供只读查看';
+      elements.locateDeconstructionEvidenceButton.textContent = '历史稿本不可定位';
     }
     state.pendingEvidence = sourceIsCurrent && evidence ? { ...evidence, projectId: state.deconstructionProjectId } : null;
   }
 
   function showHistoricalDeconstructionEvidence(payload, reason) {
-    renderDeconstructionEvidenceDialog(payload, null, false, reason || "来源版本、修订号或哈希未通过校验；当前页面只保留章节级回看。");
+    renderDeconstructionEvidenceDialog(payload, null, false, reason || "这条引用的来源与当前稿本不一致，暂不能定位。");
     openDeconstructionEvidenceDialog();
   }
 
@@ -3569,8 +3569,8 @@
     } catch (error) {
       if (requestToken !== state.deconstructionEvidenceRequestToken) return;
       state.pendingEvidence = null;
-      elements.deconstructionEvidenceTitle.textContent = "证据暂时读不到";
-      elements.deconstructionEvidenceContent.innerHTML = `<p class="depth-evidence-reason">${escapeHtml(error.message || "证据回链读取失败，请稍后重试。")} </p><button type="button" class="button button-outline" data-action="open-deconstruction-evidence" ${deconstructionEvidenceAttributes(clickedEvidence)}>重新读取证据</button>`;
+      elements.deconstructionEvidenceTitle.textContent = "原文暂时读不到";
+      elements.deconstructionEvidenceContent.innerHTML = `<p class="depth-evidence-reason">${escapeHtml(error.message || "原文读取失败，请稍后重试。")} </p><button type="button" class="button button-outline" data-action="open-deconstruction-evidence" ${deconstructionEvidenceAttributes(clickedEvidence)}>重新读取</button>`;
       elements.locateDeconstructionEvidenceButton.disabled = true;
       return;
     }
@@ -3588,7 +3588,7 @@
       && endpointIsCurrent;
     if (!precondition) {
       state.pendingEvidence = null;
-      showHistoricalDeconstructionEvidence(endpoint, current.sourceMatch ? "这条证据的文档、来源版本、修订号或哈希未通过校验。" : "当前正文已经变化，这条证据属于历史稿本。");
+      showHistoricalDeconstructionEvidence(endpoint, current.sourceMatch ? "这条引用与当前稿本不一致，暂不能定位。" : "正文已变化，当前显示历史稿本。");
       return;
     }
     state.deconstructionWorkspace = current;
@@ -3602,7 +3602,7 @@
     const current = state.deconstructionWorkspace;
     if (!deconstructionEvidenceMatchesSource(current, evidence, current?.result)) {
       closeDeconstructionEvidenceDialog();
-      setWorkspaceNotice(elements.deconstructionNotice, "当前正文已经变化，这条证据只保留章节级回看。", "red");
+      setWorkspaceNotice(elements.deconstructionNotice, "正文已变化，暂不能定位这条引用。", "red");
       return;
     }
     closeDeconstructionEvidenceDialog({ clear: false });
@@ -3634,7 +3634,7 @@
       : null;
     if (!chapter) {
       state.pendingEvidence = null;
-      setEditorNotice("已回到正文，但来源稿本已经变化；当前只保留章节级回看。", "red");
+      setEditorNotice("已回到正文，但来源稿本已变化，未定位原句。", "red");
       return;
     }
     state.activeChapterId = chapter.chapter_id;
@@ -3661,13 +3661,13 @@
       elements.chapterEditor.focus({ preventScroll: true });
     }
     const anchorText = excerptMatches
-      ? `已按 UTF-16 字符位移选择正文中的第 ${evidence.charStart}–${evidence.charEnd} 位。`
+      ? "已选中原句。"
       : sourceStillMatches
         ? evidence.excerpt
-          ? "正文片段与证据摘录不一致，已降级为章节级回看。"
-          : "当前证据未提供正文片段，已降级为章节级回看。"
-        : "证据来自另一稿本，当前只保留章节级回看。";
-    setEditorNoticeHtml(`<strong>已回到来源证据。</strong> 第 ${chapter.chapter_number} 章 · ${escapeHtml(anchorText)}${evidence.excerpt ? `<span class="editor-evidence-excerpt">“${escapeHtml(evidence.excerpt)}”</span>` : ""}`, "blue");
+          ? "原句与正文不一致，已打开来源章节。"
+          : "未提供原句，已打开来源章节。"
+        : "来源稿本已变化，未定位原句。";
+    setEditorNoticeHtml(`<strong>第 ${chapter.chapter_number} 章</strong> · ${escapeHtml(anchorText)}`, "blue");
     state.pendingEvidence = null;
   }
 
