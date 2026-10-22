@@ -1235,7 +1235,7 @@
       elements.archiveDrawerTitle.textContent = "最新状态";
       const data = state.editorAnalysis;
       const result = data?.projectId === state.editorProjectId && data.sourceMatch && data.effectiveStatus === "completed" && !state.editorDirty ? data.result : null;
-      const report = result?.analysisContractVersion === "model.1" ? result.report : null;
+      const report = isModelAnalysisContract(result?.analysisContractVersion) ? result.report : null;
       const depth = result?.depthReport;
       const counts = depth
         ? [["人物", depth.characters.characters.length, "characters"], ["剧情事件", depth.plot.events.length, "plot"], ["伏笔", depth.foreshadowing.threads.length, "foreshadowing"], ["正文证据", depth.evidence.length, "overview"]]
@@ -2249,8 +2249,26 @@
     };
   }
 
-  function isModelAnalysisReport(report) {
+  function isModelAnalysisContract(version) {
+    return version === "model.1" || version === "model.2";
+  }
+
+  function isModelAnalysisReport(report, version = "model.1") {
     if (!report || typeof report !== "object") return false;
+    if (version === "model.2") {
+      if (report.schema_version !== "2" || report.report_version !== undefined) return false;
+      if (!["characters", "events", "evidence", "chapter_numbers"].every(key => Array.isArray(report[key]))) return false;
+      const evidenceIds = new Set(report.evidence.map(item => item.id));
+      const sourcedClaim = claim => claim && typeof claim === "object" && !Array.isArray(claim)
+        && typeof claim.text === "string" && claim.text.trim().length > 0
+        && ["fact", "reported", "inferred", "unknown"].includes(claim.status)
+        && Array.isArray(claim.evidence_ids) && claim.evidence_ids.length > 0
+        && claim.evidence_ids.every(id => typeof id === "string" && evidenceIds.has(id));
+      return report.characters.every(person => person && sourcedClaim(person.identity)
+        && ["motivation", "change"].every(key => Object.hasOwn(person, key)
+          && (person[key] === null || sourcedClaim(person[key]))));
+    }
+    if (version !== "model.1" || (report.schema_version !== undefined && report.schema_version !== "1")) return false;
     const validVersion = report.report_version !== undefined
       ? report.report_version === "1.0"
       : report.schema_version === "1";
@@ -2260,13 +2278,14 @@
   function normalizeResult(value) {
     if (!value || typeof value !== "object" || value.status !== "completed") return null;
     const analysisContractVersion = String(value.analysis_contract_version || "1.0");
+    if (value.report?.schema_version === "2" && analysisContractVersion !== "model.2") throw new Error("语义拆解报告版本不一致。 ");
     const reportVersion = String(value.report?.report_version || value.report?.reportVersion || "");
     const isDepthReport = analysisContractVersion === "2.0" || reportVersion === "2.0";
     const depthReport = value.report && isDepthReport ? normalizeDepthReport(value.report) : null;
     if (analysisContractVersion === "2.0" && !depthReport) throw new Error("正式深度报告不完整。 ");
     if (depthReport && analysisContractVersion !== "2.0") throw new Error("深度报告版本不一致。 ");
-    if (analysisContractVersion === "model.1" && !isModelAnalysisReport(value.report)) throw new Error("语义拆解报告版本不完整。 ");
-    if (!["1.0", "2.0", "model.1"].includes(analysisContractVersion)) throw new Error("拆解结果合同版本无法识别。");
+    if (isModelAnalysisContract(analysisContractVersion) && !isModelAnalysisReport(value.report, analysisContractVersion)) throw new Error("语义拆解报告版本不完整。 ");
+    if (!["1.0", "2.0", "model.1", "model.2"].includes(analysisContractVersion)) throw new Error("拆解结果合同版本无法识别。");
     return {
       documentId: String(value.document_id || ""),
       sourceVersionId: String(value.source_version_id || ""),
@@ -2307,7 +2326,7 @@
 
   function normalizeHistoryItem(value) {
     if (!value || typeof value !== "object") return null;
-    const analysisContractVersion = ["1.0", "2.0", "model.1"].includes(value.analysis_contract_version)
+    const analysisContractVersion = ["1.0", "2.0", "model.1", "model.2"].includes(value.analysis_contract_version)
       ? value.analysis_contract_version
       : "unknown";
     return {
@@ -2376,7 +2395,7 @@
         throw new Error("正式结果没有绑定当前来源。");
       }
     }
-    if (result && result.analysisContractVersion !== "model.1" && (
+    if (result && !isModelAnalysisContract(result.analysisContractVersion) && (
       result.sourceVersionId !== String(payload.source.version_id || "")
       || result.sourceRevision !== deconstructionNumber(payload.source.revision)
       || result.sourceHash !== String(payload.source.hash || "")
@@ -2392,13 +2411,13 @@
     )) {
       throw new Error("深度报告与当前来源版本不一致。");
     }
-    if (result?.analysisContractVersion === "model.1"
+    if (isModelAnalysisContract(result?.analysisContractVersion)
       && (!result.scopeStart || !result.scopeEnd || result.scopeEnd < result.scopeStart || !result.scopeHash)) {
       throw new Error("卷级语义拆解缺少服务端范围校验字段。");
     }
-    if (result?.analysisContractVersion === "model.1") {
+    if (isModelAnalysisContract(result?.analysisContractVersion)) {
       const run = normalizeActiveRun(payload.active_run);
-      if (!run || run.analysisContractVersion !== "model.1" || run.runStatus !== "completed"
+      if (!run || run.analysisContractVersion !== result.analysisContractVersion || run.runStatus !== "completed"
         || result.sourceVersionId !== String(payload.source.version_id || "")
         || String(payload.focus_document_id || "") !== result.documentId
         || !["documentId", "sourceVersionId", "sourceRevision", "sourceHash"].every(key => run[key] === result[key])) {
@@ -2447,8 +2466,8 @@
     return Boolean(
       (data?.result?.analysisContractVersion === "2.0"
         && data.result.depthReport?.reportVersion === "2.0")
-      || (data?.result?.analysisContractVersion === "model.1"
-        && isModelAnalysisReport(data.result.report)),
+      || (isModelAnalysisContract(data?.result?.analysisContractVersion)
+        && isModelAnalysisReport(data.result.report, data.result.analysisContractVersion)),
     );
   }
 
@@ -2755,7 +2774,7 @@
   function renderDeconstructionHistoryItem(data, item) {
     const rule = item.analysisContractVersion === "2.0";
     const versionLabel = rule ? "深度 2.0"
-      : item.analysisContractVersion === "model.1" ? "模型报告" : item.analysisContractVersion === "1.0" ? "基础 1.0" : "版本未知";
+      : isModelAnalysisContract(item.analysisContractVersion) ? "模型报告" : item.analysisContractVersion === "1.0" ? "基础 1.0" : "版本未知";
     const ruleLabel = !rule ? "" : data.requiredEngineRevision
       ? item.engineRevision === data.requiredEngineRevision ? "现行规则" : "旧版规则"
       : item.engineRevision ? "规则版本待核对" : "规则版本未记录";
@@ -2804,7 +2823,7 @@
   function renderDeconstructionResult(data) {
     const result = data.result;
     if (!result) return "";
-    if (result.analysisContractVersion === "model.1" && window.XumaiAnalysis) {
+    if (isModelAnalysisContract(result.analysisContractVersion) && window.XumaiAnalysis) {
       const range = result.scopeStart === result.scopeEnd
         ? `第 ${result.scopeStart} 章`
         : `第 ${result.scopeStart}–${result.scopeEnd} 章`;
@@ -2823,7 +2842,7 @@
   function renderAnalysisSource(data, label, range) {
     const result = data.result;
     const origin = result.report?.producer || result.analysisLabel || label;
-    const note = result.analysisContractVersion === "model.1" ? "仅涵盖所选章节；事实、人物说法与分析推断分别标注。" : "未调用模型 · 仅整理原文线索，不判断心理或因果。";
+    const note = isModelAnalysisContract(result.analysisContractVersion) ? "仅涵盖所选章节；事实、人物说法与分析推断分别标注。" : "未调用模型 · 仅整理原文线索，不判断心理或因果。";
     return `<header class="analysis-source-banner"><div class="analysis-source-main"><strong>${escapeHtml(label)}${result.analysisContractVersion === "2.0" ? ' · 无模型' : ''}</strong><span>${escapeHtml(range)} · ${data.sourceMatch ? "来源有效" : "历史只读"}</span></div>${renderAnalysisDetails("范围与来源", `<p>${note}</p><dl class="analysis-source-facts"><div><dt>分析来源</dt><dd>${escapeHtml(origin)}</dd></div><div><dt>报告版本</dt><dd>${escapeHtml(result.analysisContractVersion)}</dd></div><div><dt>规则版本</dt><dd>${escapeHtml(result.engineRevision || data.engineRevision || "旧版未记录")}</dd></div><div><dt>稿本</dt><dd>${escapeHtml(result.sourceVersionId)}</dd></div><div><dt>修订</dt><dd>${escapeHtml(result.sourceRevision ?? "—")}</dd></div><div><dt>内容指纹</dt><dd>${escapeHtml(result.scopeHash || result.sourceHash)}</dd></div></dl>`)}</header>`;
   }
 
@@ -2914,7 +2933,7 @@
         relationLabel: type => depthRelationText[type] || "关系待核对",
       });
     }
-    if (data.result?.analysisContractVersion === "model.1" && data.result.report && window.XumaiAnalysis) {
+    if (isModelAnalysisContract(data.result?.analysisContractVersion) && data.result.report && window.XumaiAnalysis) {
       const params = new URLSearchParams(location.search);
       const section = ["plot", "characters", "time"].includes(params.get("section")) ? params.get("section") : "characters";
       let initialView = true;
@@ -3018,7 +3037,7 @@
       const loaded = [];
       for (const volume of volumes) {
         const doc = await deconstructionApi.read(projectId, { documentId: volume.documentId });
-        if (doc.result?.analysisContractVersion === "model.1" && doc.result.report) loaded.push({ volume, report: doc.result.report });
+        if (isModelAnalysisContract(doc.result?.analysisContractVersion) && doc.result.report) loaded.push({ volume, report: doc.result.report });
       }
       if (token !== state.deconstructionGuideToken) return;
       if (body) body.innerHTML = renderDeconstructionGuideContent(loaded, Array.isArray(guide.characters) ? guide.characters : []);
@@ -3402,7 +3421,7 @@
 
   function deconstructionEvidenceMatchesSource(data, evidence, result) {
     const source = data?.source;
-    if (result?.analysisContractVersion === "model.1") {
+    if (isModelAnalysisContract(result?.analysisContractVersion)) {
       return Boolean(
         data?.effectiveStatus === "completed"
         && data.runStatus === "completed"
@@ -4023,7 +4042,7 @@
   function renderReportWorkflow() {
     const root=elements.reportWorkflow,data=state.deconstructionWorkspace,task=state.reportTask;
     if(!root || !task || data?.projectId!==task.projectId)return;
-    const block=reportStartBlock(data,task),hasReport=data.result?.analysisContractVersion==='model.1' && hasDeconstructionResults(data);
+    const block=reportStartBlock(data,task),hasReport=isModelAnalysisContract(data.result?.analysisContractVersion) && hasDeconstructionResults(data);
     $$('[data-action="book-start"],[data-action="model-analyze"]').forEach(node=>node.disabled=Boolean(block || state.modelAnalysisBusy));
     const legacyPause=$('[data-action="book-pause"]');
     if(legacyPause)legacyPause.disabled=task.job?.kind==='report-v2' || task.job?.status!=='running';

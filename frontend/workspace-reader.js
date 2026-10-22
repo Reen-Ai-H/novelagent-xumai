@@ -256,6 +256,8 @@
 
   function mountModel(root, report, options) {
     const evidence = options.evidence, claim = options.claim;
+    const analysisSection = (title, value) => report.schema_version === '2' && value === null
+      ? '' : `<section><h3>${title}</h3>${claim(value)}</section>`;
     const people = list(report.characters).map(p => ({...p, title:p.name, group:modelGroup(p), subtitle:p.identity?.text || '', status:p.identity?.status,
       search:[p.name, ...list(p.aliases), p.identity?.text, p.portrait?.text, p.change?.text].join(' ')}));
     const peopleById = new Map(people.map(p => [p.id,p]));
@@ -272,7 +274,7 @@
       eventEdges:list(report.relations).map(r=>({from:r.from_id,to:r.to_id,label:kinds[r.kind] || '待核对',kind:r.kind,status:r.status,body:()=>claim(r)})),
       personRelations:p=>relations.filter(r=>r.from_id===p.id || r.to_id===p.id).map(r=>({from:r.from_id,to:r.to_id,label:r.label || r.text || '',status:r.status,body:()=>claim(r)})),
       personExperiences:p=>events.filter(e=>list(e.actor_ids).includes(p.id)),
-      personAnalysis:p=>`<section><h3>身份与处境</h3>${claim(p.identity)}</section><section><h3>性格与为人</h3>${claim(p.portrait || p.identity)}</section><section><h3>动机</h3>${claim(p.motivation)}</section><section><h3>关键经历与变化</h3>${claim(p.change)}</section><div class="analysis-phrase-row">${list(p.insights).map((i,n)=>`<button class="analysis-phrase" type="button" data-report-phrase="${esc(p.id)}~${n}">${esc(i.title)}</button>`).join('')}</div>`,
+      personAnalysis:p=>`<section><h3>身份与处境</h3>${claim(p.identity)}</section><section><h3>性格与为人</h3>${claim(p.portrait || p.identity)}</section>${analysisSection('动机',p.motivation)}${analysisSection('关键经历与变化',p.change)}${list(p.insights).length ? `<div class="analysis-phrase-row">${list(p.insights).map((i,n)=>`<button class="analysis-phrase" type="button" data-report-phrase="${esc(p.id)}~${n}">${esc(i.title)}</button>`).join('')}</div>` : ''}`,
       openInsight:(id,index)=>{const p=peopleById.get(id),insight=list(p?.insights)[Number(index)];if(insight)options.openModal({eyebrow:p.name,title:insight.title,body:claim(insight)});},
       eventBody:e=>`<section><h3>事件经过</h3>${claim(e.action)}</section><section><h3>结果与后续</h3>${claim(e.consequence)}</section>`,
       subEvents:e=>list(e.sub_events).map((s,i)=>({id:String(i),title:s.title,body:()=>claim(s)})),
