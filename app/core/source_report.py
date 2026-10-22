@@ -25,8 +25,10 @@ from schemas.analysis_report import Claim, StrictModel
 SOURCE_REPORT_WIRE = "source-report-v1"
 SOURCE_REPORT_V2_WIRE = "source-report-v2"
 SOURCE_REPORT_V3_WIRE = "source-report-v3"
-SOURCE_REPORT_WIRES = (SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE)
-RAW_SOURCE_REPORT_WIRES = (SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE)
+SOURCE_REPORT_V4_WIRE = "source-report-v4"
+SPARSE_SOURCE_REPORT_WIRES = (SOURCE_REPORT_V3_WIRE, SOURCE_REPORT_V4_WIRE)
+SOURCE_REPORT_WIRES = (SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, *SPARSE_SOURCE_REPORT_WIRES)
+RAW_SOURCE_REPORT_WIRES = (SOURCE_REPORT_V2_WIRE, *SPARSE_SOURCE_REPORT_WIRES)
 LEGACY_REPORT_WIRE = "report-draft-v1"
 REF_NAMES = {"evidence_ids": "source_ids", "name_evidence_ids": "name_source_ids",
              "time_evidence_ids": "time_source_ids"}
@@ -35,6 +37,8 @@ SOURCE_ID_GROUPS = tuple(g for g in ID_GROUPS if g != "evidence")
 SOURCE_SCALARS = ("story_order", "time_note", "time_source_ids", "title", "scope")
 MAX_DIAGNOSTICS = 12
 MAX_DIAGNOSTIC_BYTES = 8192
+SOURCE_RELATION_KINDS = {"cause": "causes", "purpose": "enables", "before": "follows",
+                         "reveal": "reveals", "echo": "foreshadow_payoff"}
 
 
 def _source_model(name, base, **overrides):
@@ -203,9 +207,41 @@ class SourceReportDraftV3(SourceReportDraftV2):
                 "status": "fact须以action_ref所引Claim为fact为前提，不升格推断/传闻；仍须核对计划、请求与实际的区别。"},
         }
         for model, fields in descriptions.items():
+            if model == "SourceEvent" and "SourceEventV4" in schema["$defs"]:
+                continue  # v4 has no model-written event index to describe.
+            if model == "SourceRelation" and "SourceRelationV4" in schema["$defs"]:
+                model = "SourceRelationV4"
             for field, description in fields.items():
                 schema["$defs"][model]["properties"][field]["description"] = description
         return schema
+
+
+# Do not remove a field from a shared model or default it away. Only this
+# explicit wire forbids actor_ids, including during whole-object revisions.
+SourceEventV4 = create_model("SourceEventV4", __base__=StrictModel,
+    **{key: (field.annotation, deepcopy(field)) for key, field in SourceEvent.model_fields.items()
+       if key != "actor_ids"})
+SourceRelationV4 = create_model("SourceRelationV4", __base__=StrictModel,
+    **{key: (field.annotation, deepcopy(field)) for key, field in SourceRelation.model_fields.items()
+       if key != "kind"})
+
+
+class SourceReportDraftV4(SourceReportDraftV3):
+    """输出报告实例JSON，全部对象id全局唯一，事实、来源与内部引用须完整。
+
+    事件不含actor_ids、relations不含kind，显式提供即拒绝；kind仅由basis唯一映射，
+    名单只在最终公共投影按结构主客体生成，
+    不代表在场或实际执行，不以索引代替原文语义核对。一条Claim表达对应主体的具体
+    行动或认知，多人分工用必要子行动表达，不漏重要经历或编造动作凑名单。
+    identity严格有源，motivation/change键必填、未交代时null；不借null隐去真实事实。
+    participants须被真实Claim引用；不藏核心人物、不自动合并或删除背景。
+    其余人物、来源、状态、阶段、关系、标题与格式修复约束继承v3。
+    """
+
+    events: list[SourceEventV4] = Field(min_length=1, max_length=300,
+        description="完整表达真实分工和必要经历；事件无actor_ids，不将正文提及或计划冒充实际行动。")
+    relations: list[SourceRelationV4] = Field(max_length=600,
+        description="只选有据basis及同向事件/动作，关系无kind，最终按basis唯一映射；不将计划冒充实际因果。")
 
 
 def source_report_model(wire=SOURCE_REPORT_WIRE):
@@ -215,6 +251,8 @@ def source_report_model(wire=SOURCE_REPORT_WIRE):
         return SourceReportDraftV2
     if wire == SOURCE_REPORT_V3_WIRE:
         return SourceReportDraftV3
+    if wire == SOURCE_REPORT_V4_WIRE:
+        return SourceReportDraftV4
     raise ValueError("未知的私有来源报告合同版本")
 
 
@@ -226,7 +264,7 @@ def source_response_model(wire):
     Real retractions still require the sourced review and final verification.
     """
     base = source_report_model(wire)
-    if wire != SOURCE_REPORT_V3_WIRE:
+    if wire not in SPARSE_SOURCE_REPORT_WIRES:
         return base
     protected = None
 
@@ -409,10 +447,28 @@ def _legacy_projection(data, entries):
 
 def validate_source_candidate(data, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
     check_source_entries(entries, bank, read_text)
-    draft = _shape(data, entries, read_text, wire=wire).model_dump(mode="json")
-    _, report = validate_draft(_legacy_projection(draft, entries), bank, read_text, producer=producer,
-                               schema_version="2" if wire == SOURCE_REPORT_V3_WIRE else "1")
-    return draft, report
+    draft = _shape(data, entries, read_text, wire=wire)
+    value = draft.model_dump(mode="json")
+    projected = _legacy_projection(value, entries)
+    if wire == SOURCE_REPORT_V4_WIRE:
+        # Validate ALL endpoints before intersecting with visible characters:
+        # otherwise an invalid ID could disappear from the derived index.
+        people = {p.id for p in [*draft.characters, *draft.participants]}
+        if any(key is not None and key not in people for _, claim, _ in _claims(draft)
+               for key in (claim.subject_id, claim.object_id)):
+            raise ValueError("动作或身份端点不存在，不能以字符串null代替null")
+        for event, output in zip(draft.events, projected["events"], strict=True):
+            claims = [event.action, event.consequence, *event.sub_events]
+            endpoints = {key for claim in claims for key in (claim.subject_id, claim.object_id) if key is not None}
+            actors = [person.id for person in draft.characters if person.id in endpoints]
+            if len(actors) > 20:
+                raise ValueError("事件人物超过公共20人上限")
+            output["actor_ids"] = actors
+        for edge in projected["relations"]:
+            edge["kind"] = SOURCE_RELATION_KINDS[edge["basis"]]
+    _, report = validate_draft(projected, bank, read_text, producer=producer,
+                               schema_version="2" if wire in SPARSE_SOURCE_REPORT_WIRES else "1")
+    return value, report
 
 
 def _cycle_targets(nodes, edges):
@@ -472,7 +528,7 @@ def prepare_source_draft(data, entries, bank, read_text, *, producer, wire=SOURC
     people = {p.id: p for p in [*draft.characters, *draft.participants]}
     visible, event_ids = {p.id for p in draft.characters}, {e.id for e in draft.events}
     claims = {key: (claim, owner) for key, claim, owner in _claims(draft)}
-    if wire == SOURCE_REPORT_V3_WIRE:
+    if wire in SPARSE_SOURCE_REPORT_WIRES:
         used_people = {endpoint for claim, _ in claims.values() for endpoint in (claim.subject_id, claim.object_id)}
         for person in draft.participants:
             if person.id not in used_people:
@@ -512,6 +568,8 @@ def prepare_source_draft(data, entries, bank, read_text, *, producer, wire=SOURC
                     or (claim.kind in {"knowledge", "feeling"} and claim.subject_id != owner)))):
             emit("claim_holder", [claim_targets[key]], key)
     for event in draft.events:
+        if wire == SOURCE_REPORT_V4_WIRE:
+            continue  # Only final projection has an event index in this wire.
         event_claims = [event.action, event.consequence, *event.sub_events]
         participants = {key for c in event_claims for key in (c.subject_id, c.object_id) if key is not None}
         subjects = {c.subject_id for c in event_claims if c.subject_id is not None}
@@ -526,10 +584,11 @@ def prepare_source_draft(data, entries, bank, read_text, *, producer, wire=SOURC
         return claims[key]
 
     dependencies, action_edges, relation_keys, person_keys = [], [], set(), set()
-    kinds = {"cause": "causes", "purpose": "enables", "before": "follows", "reveal": "reveals", "echo": "foreshadow_payoff"}
+    kinds = SOURCE_RELATION_KINDS
     for i, edge in enumerate(draft.relations):
         target = f"relations/{i}"
-        key = edge.from_id, edge.to_id, edge.kind
+        kind = kinds[edge.basis] if wire == SOURCE_REPORT_V4_WIRE else edge.kind
+        key = edge.from_id, edge.to_id, kind
         if key in relation_keys:
             emit("duplicate_relation", [target], target)
         relation_keys.add(key)
@@ -538,7 +597,7 @@ def prepare_source_draft(data, entries, bank, read_text, *, producer, wire=SOURC
             emit("relation_endpoint", [target], target)
         if not first or not second:
             continue
-        if edge.from_action == edge.to_action or kinds[edge.basis] != edge.kind:
+        if edge.from_action == edge.to_action or kinds[edge.basis] != kind:
             emit("relation_kind", [target], target)
         if edge.status == "fact" and any(c.status != "fact" for c in (first[0], second[0])):
             emit("relation_status", [target], target)
@@ -623,6 +682,11 @@ def validate_source_review(data, draft, entries, bank, read_text, *, final=False
         if len(targets) != len(set(targets)):
             raise ValueError("修订对象重复")
         for change in review.changes:
+            if wire == SOURCE_REPORT_V4_WIRE and change.replacement is not None:
+                if change.target.startswith("events/") and "actor_ids" in change.replacement:
+                    raise ValueError("v4事件不接受actor_ids")
+                if change.target.startswith("relations/") and "kind" in change.replacement:
+                    raise ValueError("v4事件关系不接受kind")
             _review_sources(change.source_ids, entries, bank, read_text)
     return review
 

@@ -33,7 +33,7 @@ def without_descriptions(value):
 
 class SourceV3DescriptionTest(unittest.TestCase):
     def test_all_108_old_schema_values_keep_the_b604_fingerprint(self):
-        excluded = {"SourceReportDraftV3", "SourceCharacterV3", "SourceInsightV3",
+        excluded = {"SourceReportDraftV3", "SourceCharacterV3", "SourceInsightV3", "SourceEventV4", "SourceRelationV4", "SourceReportDraftV4",
                     "ReportDraftV3", "DraftCharacterV3", "AnalysisReportV2", "CharacterV2", "PreviewGroundedReportV2"}
         source.SourceReportDraftV3.model_json_schema()
         schemas = {module.__name__ + "." + name: model.model_json_schema()
@@ -42,6 +42,17 @@ class SourceV3DescriptionTest(unittest.TestCase):
                    if inspect.isclass(model) and issubclass(model, BaseModel) and model is not BaseModel
                    and model.__module__ == module.__name__ and name not in excluded}
         self.assertEqual(len(schemas), 108)
+        # Exact names captured from the unchanged de071ce source-only copy;
+        # adding v4 must not silently shrink or substitute the old model set.
+        names = {
+            "app.core.source_report": "SourceAliasBasis SourceCharacter SourceCharacterRelation SourceCharacterV2 SourceClaim SourceDetail SourceDraftClaim SourceEvent SourceFinding SourceInsight SourceParticipant SourceQuestion SourceRelation SourceReportDraft SourceReportDraftV2 SourceTimeConstraint _SourceReportShape",
+            "app.core.report_pipeline": "AliasBasis Correction DraftCharacter DraftCharacterRelation DraftClaim DraftDetail DraftEvent DraftFinding DraftRelation Participant QuestionSource ReportDraft ReportReview ReportVerification ReviewAccept ReviewBlocked ReviewRevise SourceIssue TimeConstraint",
+            "app.core.analysis_grounding": "GroundedDelta GroundedReport PreviewEvent PreviewGroundedReport SourceSelection",
+            "schemas.analysis_report": "AnalysisImport AnalysisReport AnalysisRequest Character CharacterInsight CharacterRelation Claim Event Finding Relation ReportEvidence ReportTaskPublic ReportTaskRequest StrictModel SubEvent",
+            "schemas.analysis_delta": "AnalysisDelta CharacterRelationKey RelationKey",
+            "schemas.deconstruction": "ChapterBreakdown DeconstructionActionRequest DeconstructionActions DeconstructionActiveRun DeconstructionCandidate DeconstructionDepthReport DeconstructionDocument DeconstructionDocumentPublic DeconstructionError DeconstructionEvidenceChapter DeconstructionEvidenceResponse DeconstructionHistoryItem DeconstructionObservation DeconstructionOverview DeconstructionProgress DeconstructionProjectRecord DeconstructionResponse DeconstructionResult DeconstructionSource DeconstructionState DeconstructionVolumeItem DepthAnalysisItem DepthChapter DepthCharacter DepthCharacterState DepthCharactersView DepthEndpoint DepthEvent DepthEvidence DepthForeshadowing DepthForeshadowingState DepthForeshadowingView DepthIdentityCandidate DepthModel DepthPlotOverview DepthPlotView DepthPlotline DepthReaderExperience DepthReaderView DepthReadingSegment DepthRelation DepthRhythm DepthRhythmView DepthSource DepthTechnique DepthTechniqueView DepthView EvidenceRef TimelineNode",
+        }
+        self.assertEqual(set(schemas), {module + "." + name for module, group in names.items() for name in group.split()})
         self.assertEqual(pipeline.object_hash(schemas),
                          "3ae224e76ef26cd7e8ee715961ff63ba3fec502ba153aae22d7250a7512ad0c8")
 

@@ -195,7 +195,7 @@ def source_report_messages(chapters, bank, entries, *, stage, draft=None,
                            original=None, revision=None, diagnostics=None, wire="source-report-v1"):
     """Explicit new wire only. Never expose two selector namespaces to the model."""
     import json
-    from app.core.source_report import (SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE, check_source_entries,
+    from app.core.source_report import (SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE, SOURCE_REPORT_V4_WIRE, check_source_entries,
         source_report_model, source_target_hashes, source_target_index)
     from app.core.report_pipeline import object_hash
 
@@ -210,7 +210,9 @@ def source_report_messages(chapters, bank, entries, *, stage, draft=None,
             if "source_id" in segment:
                 segment["source_id"] = reverse[segment["source_id"]]
     material = {"chapters": segments}
-    if wire == SOURCE_REPORT_V3_WIRE:
+    if wire == SOURCE_REPORT_V4_WIRE:
+        rules = Path(__file__).with_name("deconstruction_source_report_v4_rules.md").read_text(encoding="utf-8")
+    elif wire == SOURCE_REPORT_V3_WIRE:
         rules = Path(__file__).with_name("deconstruction_source_report_v3_rules.md").read_text(encoding="utf-8")
     else:
         rules = Path(__file__).with_name("deconstruction_source_report_rules.md").read_text(encoding="utf-8")
@@ -219,12 +221,13 @@ def source_report_messages(chapters, bank, entries, *, stage, draft=None,
                     "events.sub_events及contradictions仍使用必填title的SourceDetail。"
                     if wire == SOURCE_REPORT_V2_WIRE else
                     "本轮私有合同source-report-v1：人物insights、events.sub_events及contradictions均为SourceDetail，title全部必填。")
-    if wire != SOURCE_REPORT_V3_WIRE:
+    if wire not in (SOURCE_REPORT_V3_WIRE, SOURCE_REPORT_V4_WIRE):
         rules = version_rule + "\n" + rules
     if stage == "draft":
         instruction = "起草SourceReportDraft，直接返回完整紧凑JSON。"
     elif stage in {"review", "verify"}:
-        review_file = ("deconstruction_source_report_v3_review.md" if wire == SOURCE_REPORT_V3_WIRE
+        review_file = ("deconstruction_source_report_v4_review.md" if wire == SOURCE_REPORT_V4_WIRE else
+                       "deconstruction_source_report_v3_review.md" if wire == SOURCE_REPORT_V3_WIRE
                        else "deconstruction_source_report_review.md")
         rules += "\n" + Path(__file__).with_name(review_file).read_text(encoding="utf-8")
         material.update(draft=draft, draft_hash=object_hash(draft))

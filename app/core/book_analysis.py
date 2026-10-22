@@ -278,7 +278,7 @@ class BookAnalysis:
         previous = self.load(project, account)
         source_key = dict(source_hash=source.source_hash, source_version=source.version_id,
                           source_revision=source.source_revision)
-        from app.core.source_report import SOURCE_REPORT_V3_WIRE, freeze_source_directory
+        from app.core.source_report import SOURCE_REPORT_V4_WIRE, freeze_source_directory
         try:
             directory = freeze_source_directory(dict(project_id=project, account_id=account, **source_key), bank, read_text)
         except ValueError:
@@ -320,7 +320,7 @@ class BookAnalysis:
                 history.append({key: value for key, value in previous.items() if key != "report_history"})
             job = dict(project_id=project, account_id=account, **source_key,
                        kind="report-v2", run_id=uuid4().hex, model=runtime.model,
-                       report_wire_version=SOURCE_REPORT_V3_WIRE, source_directory=directory,
+                       report_wire_version=SOURCE_REPORT_V4_WIRE, source_directory=directory,
                        status="running", stage="queued", cursor=0, total=2,
                        message="拆书已开始，可以离开此页", error_code=None, document_id=None,
                        budget=budget, inflight=False, report_history=history)

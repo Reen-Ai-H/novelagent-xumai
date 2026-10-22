@@ -10,7 +10,7 @@ from app import deconstruction_routes
 from app.core.book_analysis import BookAnalysis
 from app.core.model_budget import BudgetLedger, pricing_for_model
 from app.core.report_pipeline import object_hash
-from app.core.source_report import SOURCE_REPORT_V3_WIRE, check_source_directory, freeze_source_directory, source_target_hashes
+from app.core.source_report import SOURCE_REPORT_V3_WIRE, SOURCE_REPORT_V4_WIRE, check_source_directory, freeze_source_directory, source_target_hashes
 from stage38_report_fixtures import acceptance
 from stage38_source_report_fixtures import source_case
 import test_stage38_report_api as old
@@ -37,8 +37,13 @@ class SourceReportApiTest(unittest.TestCase):
     def prepare(self, count=2, *, bulk=False, wire=SOURCE_REPORT_V3_WIRE):
         old.ReportApiTest.prepare(self, count, bulk=bulk, legacy=False)
         self.draft, _, _, _ = source_case(texts=self.texts)
-        if wire == SOURCE_REPORT_V3_WIRE:
+        if wire in (SOURCE_REPORT_V3_WIRE, SOURCE_REPORT_V4_WIRE):
             self.draft["schema_version"] = "2"
+        if wire == SOURCE_REPORT_V4_WIRE:
+            for event in self.draft["events"]:
+                del event["actor_ids"]
+            for edge in self.draft["relations"]:
+                del edge["kind"]
         else:
             # Explicit persisted historical wire. Never patch the production
             # default or infer a version from the synthetic response's shape.
@@ -72,7 +77,7 @@ class SourceReportApiTest(unittest.TestCase):
             return answer
         return patch.object(self.runner, "_update_running", side_effect=update)
 
-    def test_fresh_six_chapter_job_freezes_private_wire_and_auto_imports_stable_sources(self):
+    def test_historical_six_chapter_wire_resumes_and_auto_imports_stable_sources(self):
         self.prepare(6, bulk=True)
         self.assertIsNone(self.job())
         self.assertGreaterEqual(sum(map(len, self.texts.values())), 21224)
@@ -304,13 +309,17 @@ class SourceReportApiTest(unittest.TestCase):
                       error_code="report_evidence_invalid", draft_response=old_draft)
         self.runner.save(legacy)
         before = deepcopy(legacy)
+        for event in self.draft["events"]:
+            del event["actor_ids"]  # A new synthetic response, never the failed historical candidate.
+        for edge in self.draft["relations"]:
+            del edge["kind"]
         self.start(); final = self.wait()
         self.assertEqual(final["status"], "completed", final)
         current = self.job()
         self.assertEqual(current["report_history"][-1], {k: v for k, v in before.items() if k != "report_history"})
         self.assertEqual(current["report_history"][-1]["draft_response"], old_draft)
         self.assertNotEqual(current["run_id"], "failed-legacy")
-        self.assertEqual(current["report_wire_version"], SOURCE_REPORT_V3_WIRE)
+        self.assertEqual(current["report_wire_version"], SOURCE_REPORT_V4_WIRE)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(current["draft_response"], self.draft)
 

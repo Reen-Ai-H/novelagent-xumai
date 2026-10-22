@@ -15,7 +15,7 @@ from app import deconstruction_routes
 from app.core.book_analysis import BookAnalysis
 from app.core.report_pipeline import ReportDraft, object_hash, validate_draft
 from app.core.source_report import (
-    SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE, SourceReportDraft,
+    SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V4_WIRE, SourceReportDraft,
     SourceReportDraftV2, _legacy_projection, apply_source_revision,
     report_wire, source_report_model, source_target_hashes,
     validate_source_candidate, validate_source_review,
@@ -464,7 +464,7 @@ class SourceV2ApiTest(unittest.TestCase):
         self.assertNotIn("title", case.job()["draft_response"]["characters"][0]["insights"][0])
         self.assertEqual(case.job()["draft"]["characters"][0]["insights"][0]["title"], "补充信息")
 
-    def test_failed_v1_history_is_preserved_while_explicit_new_job_uses_v3(self):
+    def test_failed_v1_history_is_preserved_while_explicit_new_job_uses_v4(self):
         case = self.case(v1=True)
         old = case.job()
         add_insight(case.draft)
@@ -472,10 +472,14 @@ class SourceV2ApiTest(unittest.TestCase):
         case.runner.save(old)
         before = deepcopy(old)
         case.draft["schema_version"] = "2"
+        for event in case.draft["events"]:
+            del event["actor_ids"]
+        for edge in case.draft["relations"]:
+            del edge["kind"]
         case.start(); final = case.wait()
         self.assertEqual(final["status"], "completed", final)
         job = case.job()
-        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_V3_WIRE)
+        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_V4_WIRE)
         self.assertEqual(job["report_history"][-1], {key:value for key,value in before.items() if key != "report_history"})
         self.assertEqual(len(case.calls), 2)
         self.assertNotIn("title", job["report_history"][-1]["draft_response"]["characters"][0]["insights"][0])

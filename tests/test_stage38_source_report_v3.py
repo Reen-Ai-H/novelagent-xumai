@@ -165,7 +165,7 @@ class SourceV3ContractTest(unittest.TestCase):
 
     def test_unknown_private_wire_and_public_projection_versions_reject(self):
         self.assertIs(source_report_model(SOURCE_REPORT_V3_WIRE), SourceReportDraftV3)
-        for version in ("source-report-v4", "source-report-v0", "", 3):
+        for version in ("source-report-v5", "source-report-v0", "", 3):
             with self.subTest(version=version):
                 with self.assertRaises(ValueError):
                     source_report_model(version)
