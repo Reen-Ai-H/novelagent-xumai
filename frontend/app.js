@@ -2896,7 +2896,16 @@
     elements.deconstructionRefreshButton.disabled = working;
     elements.deconstructionPageContent.setAttribute("aria-busy", String(working));
     state.deconstructionVolumeId = data.focusDocumentId || "";
-    document.getElementById("workspaceSource").innerHTML = (data.result ? renderAnalysisSource(data, isRule ? "规则分析" : "模型报告", data.scopeLabel || `${data.result.scopeStart || 1}–${data.result.scopeEnd || data.source.chapterCount || '—'} 章`) : "") + renderDeconstructionDiagnostics(data);
+    const sourcePanel = document.getElementById("workspaceSource");
+    const sourceContent = (data.result ? renderAnalysisSource(data, isRule ? "规则分析" : "模型报告", data.scopeLabel || `${data.result.scopeStart || 1}–${data.result.scopeEnd || data.source.chapterCount || '—'} 章`) : "") + renderDeconstructionDiagnostics(data);
+    // A failed attempt can live here beside a valid report. Keep its sole
+    // workflow node connected while replacing the source/history content.
+    if (elements.reportWorkflow.parentElement === sourcePanel) {
+      Array.from(sourcePanel.childNodes).forEach(node => {
+        if (node !== elements.reportWorkflow) node.remove();
+      });
+      sourcePanel.insertAdjacentHTML('afterbegin', sourceContent);
+    } else sourcePanel.innerHTML = sourceContent;
     const volumeBar = renderDeconstructionVolumeBar(data);
     const readableRuleUpgrade = data.effectiveStatus === "rebuild_required" && data.updateAvailable
       && data.error?.code === "engine_update_available" && isRule && data.runStatus === "completed";
@@ -4054,22 +4063,29 @@
     if(legacyPause)legacyPause.disabled=task.job?.kind==='report-v2' || task.job?.status!=='running';
     const job=task.job,running=['queued','running'].includes(job?.status);
     const currentReport=hasReport && data.sourceMatch===true && data.effectiveStatus==='completed';
-    const unsettled=job?.kind==='report-v2' && ['running','paused','failed'].includes(job.status);
+    const unknown=job?.error_code==='report_request_unknown';
+    const failedAttempt=currentReport && task.loaded && job?.kind==='report-v2' && job.status==='failed'
+      && !unknown && !task.pollError && !task.budgetError;
+    const unsettled=running || (job?.kind==='report-v2' && ['paused','failed'].includes(job.status))
+      || unknown || !task.loaded || task.pollError || task.budgetError;
     root.hidden=currentReport && !unsettled;
     // Legacy rule state belongs in source tools. The primary header has one
     // status: the report workflow, or a ready badge for a source-matched report.
-    elements.deconstructionStatusPill.hidden=!root.hidden || !currentReport;
-    elements.deconstructionStatusPill.textContent=currentReport && root.hidden?'模型报告已就绪':'';
+    elements.deconstructionStatusPill.hidden=(!root.hidden && !failedAttempt) || !currentReport;
+    const producer=data.result?.report?.producer || data.result?.analysisLabel;
+    elements.deconstructionStatusPill.textContent=failedAttempt
+      ? ['报告已就绪',producer].filter(Boolean).join(' · ')
+      : currentReport && root.hidden?'模型报告已就绪':'';
     elements.deconstructionStatusPill.className = `deconstruction-status-pill is-${data.effectiveStatus}`;
     const message=job?.status==='completed' && !currentReport?'':reportJobMessage(job);
     const action=job?.kind==='report-v2' && job.status==='paused'?'继续拆书':job?.kind==='report-v2' && ['completed','failed'].includes(job.status)?'重新分析':'开始拆书';
-    const reason=task.pollError || task.budgetError || (job?.kind==='report-v2' && job.status==='failed'?job.message:message || block);
+    const reason=task.pollError || task.budgetError || (unknown?block:job?.kind==='report-v2' && job.status==='failed'?job.message:message || block);
     const empty=!hasDeconstructionResults(data) && new URLSearchParams(location.search).get('section')!=='guide';
     elements.deconstructionPageContent.setAttribute('aria-busy',String(empty && running));
     const focused=root.contains?.(document.activeElement)?document.activeElement?.dataset?.action:null;
     // Move, never clone, the existing safe controls; polling and confirmation
     // continue to use the same task ownership and source checks.
-    const container=empty?elements.deconstructionPageContent:$('.deconstruction-header-actions');
+    const container=failedAttempt?document.getElementById('workspaceSource'):empty?elements.deconstructionPageContent:$('.deconstruction-header-actions');
     if(root.parentElement!==container)container.appendChild?.(root);
     root.className=`report-workflow ${empty?'is-empty':'is-compact'}`;
     let heading='',steps='',detail=reason;

@@ -48,25 +48,27 @@ const origin='http://guide-workflow.invalid';
    assert.equal(await workflow.evaluate(n=>n===window.__originalGuideWorkflow),true,'Move the same node; do not clone/recreate it');
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   }
+  const inSource=()=>formal&&job.status==='failed'&&job.error_code!=='report_request_unknown';
   async function guide(){
    await page.locator('[data-action=open-workspace-tools]').click();
    await page.locator('#workspaceToolsDialog [data-section=guide]').click();
    await page.waitForFunction(()=>document.querySelector('[data-guide-note]')?.textContent==='0 卷生效');
    assert.equal(await page.locator('.deconstruction-guide').count(),1);await sameNode();
-   assert.equal(await workflow.evaluate(n=>n.parentElement.className),'deconstruction-header-actions');
+   if(inSource())assert.equal(await workflow.evaluate(n=>n.parentElement.id),'workspaceSource');
+   else assert.equal(await workflow.evaluate(n=>n.parentElement.className),'deconstruction-header-actions');
    assert.equal(await main.getAttribute('aria-busy'),'false');
    assert.equal(await workflow.locator('.report-stage-list').count(),0);
   }
   async function back(section){
    await page.locator(`#deconstructionSubnav [data-section=${section}]`).click();
    await page.waitForFunction(()=>!document.querySelector('.deconstruction-guide'));await sameNode();
-   assert.equal(await workflow.evaluate(n=>n.parentElement.id),formal?'':'deconstructionPageContent');
+   assert.equal(await workflow.evaluate(n=>n.parentElement.id),inSource()?'workspaceSource':formal?'':'deconstructionPageContent');
    if(formal)assert.equal(await page.locator('.total-graph-node').count(),6);
   }
   try{
    for(const hasReport of [false,true])for(const status of ['paused','running','failed']){
     await open(status,hasReport);const before=posts.length;await guide();
-    assert.equal(await workflow.isVisible(),true);assert.equal(await primary.isDisabled(),status==='running');
+    assert.equal(await workflow.isVisible(),!inSource());assert.equal(await primary.isDisabled(),status==='running');
     if(status==='paused'){
      assert.equal(await primary.innerText(),'继续拆书');
      // A paused job has no poll to rescue a detached node after this delay.
@@ -76,7 +78,9 @@ const origin='http://guide-workflow.invalid';
      await page.waitForFunction(()=>document.activeElement?.dataset.action==='open-report-confirm');
      if(!hasReport){const file=path.join(out,`${width}x${height}-paused-guide.png`);await page.screenshot({path:file});screenshots.push(file);}
     }else if(status==='failed'){
+     if(inSource())await page.locator('[data-action=open-workspace-tools]').click();
      assert.equal(await primary.innerText(),'重新分析');await primary.click();await page.locator('#reportConfirmDialog[open]').waitFor();await page.keyboard.press('Escape');assert.equal(posts.length,before);
+     if(inSource())await page.locator('#workspaceToolsDialog [data-action=close-workspace-tools]').click();
     }else{
      await workflow.locator('[data-action=pause-report]').click();
      await page.waitForFunction(()=>document.querySelector('[data-action=open-report-confirm]')?.textContent==='继续拆书');

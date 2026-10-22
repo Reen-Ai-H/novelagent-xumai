@@ -124,7 +124,10 @@ const origin='http://empty-state.invalid';
     job=task(status,status==='completed'?'completed':'review');await navigate('characters','&volume=history&map=total');
     await page.locator('.total-graph-scroll').waitFor();assert.equal(await page.locator('.total-graph-node').count(),6);
     assert.equal(await workflow.locator('.report-stage-list').count(),0);assert.equal(await workflow.locator('h2').count(),0);
-    assert.equal(await workflow.evaluate(n=>n.parentElement.className),'deconstruction-header-actions');
+    if(status==='failed'){
+     assert.equal(await workflow.evaluate(n=>n.parentElement.id),'workspaceSource');
+     assert.equal(await page.locator('.deconstruction-header-actions #reportWorkflow').count(),0);
+    }else assert.equal(await workflow.evaluate(n=>n.parentElement.className),'deconstruction-header-actions');
     assert.ok(page.url().includes('volume=history'));assert.equal(await page.locator('#deconstructionPageContent #reportWorkflow').count(),0);
     cases.push({width,case:`historical report retained during ${status}`});
    }
