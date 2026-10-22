@@ -26,7 +26,7 @@
 
 ## v2 · 人物经历的展示标题
 
-- 新任务显式使用`source-report-v2`；`source-report-v1`及旧`report-draft-v1`继续按各自原schema处理，不靠输出外形猜版本。
+- 本节定义`source-report-v2`兼容合同；10/22新任务已改用[显式v3稀疏分析合同](STAGE_38_SPARSE_ANALYSIS_CONTRACT.md)。`source-report-v1`、v2及旧`report-draft-v1`任务继续按各自原schema处理，不靠输出外形猜版本。
 - 仅人物`insights`的title可缺省，固定展示标签为“补充信息”。已提供title不截断、不替换，空串/null/超长仍拒绝；其余标题、姓名、事实、状态、阶段、端点、来源等约束不变。
 - 初始响应与有源revision使用同一版本规范化，再产生草稿/hash及review/verify。私有任务须保留默认化前的实际响应内容和原修订，不将规范化data冒称原始响应；不新增公共内容暴露。
 - 版本、来源目录与源CAS在每阶段仍需核对；旧缓存不能获得新默认值。最终投影至原公共schema与完整validate_draft/import，不新增格式修复、内容修订或费用额度。
