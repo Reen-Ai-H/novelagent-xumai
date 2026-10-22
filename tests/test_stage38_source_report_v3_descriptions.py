@@ -45,7 +45,7 @@ class SourceV3DescriptionTest(unittest.TestCase):
         self.assertEqual(pipeline.object_hash(schemas),
                          "3ae224e76ef26cd7e8ee715961ff63ba3fec502ba153aae22d7250a7512ad0c8")
 
-    def test_old_rules_reviews_and_v3_review_keep_their_byte_fingerprints(self):
+    def test_old_rules_reviews_and_v3_review_keep_runtime_text_fingerprints(self):
         expected = {
             "deconstruction_report_rules.md": "1c2a9e223935b65c04322879117bc86d44e6d0e41e6d722b90ed4233324ac7a6",
             "deconstruction_report_review.md": "8226e3968f2d24d03bb4846f857e920cdf7d96a0ad98b1cafe4079771fa287ac",
@@ -55,7 +55,8 @@ class SourceV3DescriptionTest(unittest.TestCase):
         }
         for name, fingerprint in expected.items():
             with self.subTest(prompt=name):
-                self.assertEqual(sha256((Path("app/agents") / name).read_bytes()).hexdigest(), fingerprint)
+                text = (Path("app/agents") / name).read_text(encoding="utf-8")
+                self.assertEqual(sha256(text.encode("utf-8")).hexdigest(), fingerprint)
 
     def test_v3_non_description_values_and_dynamic_repair_schema_are_unchanged(self):
         for options in ({}, {"mode": "serialization", "by_alias": False, "ref_template": "#/definitions/{model}"}):
@@ -97,7 +98,7 @@ class SourceV3DescriptionTest(unittest.TestCase):
                               ("SourceCharacterRelation", ("from_id", "to_id", "action_ref", "source_ids", "status"))):
             for field in fields:
                 self.assertTrue(definitions[model]["properties"][field]["description"])
-        rules = Path("app/agents/deconstruction_source_report_v3_rules.md").read_text()
+        rules = Path("app/agents/deconstruction_source_report_v3_rules.md").read_text(encoding="utf-8")
         self.assertIn("称谓来源及真实主体→事件名单→边的方向/来源/状态", rules)
         self.assertIn(formula, rules)
         self.assertIn("不机械清名单、错绑主体或把主角藏到背景凑过关", rules)
