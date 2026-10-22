@@ -107,7 +107,7 @@ assert.equal(matches({{ offsetUnit: "utf16_code_unit", charStart: 0, charEnd: 3,
         locate_end = self.app_source.index("\n  function renderAIConversation", locate_start)
         locate_source = self.app_source[locate_start:locate_end]
         self.assertIn("const excerptMatches = validEnd && deconstructionEvidenceExcerptMatches(evidence, content);", locate_source)
-        self.assertIn('"正文片段与证据摘录不一致，已降级为章节级回看。"', locate_source)
+        self.assertIn('"原句与正文不一致，已打开来源章节。"', locate_source)
         self.assertIn("if (excerptMatches)", locate_source)
         self.assertIn("setSelectionRange(evidence.charStart, evidence.charEnd)", locate_source)
 
@@ -133,7 +133,7 @@ assert.equal(matches({{ offsetUnit: "utf16_code_unit", charStart: 0, charEnd: 3,
         has_results_start = self.app_source.index("function hasDeconstructionResults")
         has_results_end = self.app_source.index("\n  function formatDeconstructionCount", has_results_start)
         self.assertNotIn("history", self.app_source[has_results_start:has_results_end])
-        self.assertIn("正文片段与证据摘录不一致", self.app_source)
+        self.assertIn("原句与正文不一致", self.app_source)
         self.assertNotIn("localStorage", self.app_source)
         self.assertNotIn("sessionStorage", self.app_source)
         self.assertIn("prefers-reduced-motion: reduce", self.css_source)

@@ -807,6 +807,27 @@ class IndependentWorkspaceService:
     @classmethod
     def _parse_text(cls, filename: str, text: str, *, heading_levels: dict[int, int] | None = None) -> tuple[str, list[ImportChapterPreview], list[str]]:
         parsed = parse_document(filename, text, heading_levels=heading_levels)
+        if parsed.chapters:
+            boundaries = suggest_boundaries(text, Path(filename).stem, heading_levels=heading_levels)
+            # Normal uploads must use the same mixed-title recognition as the
+            # partition preview. Keep established explicit-only imports (body
+            # and fragments) compatible; newly inferred layers retain every
+            # source character, including heading lines, in ordered chunks.
+            if any(b["confidence"] == "inferred" for b in boundaries):
+                items, chunks = partition_text(text, boundaries)
+                levels = {utf16_length(text[:p]): level for p, level in (heading_levels or {}).items()}
+                chapters = []
+                for item, content in zip(items, chunks):
+                    local_levels = {p-item["start"]: level for p, level in levels.items()
+                                    if item["start"] <= p < item["end"]}
+                    chapters.append(ImportChapterPreview(
+                        chapter_number=item["chapter_number"], title=item["title"], content=content,
+                        word_count=item["word_count"],
+                        imported_heading_style=ImportedHeadingStyle(
+                            content_hash=content_digest(content), heading_levels=local_levels)
+                        if local_levels else None,
+                    ))
+                return Path(filename).stem or parsed.title, chapters, []
         chapters = [ImportChapterPreview(chapter_number=item.chapter_number, title=item.title,
                                           content=item.content, word_count=cls._word_count(item.content),
                                           imported_heading_style=ImportedHeadingStyle(content_hash=content_digest(item.content), heading_levels=dict(item.heading_levels))

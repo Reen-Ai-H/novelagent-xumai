@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from schemas.analysis_report import AnalysisImport, AnalysisRequest
+from schemas.analysis_report import AnalysisImport, AnalysisRequest, ReportTaskRequest
 from app.agents.deconstruction_model import create_runtime
 from app.core.book_analysis import BookAnalysis
 
@@ -25,7 +25,9 @@ book_analysis = BookAnalysis(deconstruction_service)
 @router.get("/projects/{project_id}/deconstruction/model-budget")
 async def read_model_budget(project_id: str, request: Request):
     _current_independent_account(request, project_id)
-    return {"budget": _service().model_budget.public(create_runtime().model)}
+    runtime = create_runtime()
+    return {"budget": _service().model_budget.public(runtime.model),
+            "model_available": bool(getattr(runtime, "available", False))}
 
 
 @router.get("/projects/{project_id}/deconstruction/book")
@@ -36,6 +38,19 @@ async def read_book_analysis(project_id: str, request: Request):
     if job:
         book_analysis.ensure_task(job)
     return {"job": book_analysis.public(job)}
+
+
+@router.post("/projects/{project_id}/deconstruction/book/start-report")
+async def start_report_analysis(project_id: str, request: Request, payload: ReportTaskRequest):
+    account = _current_independent_account(request, project_id)
+    _service()
+    try:
+        return {"job": book_analysis.start_report(project_id, account.account_id, payload)}
+    except DeconstructionServiceError as exc:
+        _raise_service_error(exc)
+    except (OSError, ValueError):
+        _raise_service_error(DeconstructionServiceError(
+            "analysis_task_unavailable", "分析任务或预算暂不可用，未开始新的请求。", status_code=503))
 
 
 @router.post("/projects/{project_id}/deconstruction/book/{action}")

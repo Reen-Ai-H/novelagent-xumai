@@ -70,8 +70,16 @@ class EntryApiTest(unittest.TestCase):
             self.assertEqual(created.status_code, 200)
             project_id = created.json()["project"]["project_id"]
 
+            # Replace the scoped login cookie, not add a second cookie with
+            # the same name but an empty domain. Duplicate-header precedence
+            # is not the behavior this expired-session test is exercising.
+            client.cookies.clear()
             client.cookies.set("xumai_session", "expired-or-unknown")
             expired = client.get("/api/auth/session")
+            self.assertEqual(
+                expired.request.headers["cookie"],
+                "xumai_session=expired-or-unknown",
+            )
             self.assertEqual(expired.status_code, 401)
             self.assertEqual(expired.json()["detail"]["code"], "session_expired")
 

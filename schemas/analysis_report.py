@@ -1,7 +1,7 @@
 """Model-authored analysis; code validates structure and evidence, never invents semantics."""
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
 
 class StrictModel(BaseModel):
@@ -35,6 +35,7 @@ class Character(StrictModel):
     name: str = Field(min_length=1, max_length=80)
     aliases: list[str] = Field(default_factory=list, max_length=20)
     role: str = Field(min_length=1, max_length=80)
+    importance: Literal["main", "support"] | None = None
     identity: Claim
     motivation: Claim
     change: Claim
@@ -104,7 +105,7 @@ class AnalysisReport(StrictModel):
         event_ids = {x.id for x in self.events}
         claims = [*self.findings, *self.relations, *self.character_relations, *self.contradictions]
         for person in self.characters:
-            claims.extend((person.identity, person.motivation, person.change))
+            claims.extend(c for c in (person.identity, person.motivation, person.change) if c is not None)
             claims.extend(person.insights)
             if person.portrait is not None:
                 claims.append(person.portrait)
@@ -127,6 +128,44 @@ class AnalysisReport(StrictModel):
         return self
 
 
+class CharacterV2(Character):
+    """Schema 2 only: absent analysis is not an unknown factual claim."""
+
+    motivation: Claim | None
+    change: Claim | None
+
+
+class AnalysisReportV2(AnalysisReport):
+    # Required tag: a missing version must retain the historical schema 1
+    # default, never be inferred from nullable character fields.
+    schema_version: Literal["2"]
+    characters: list[CharacterV2] = Field(min_length=1, max_length=100)
+
+
+def _public_report_version(value):
+    # Only the historical missing tag defaults to schema 1. Nullable fields
+    # never select a version; unknown tags must fail without trying branches.
+    if isinstance(value, AnalysisReport):
+        return value.schema_version
+    if isinstance(value, dict):
+        return value.get("schema_version", "1")
+    return None
+
+
+PublicAnalysisReport = Annotated[
+    Annotated[AnalysisReport, Tag("1")] | Annotated[AnalysisReportV2, Tag("2")],
+    Discriminator(_public_report_version),
+]
+MODEL_REPORT_CONTRACTS = frozenset(("model.1", "model.2"))
+
+
+def model_report_contract(report):
+    versions = {"1": "model.1", "2": "model.2"}
+    if not isinstance(report, AnalysisReport) or report.schema_version not in versions:
+        raise ValueError("未知的公开分析报告版本")
+    return versions[report.schema_version]
+
+
 def validate_character_relations(relations, character_ids):
     keys = []
     for edge in relations:
@@ -143,7 +182,7 @@ class AnalysisImport(StrictModel):
     expected_source_version_id: str | None = Field(default=None, min_length=1, max_length=128)
     expected_source_revision: int | None = Field(default=None, ge=0)
     expected_source_hash: str | None = Field(default=None, min_length=16, max_length=128)
-    report: AnalysisReport
+    report: PublicAnalysisReport
 
 
 class AnalysisRequest(StrictModel):
@@ -151,3 +190,28 @@ class AnalysisRequest(StrictModel):
     expected_source_revision: int = Field(ge=0)
     expected_source_hash: str = Field(min_length=16, max_length=128)
     chapter_numbers: list[int] = Field(min_length=1, max_length=20)
+
+
+class ReportTaskRequest(StrictModel):
+    """Explicitly analyse the complete current manuscript; never a silent subset."""
+
+    expected_source_version_id: str = Field(min_length=1, max_length=128)
+    expected_source_revision: int = Field(ge=0)
+    expected_source_hash: str = Field(min_length=16, max_length=128)
+
+
+ReportTaskStatus = Literal["running", "paused", "failed", "completed"]
+ReportTaskStage = Literal["queued", "draft", "review", "revise", "verify", "adopt", "completed"]
+
+
+class ReportTaskPublic(StrictModel):
+    kind: Literal["report-v2"] = "report-v2"
+    run_id: str
+    status: ReportTaskStatus
+    stage: ReportTaskStage
+    cursor: int = Field(ge=0, le=3)
+    total: int = Field(ge=2, le=3)
+    message: str
+    budget: dict
+    document_id: str | None = None
+    error_code: str | None = None

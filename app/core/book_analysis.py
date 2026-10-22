@@ -151,6 +151,11 @@ class BookAnalysis:
     def public(self, job):
         if not job:
             return None
+        if job.get("kind") == "report-v2":
+            from schemas.analysis_report import ReportTaskPublic
+            return ReportTaskPublic(**{key: job.get(key) for key in
+                ("kind", "run_id", "status", "stage", "cursor", "total", "message", "document_id", "error_code")},
+                budget=self.service.model_budget.public(job["model"])).model_dump(mode="json")
         result = {k: job[k] for k in ("status", "cursor", "total", "message", "budget")}
         if job.get("model"):
             result["budget"] = self.service.model_budget.public(job["model"])
@@ -161,7 +166,8 @@ class BookAnalysis:
         if job["status"] == "running" and (project not in self.tasks or self.tasks[project].done()):
             self.tasks[project] = asyncio.create_task(self.run(project, job["account_id"]))
             self.tasks[project].add_done_callback(
-                lambda task: None if task.cancelled() else self._resume_replaced_job(project, job))
+                lambda task: self._resume_replaced_job(project, job)
+                if not task.cancelled() or job.get("kind") == "report-v2" else None)
 
     @staticmethod
     def _same_source(left, right):
@@ -170,7 +176,9 @@ class BookAnalysis:
 
     @classmethod
     def _same_job(cls, left, right):
-        return cls._same_source(left, right) and left.get("run_id") == right.get("run_id")
+        return (cls._same_source(left, right) and left.get("run_id") == right.get("run_id")
+                and left.get("report_wire_version") == right.get("report_wire_version")
+                and left.get("source_directory") == right.get("source_directory"))
 
     def _resume_replaced_job(self, project, previous):
         current = self.load(project, previous["account_id"])
@@ -185,6 +193,11 @@ class BookAnalysis:
             expected_source_revision=job["source_revision"], expected_source_hash=job["source_hash"])
         if not source.sufficient or source.pending_changes:
             raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
+        if job.get("kind") == "report-v2":
+            from app.core.source_report import SOURCE_REPORT_WIRES, check_source_directory, report_wire
+            if report_wire(job) in SOURCE_REPORT_WIRES:
+                read_text = {c.chapter_number: c.content for c in source.chapters}
+                check_source_directory(job, source_bank(read_text), read_text)
         return source
 
     def recover_pending(self) -> dict[str, int]:
@@ -225,6 +238,8 @@ class BookAnalysis:
         if not runtime.available:
             raise DeconstructionServiceError("model_unavailable", "请先配置作品拆解模型。", status_code=503)
         job = self.load(project, account)
+        if job and job.get("kind") == "report-v2":
+            raise DeconstructionServiceError("report_task_exists", "请使用当前作品的拆书入口管理这份任务。", status_code=409)
         # Source revisions replace analysis state, never the project's incurred
         # costs or holds for requests already sent to the provider.
         previous_budget = job.get("budget") if job else None
@@ -249,6 +264,66 @@ class BookAnalysis:
         if job["status"] != "completed":
             job["status"] = "running"
             job["message"] = "正在分段阅读，结果会逐步更新"
+        self.save(job)
+        self.ensure_task(job)
+        return self.public(job)
+
+    @_job_transaction
+    def start_report(self, project, account, payload):
+        from copy import deepcopy
+        from app.core.deconstruction_service import DeconstructionServiceError
+        # Account, exact source, pending changes and the COMPLETE size limit
+        # precede the factory, budget and scheduling boundary.
+        source, _, bank, read_text = self.service.report_material(project, account, payload)
+        previous = self.load(project, account)
+        source_key = dict(source_hash=source.source_hash, source_version=source.version_id,
+                          source_revision=source.source_revision)
+        from app.core.source_report import SOURCE_REPORT_V4_WIRE, freeze_source_directory
+        try:
+            directory = freeze_source_directory(dict(project_id=project, account_id=account, **source_key), bank, read_text)
+        except ValueError:
+            raise DeconstructionServiceError("report_scope_invalid", "当前正文没有完整可定位的来源，本次未发送请求。", status_code=422) from None
+        if previous and previous.get("kind") == "report-v2" and self._same_source(previous, source_key):
+            if previous["status"] in {"running", "completed"}:
+                self.ensure_task(previous)
+                return self.public(previous)
+            if previous.get("inflight") or previous.get("error_code") == "report_request_unknown":
+                raise DeconstructionServiceError("report_request_unknown", "上次请求结果尚未确认，已保留费用占用；不会自动重发。", status_code=409)
+            if previous.get("stage") == "adopt" and previous.get("approved_hash"):
+                previous.update(status="running", run_id=uuid4().hex, error_code=None,
+                                message="正在保存已核对的报告")
+                self.save(previous)
+                self.ensure_task(previous)
+                return self.public(previous)
+        if previous and (previous["status"] == "running" or previous.get("inflight")):
+            raise DeconstructionServiceError("analysis_task_busy", "已有分析任务正在处理或等待确认，请先保留该任务。", status_code=409)
+        runtime = self.runtime_factory()
+        if not runtime.available:
+            raise DeconstructionServiceError("model_unavailable", "请先配置作品拆解模型。", status_code=503)
+        shared = self.service.model_budget.public(runtime.model)
+        if shared["remaining_cny"] <= 0:
+            raise DeconstructionServiceError("model_budget_exceeded", "本轮共用预算不足，现有结果已保留。", status_code=409)
+        if previous and previous.get("budget"):
+            budget = BudgetLedger.from_public(previous["budget"], pricing=pricing_for_model(runtime.model)).public()
+        else:
+            # Carry incurred scope costs into the existing job ledger too. The
+            # SAME service.model_budget remains the authoritative shared cap.
+            budget = BudgetLedger(budget_cny=shared["budget_cny"], reserve_cny=0,
+                                  spent_cny=shared["accounted_spent_cny"],
+                                  pricing=pricing_for_model(runtime.model)).public()
+        if previous and previous.get("kind") == "report-v2" and self._same_source(previous, source_key) and previous["status"] == "paused":
+            job = previous
+            job.update(status="running", run_id=uuid4().hex, error_code=None, message="正在继续拆书")
+        else:
+            history = deepcopy(previous.get("report_history", [])) if previous else []
+            if previous:
+                history.append({key: value for key, value in previous.items() if key != "report_history"})
+            job = dict(project_id=project, account_id=account, **source_key,
+                       kind="report-v2", run_id=uuid4().hex, model=runtime.model,
+                       report_wire_version=SOURCE_REPORT_V4_WIRE, source_directory=directory,
+                       status="running", stage="queued", cursor=0, total=2,
+                       message="拆书已开始，可以离开此页", error_code=None, document_id=None,
+                       budget=budget, inflight=False, report_history=history)
         self.save(job)
         self.ensure_task(job)
         return self.public(job)
@@ -304,6 +379,10 @@ class BookAnalysis:
             return current
 
     async def run(self, project, account):
+        job = self.load(project, account)
+        if job and job.get("kind") == "report-v2":
+            from app.core.report_job import run_report_job
+            return await run_report_job(self, project, account)
         from app.core.deconstruction_service import DeconstructionServiceError
         from app.agents.llm_runtime import LLMRuntimeError
         from pydantic import ValidationError

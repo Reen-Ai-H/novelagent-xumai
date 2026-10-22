@@ -1,0 +1,744 @@
+"""Private source-only report wire; the legacy final validator stays authoritative.
+
+Short selectors are local to one frozen job. They are never inferred from a
+failed old report, fuzzy-matched, or used as proof of literary entailment.
+"""
+from __future__ import annotations
+
+from collections import Counter
+from copy import deepcopy
+from typing import Literal
+
+from pydantic import Field, create_model, model_validator
+
+from app.core.analysis_grounding import source_bank
+from app.core.report_pipeline import (
+    AliasBasis, DraftCharacter, DraftCharacterRelation, DraftClaim, DraftDetail,
+    DraftEvent, DraftFinding, DraftRelation, ID_GROUPS, INDEX_GROUPS,
+    MAX_REVISION_BYTES, NON_PEOPLE, Participant, QuestionSource, ReportDraft,
+    ReportReview, ReportVerification, ReviewAccept, ReviewBlocked, ReviewRevise,
+    TimeConstraint, _claims, canonical, object_hash, validate_draft,
+)
+from schemas.analysis_report import Claim, StrictModel
+
+
+SOURCE_REPORT_WIRE = "source-report-v1"
+SOURCE_REPORT_V2_WIRE = "source-report-v2"
+SOURCE_REPORT_V3_WIRE = "source-report-v3"
+SOURCE_REPORT_V4_WIRE = "source-report-v4"
+SPARSE_SOURCE_REPORT_WIRES = (SOURCE_REPORT_V3_WIRE, SOURCE_REPORT_V4_WIRE)
+SOURCE_REPORT_WIRES = (SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, *SPARSE_SOURCE_REPORT_WIRES)
+RAW_SOURCE_REPORT_WIRES = (SOURCE_REPORT_V2_WIRE, *SPARSE_SOURCE_REPORT_WIRES)
+LEGACY_REPORT_WIRE = "report-draft-v1"
+REF_NAMES = {"evidence_ids": "source_ids", "name_evidence_ids": "name_source_ids",
+             "time_evidence_ids": "time_source_ids"}
+SOURCE_REF_NAMES = frozenset(REF_NAMES.values())
+SOURCE_ID_GROUPS = tuple(g for g in ID_GROUPS if g != "evidence")
+SOURCE_SCALARS = ("story_order", "time_note", "time_source_ids", "title", "scope")
+MAX_DIAGNOSTICS = 12
+MAX_DIAGNOSTIC_BYTES = 8192
+SOURCE_RELATION_KINDS = {"cause": "causes", "purpose": "enables", "before": "follows",
+                         "reveal": "reveals", "echo": "foreshadow_payoff"}
+
+
+def _source_model(name, base, **overrides):
+    # Copy constraints/defaults, not AnalysisReport validators: the latter must
+    # run on the final server-bound report, never on an incomplete draft.
+    fields = {REF_NAMES.get(key, key): (field.annotation, deepcopy(field))
+              for key, field in base.model_fields.items() if key != "evidence"}
+    for key, annotation in overrides.items():
+        fields[key] = (annotation, fields[key][1])
+    if "id" in fields:
+        # Code-owned schema guidance survives the common runtime's deliberate
+        # removal of candidate values/messages from repair error summaries.
+        fields["id"][1].description = (
+            "内部稳定编号；须与本报告characters、events、findings、participants全部对象的id全局唯一。"
+            "不同对象即使用名或拼音近似也不得共用id；不能通过合并或删除对象解决编号冲突。")
+    return create_model(name, __base__=StrictModel, **fields)
+
+
+SourceClaim = _source_model("SourceClaim", Claim)
+SourceDraftClaim = _source_model("SourceDraftClaim", DraftClaim)
+SourceFinding = _source_model("SourceFinding", DraftFinding)
+SourceDetail = _source_model("SourceDetail", DraftDetail)
+SourceAliasBasis = _source_model("SourceAliasBasis", AliasBasis)
+SourceParticipant = _source_model("SourceParticipant", Participant)
+SourceCharacter = _source_model("SourceCharacter", DraftCharacter,
+    identity=SourceDraftClaim, motivation=SourceDraftClaim, change=SourceDraftClaim,
+    portrait=SourceDraftClaim | None, insights=list[SourceDetail],
+    alias_basis=list[SourceAliasBasis], importance_basis=SourceClaim)
+SourceEvent = _source_model("SourceEvent", DraftEvent,
+    action=SourceDraftClaim, consequence=SourceDraftClaim, sub_events=list[SourceDetail])
+SourceRelation = _source_model("SourceRelation", DraftRelation)
+SourceCharacterRelation = _source_model("SourceCharacterRelation", DraftCharacterRelation)
+SourceTimeConstraint = _source_model("SourceTimeConstraint", TimeConstraint)
+SourceQuestion = _source_model("SourceQuestion", QuestionSource)
+_SourceReportShape = _source_model("SourceReportShape", ReportDraft,
+    findings=list[SourceFinding], characters=list[SourceCharacter], events=list[SourceEvent],
+    relations=list[SourceRelation], character_relations=list[SourceCharacterRelation],
+    contradictions=list[SourceDetail], participants=list[SourceParticipant],
+    order_constraints=list[SourceTimeConstraint], question_sources=list[SourceQuestion])
+
+
+class SourceReportDraft(_SourceReportShape):
+    """characters、events、findings、participants中全部对象的id必须全局唯一。
+
+    编号只作内部引用，不是姓名或文学事实。格式修复须保留全部人物/事件/对象、
+    事实文字、判断状态与来源编号选择；只可重分配可无歧义的内部ID，并同步对应的
+    subject_id/object_id、actor_ids、from_id/to_id、story_order及动作定位引用
+    from_action/to_action/action_ref。不得合并、去重、删对象或猜测身份/端点。
+    无法明确归属的引用不能靠改编号掩盖；仍有歧义或重复时必须拒绝，不另增修复循环。
+    """
+
+    @model_validator(mode="after")
+    def unique_object_ids(self):
+        ids = [item.id for group in SOURCE_ID_GROUPS for item in getattr(self, group)]
+        if len(ids) != len(set(ids)):
+            # No ID/name/source values are put into trusted error prose.
+            raise ValueError("报告对象的内部ID必须全局唯一")
+        return self
+
+
+class SourceInsight(SourceDetail):
+    # Presentation metadata only. Explicit invalid values must still fail;
+    # never synthesize a manuscript-derived title or default a factual field.
+    title: str = Field(default="补充信息", min_length=1, max_length=80,
+                       description="仅source-report-v2人物insights可缺省此展示标题，缺省为补充信息；"
+                                   "显式提供时原样保留并严格限制，null/空串/超长不使用默认值。")
+
+
+SourceCharacterV2 = _source_model("SourceCharacterV2", SourceCharacter, insights=list[SourceInsight])
+
+
+def _v2_field(key, description):
+    # Guidance only: copy every old field constraint/default unchanged. Never
+    # mutate a shared FieldInfo or make these descriptions into new validators.
+    field = deepcopy(SourceReportDraft.model_fields[key])
+    field.description = description
+    return field
+
+
+SourceReportDraftV2 = create_model("SourceReportDraftV2", __base__=SourceReportDraft,
+    __doc__=SourceReportDraft.__doc__ + "\n编号限制仅针对编号冲突，不禁止其他schema结构修复。"
+        "仅source-report-v2人物insights缺title时使用补充信息；其他标题仍必填。"
+        "\n先建立characters、participants和events，再填写两类边。relations只连接events.id及所属事件的合法动作路径，"
+        "不连接characters/participants；character_relations只连接characters.id及同向人物Claim。"
+        "人物之间的身份关系不能直接当事件边；真实身份揭示事件仍可按合法事件端点、动作和来源表达。"
+        "选择直接必要有源机制，不两两枚举或补传递闭包；同键多机制合并保留事实，不固定截断节点或边。"
+        "\nstatus仅fact/reported/inferred/unknown；phase仅actual/planned/requested/negated/unknown。"
+        "planned绝不能填status，不能由程序映射成fact。",
+    characters=(list[SourceCharacterV2], _v2_field("characters", "先建立有据人物，供人物关系引用；人物ID不能作为relations的事件端点。")),
+    participants=(list[SourceParticipant], _v2_field("participants", "先建立未上卡的有据个体；参与者ID不能作为两类图谱的端点。")),
+    events=(list[SourceEvent], _v2_field("events", "先建立事件及其action/consequence/sub_events，供relations引用；不要用人物ID代替事件ID。")),
+    relations=(list[SourceRelation], _v2_field("relations", "from_id/to_id只选events.id，不能选characters/participants。"
+        "from_action/to_action分别属于各自事件，格式EventId.action、EventId.consequence或EventId.sub_events.索引。"
+        "人物之间的身份关系不能直接当事件边；真实身份揭示事件仍可按合法事件端点、动作和来源表达。"
+        "只选直接必要有源机制，不两两枚举或补传递闭包，同一(from_id,to_id,kind)多机制合并保留事实。")),
+    character_relations=(list[SourceCharacterRelation], _v2_field("character_relations", "from_id/to_id只选characters.id，不能选events/participants。"
+        "action_ref指向已有有向人物Claim，其subject/object与两端同向；人物身份关系不能冒充relations事件边。"
+        "不两两枚举或补传递闭包，同一(from_id,to_id,label)多机制合并保留事实。")))
+
+
+class SourceInsightV3(SourceDetail):
+    title: str = Field(default="补充信息", min_length=1, max_length=80,
+                       description="仅人物insights缺title时使用固定展示标签补充信息；提供值仍严格，null/空/超长不兜底。")
+
+
+SourceCharacterV3 = _source_model("SourceCharacterV3", SourceCharacter,
+    motivation=SourceDraftClaim | None, change=SourceDraftClaim | None, insights=list[SourceInsightV3])
+
+
+class SourceReportDraftV3(SourceReportDraftV2):
+    """输出报告实例JSON，不输出schema定义。全部对象id全局唯一，引用同步。
+
+    人物identity严格有源；所有主配角motivation/change键必填，未交代时值为null，
+    不生成未知话术或假来源，不借null隐藏明确事实。非null保留完整Claim约束。
+    先确定核心人物与经历，participants仅按实际主张subject_id/object_id需要建立，
+    不枚举名词、不凑数组上限、不以背景分类隐藏核心人物。来源及个体身份仍须核对。
+    relations只连事件及合法动作，character_relations只连人物及非null同向Claim；
+    只保留直接必要有源机制，不扩传递闭包，不删事实或固定截断节点边。
+    status为fact/reported/inferred/unknown，phase为actual/planned/requested/negated/unknown。
+    仅人物insights缺title可用补充信息，其他标题必填；格式修复不合并、删对象或清空事实。
+    """
+
+    schema_version: Literal["2"] = "2"
+    characters: list[SourceCharacterV3] = Field(min_length=1, max_length=100)
+    participants: list[SourceParticipant] = Field(max_length=100,
+        description="仅实际Claim的subject_id/object_id引用且不上卡的有据个体；名字声明或正文提及不算引用，不凑上限。")
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        # Export-only guidance: shared FieldInfo, validators and old wires stay
+        # untouched. The per-call repair subclass inherits this same exporter.
+        schema = deepcopy(super().model_json_schema(*args, **kwargs))
+        name_source = (
+            "所选来源须至少一段字面包含name的原称谓；编号有效和同一性有据不能替代字面命中，"
+            "字面命中本身也不证明同一性。")
+        holder = (
+            "kind为knowledge/feeling时subject_id不可为null，须指向原文实际持有者。"
+            "在characters的人物分析字段中，主张必须关于本人，知情/情感主体必须本人。"
+            "先从原文纠正主张主体，不用‘本人的卡片’替代真正行动者。")
+        descriptions = {
+            "SourceCharacterV3": {"name_source_ids": name_source},
+            "SourceParticipant": {"name_source_ids": name_source},
+            "SourceAliasBasis": {"source_ids":
+                "所选来源须至少一段字面包含本项name的原称谓；编号有效和同一性有据不能替代字面命中，"
+                "字面命中本身也不证明同一性；须与aliases逐项对应。"},
+            "SourceDraftClaim": {"subject_id": holder},
+            "SourceFinding": {"subject_id": holder},
+            "SourceDetail": {"subject_id": holder},
+            "SourceInsightV3": {"subject_id": holder},
+            "SourceEvent": {"actor_ids":
+                "令P为已建卡人物，S/O为本事件action、consequence、sub_events的结构主体/客体并集："
+                "S∩P ⊆ actor_ids ⊆ (S∪O)∩P且不得重复。文字提及不代替结构引用；"
+                "应回读并完整表达真实参与和必要经历，不机械清名单、错绑主体或把主角藏到背景凑过关。"},
+            "SourceRelation": {
+                "from_id": "仅events.id；from_action须属于此事件，不用人物ID代替。",
+                "to_id": "仅events.id；to_action须属于此事件，不用人物ID代替。",
+                "from_action": "须属于from_id事件：EventId.action、EventId.consequence或EventId.sub_events.索引。",
+                "to_action": "须属于to_id事件：EventId.action、EventId.consequence或EventId.sub_events.索引。",
+                "status": "fact须以两端所引Claim均为fact为前提，不升格推断/传闻。",
+                "basis": "cause/purpose须以两端所引Claim的phase均为actual为前提，不把计划、请求或否定当实际因果。"},
+            "SourceCharacterRelation": {
+                "from_id": "仅characters.id，须为action_ref所引Claim的subject_id。",
+                "to_id": "仅characters.id，须为action_ref所引Claim的object_id，方向不得反转。",
+                "action_ref": "须定位非null有向Claim，其subject_id/object_id与from_id/to_id同向；来源须与本边有交集。",
+                "source_ids": "须与action_ref所引Claim的source_ids至少有一项交集；编号有效不代替原文支持。",
+                "status": "fact须以action_ref所引Claim为fact为前提，不升格推断/传闻；仍须核对计划、请求与实际的区别。"},
+        }
+        for model, fields in descriptions.items():
+            if model == "SourceEvent" and "SourceEventV4" in schema["$defs"]:
+                continue  # v4 has no model-written event index to describe.
+            if model == "SourceRelation" and "SourceRelationV4" in schema["$defs"]:
+                model = "SourceRelationV4"
+            for field, description in fields.items():
+                schema["$defs"][model]["properties"][field]["description"] = description
+        return schema
+
+
+# Do not remove a field from a shared model or default it away. Only this
+# explicit wire forbids actor_ids, including during whole-object revisions.
+SourceEventV4 = create_model("SourceEventV4", __base__=StrictModel,
+    **{key: (field.annotation, deepcopy(field)) for key, field in SourceEvent.model_fields.items()
+       if key != "actor_ids"})
+SourceRelationV4 = create_model("SourceRelationV4", __base__=StrictModel,
+    **{key: (field.annotation, deepcopy(field)) for key, field in SourceRelation.model_fields.items()
+       if key != "kind"})
+
+
+class SourceReportDraftV4(SourceReportDraftV3):
+    """输出报告实例JSON，全部对象id全局唯一，事实、来源与内部引用须完整。
+
+    事件不含actor_ids、relations不含kind，显式提供即拒绝；kind仅由basis唯一映射，
+    名单只在最终公共投影按结构主客体生成，
+    不代表在场或实际执行，不以索引代替原文语义核对。一条Claim表达对应主体的具体
+    行动或认知，多人分工用必要子行动表达，不漏重要经历或编造动作凑名单。
+    identity严格有源，motivation/change键必填、未交代时null；不借null隐去真实事实。
+    participants须被真实Claim引用；不藏核心人物、不自动合并或删除背景。
+    其余人物、来源、状态、阶段、关系、标题与格式修复约束继承v3。
+    """
+
+    events: list[SourceEventV4] = Field(min_length=1, max_length=300,
+        description="完整表达真实分工和必要经历；事件无actor_ids，不将正文提及或计划冒充实际行动。")
+    relations: list[SourceRelationV4] = Field(max_length=600,
+        description="只选有据basis及同向事件/动作，关系无kind，最终按basis唯一映射；不将计划冒充实际因果。")
+
+
+def source_report_model(wire=SOURCE_REPORT_WIRE):
+    if wire == SOURCE_REPORT_WIRE:
+        return SourceReportDraft
+    if wire == SOURCE_REPORT_V2_WIRE:
+        return SourceReportDraftV2
+    if wire == SOURCE_REPORT_V3_WIRE:
+        return SourceReportDraftV3
+    if wire == SOURCE_REPORT_V4_WIRE:
+        return SourceReportDraftV4
+    raise ValueError("未知的私有来源报告合同版本")
+
+
+def source_response_model(wire):
+    """One live draft/repair pair; no state on shared schemas or old wires.
+
+    A parseable, complete Claim cannot disappear into null during a schema
+    repair. This is a structural loss check, not a judgement of source meaning.
+    Real retractions still require the sourced review and final verification.
+    """
+    base = source_report_model(wire)
+    if wire not in SPARSE_SOURCE_REPORT_WIRES:
+        return base
+    protected = None
+
+    def analysis_state(value):
+        counts, anchors, ids = Counter(), {}, Counter()
+        if not isinstance(value, dict) or not isinstance(value.get("characters"), list):
+            return counts, anchors, ids
+        people = [p for p in value["characters"] if isinstance(p, dict)]
+        ids.update(p["id"] for p in people if isinstance(p.get("id"), str))
+        for person in people:
+            name = person["name"].strip() if isinstance(person.get("name"), str) else None
+            for field in ("motivation", "change"):
+                claim = person.get(field)
+                if not isinstance(claim, dict):
+                    continue
+                try:
+                    # Even a Claim with malformed/missing action annotations
+                    # already carries factual text and sources. Repairing those
+                    # annotations must not become permission to erase it.
+                    SourceClaim.model_validate({k: claim[k] for k in SourceClaim.model_fields if k in claim}, strict=True)
+                except ValueError:
+                    continue
+                # Names are only exact repair anchors, never aliases or entity
+                # inference. Counts preserve separate same-name individuals.
+                if name is not None:
+                    counts[(name, field)] += 1
+                if isinstance(person.get("id"), str) and ids[person["id"]] == 1:
+                    # A unique ID protects the Claim even when name is the
+                    # schema defect. None marks unavailable name metadata,
+                    # not an absent Claim; membership must be checked below.
+                    anchors[(person["id"], field)] = name
+        return counts, anchors, ids
+
+    def preserve_analysis(cls, value):
+        nonlocal protected
+        counts, anchors, ids = analysis_state(value)
+        if protected is None:
+            protected = counts, anchors
+        else:
+            prior_counts, prior_anchors = protected
+            # Stable IDs prevent shuffling null between same-name people. An
+            # explicitly repaired ID still has the exact-name count backstop.
+            lost = any((key[0] in ids or name is None)
+                       and (key not in anchors or (name is not None and anchors[key] != name))
+                       for key, name in prior_anchors.items())
+            if lost or prior_counts - counts:
+                raise ValueError("格式修复不能清空已有分析主张，须经有源修订和终审")
+        return value
+
+    return create_model(base.__name__, __base__=base, __doc__=base.__doc__, __validators__={
+        "preserve_analysis": model_validator(mode="before")(preserve_analysis)})
+
+
+def report_wire(job):
+    version = job.get("report_wire_version")
+    if version in (None, LEGACY_REPORT_WIRE):
+        return LEGACY_REPORT_WIRE
+    if version not in SOURCE_REPORT_WIRES:
+        raise ValueError("未知的私有报告合同版本")
+    return version
+
+
+def _binding(job):
+    if (any(not isinstance(job[key], str) or not job[key] for key in
+            ("account_id", "project_id", "source_version", "source_hash"))
+            or type(job["source_revision"]) is not int or job["source_revision"] < 0):
+        raise ValueError("来源目录绑定格式无效")
+    return {key: job[key] for key in ("account_id", "project_id", "source_version",
+                                     "source_revision", "source_hash")}
+
+
+def _directory_material(bank, read_text):
+    if not bank or bank != source_bank(read_text):
+        raise ValueError("来源目录必须对应完整当前来源库")
+    ordered = sorted(bank.values(), key=lambda p: (p.chapter_number, p.start, p.end, p.id))
+    entries, counts = {}, {}
+    for passage in ordered:
+        if any(type(getattr(passage, key)) is not int for key in ("chapter_number", "start", "end")):
+            raise ValueError("来源目录位置类型无效")
+        number = passage.chapter_number
+        counts[number] = counts.get(number, 0) + 1
+        entries[f"C{number}P{counts[number]:03d}"] = passage.id
+    return entries, ordered
+
+
+def check_source_entries(entries, bank, read_text):
+    if entries != _directory_material(bank, read_text)[0]:
+        raise ValueError("短来源目录与完整来源库不一致")
+
+
+def freeze_source_directory(job, bank, read_text):
+    """Validate the COMPLETE bank before any runtime/budget/HTTP boundary."""
+    entries, ordered = _directory_material(bank, read_text)
+    value = {**_binding(job), "entries": entries,
+             "bank_hash": object_hash([dict(source_id=p.id, chapter_number=p.chapter_number,
+                                           start=p.start, end=p.end, quote=p.quote) for p in ordered])}
+    return {**value, "directory_hash": object_hash(value)}
+
+
+def check_source_directory(job, bank, read_text):
+    # Recomputing an expectation is a check, NOT a replacement directory. All
+    # resolution below uses the persisted map after this equality check.
+    expected = freeze_source_directory(job, bank, read_text)
+    directory = job.get("source_directory")
+    if (not isinstance(directory, dict) or directory != expected
+            or directory["directory_hash"] != object_hash({k: v for k, v in directory.items() if k != "directory_hash"})):
+        raise ValueError("冻结来源目录、账户或稿本绑定不一致")
+    return job["source_directory"]["entries"]
+
+
+def source_target_index(draft):
+    result = {key: value for key, value in draft.items() if key in SOURCE_SCALARS}
+    for group in SOURCE_ID_GROUPS:
+        result.update({f"{group}/{item['id']}": item for item in draft[group]})
+    for group in INDEX_GROUPS:
+        result.update({f"{group}/{i}": item for i, item in enumerate(draft[group])})
+    return result
+
+
+def source_target_hashes(draft):
+    return {key: object_hash(value) for key, value in source_target_index(draft).items()}
+
+
+def _references(value, path="", target=None):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child = f"{path}.{key}" if path else key
+            if key in SOURCE_REF_NAMES:
+                yield child, target or key, item
+            elif not path and key in SOURCE_ID_GROUPS:
+                for index, obj in enumerate(item):
+                    yield from _references(obj, f"{key}[{index}]", f"{key}/{obj['id']}")
+            elif not path and key in INDEX_GROUPS:
+                for index, obj in enumerate(item):
+                    yield from _references(obj, f"{key}[{index}]", f"{key}/{index}")
+            else:
+                yield from _references(item, child, target)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _references(item, f"{path}[{index}]", target)
+
+
+def _shape(data, entries, read_text, *, wire=SOURCE_REPORT_WIRE):
+    draft = source_report_model(wire).model_validate(data, strict=True)
+    if (set(draft.chapter_numbers) != set(read_text)
+            or len(draft.chapter_numbers) != len(read_text)):
+        raise ValueError("报告必须覆盖全部当前正文")
+    ids = [item.id for group in SOURCE_ID_GROUPS for item in getattr(draft, group)]
+    # A duplicate cannot be safely addressed by a whole-object correction.
+    if len(ids) != len(set(ids)) or set(ids).intersection(entries.values()):
+        raise ValueError("草稿对象ID不唯一或占用服务器证据ID")
+    return draft
+
+
+def _legacy_projection(data, entries):
+    """Only rename/resolve refs and assemble declarations; no fact edits."""
+    used = set()
+    def visit(value):
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key in SOURCE_REF_NAMES:
+                    if len(item) != len(set(item)) or any(ref not in entries for ref in item):
+                        raise ValueError("来源引用不存在或重复")
+                    used.update(item)
+                    result[next(k for k, v in REF_NAMES.items() if v == key)] = [entries[ref] for ref in item]
+                else:
+                    result[key] = visit(item)
+            return result
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        return value
+    projected = visit(data)
+    if len(used) > 500:
+        raise ValueError("派生证据超过原报告容量")
+    ordered = sorted(entries, key=lambda short: tuple(map(int, short[1:].split("P"))))
+    projected["evidence"] = [dict(id=entries[short], source_id=entries[short]) for short in ordered if short in used]
+    return projected
+
+
+def validate_source_candidate(data, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
+    check_source_entries(entries, bank, read_text)
+    draft = _shape(data, entries, read_text, wire=wire)
+    value = draft.model_dump(mode="json")
+    projected = _legacy_projection(value, entries)
+    if wire == SOURCE_REPORT_V4_WIRE:
+        # Validate ALL endpoints before intersecting with visible characters:
+        # otherwise an invalid ID could disappear from the derived index.
+        people = {p.id for p in [*draft.characters, *draft.participants]}
+        if any(key is not None and key not in people for _, claim, _ in _claims(draft)
+               for key in (claim.subject_id, claim.object_id)):
+            raise ValueError("动作或身份端点不存在，不能以字符串null代替null")
+        for event, output in zip(draft.events, projected["events"], strict=True):
+            claims = [event.action, event.consequence, *event.sub_events]
+            endpoints = {key for claim in claims for key in (claim.subject_id, claim.object_id) if key is not None}
+            actors = [person.id for person in draft.characters if person.id in endpoints]
+            if len(actors) > 20:
+                raise ValueError("事件人物超过公共20人上限")
+            output["actor_ids"] = actors
+        for edge in projected["relations"]:
+            edge["kind"] = SOURCE_RELATION_KINDS[edge["basis"]]
+    _, report = validate_draft(projected, bank, read_text, producer=producer,
+                               schema_version="2" if wire in SPARSE_SOURCE_REPORT_WIRES else "1")
+    return value, report
+
+
+def _cycle_targets(nodes, edges):
+    """Return one exact cycle witness, not all edges or an invented ordering."""
+    outgoing = {node: [] for node in sorted(nodes)}
+    for start, end, target in edges:
+        outgoing[start].append((end, target))
+    done = set()
+    for start in outgoing:
+        if start in done:
+            continue
+        active, path, stack = {start: 0}, [], [(start, iter(outgoing[start]))]
+        while stack:
+            node, iterator = stack[-1]
+            edge = next(iterator, None)
+            if edge is None:
+                done.add(node)
+                del active[node]
+                stack.pop()
+                if path:
+                    path.pop()
+                continue
+            end, target = edge
+            if end in active:
+                return list(dict.fromkeys([*path[active[end]:], target]))
+            if end not in done:
+                active[end] = len(stack)
+                path.append(target)
+                stack.append((end, iter(outgoing[end])))
+    return []
+
+
+def prepare_source_draft(data, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
+    """Strict shape/boundary first; only enumerated, addressable defects review.
+
+    No exception from the final validator is converted into a diagnostic.
+    Unexpected errors still fail the job. Diagnostics never make a draft valid.
+    """
+    check_source_entries(entries, bank, read_text)
+    draft = _shape(data, entries, read_text, wire=wire)
+    value = draft.model_dump(mode="json")
+    diagnostics = []
+    def emit(code, targets, field, **details):
+        issue = dict(code=code, targets=list(dict.fromkeys(targets)), field=field, **details)
+        if issue not in diagnostics:
+            diagnostics.append(issue)
+        if (len(diagnostics) > MAX_DIAGNOSTICS
+                or len(canonical(diagnostics).encode("utf-8")) > MAX_DIAGNOSTIC_BYTES):
+            raise ValueError("草稿问题超过安全诊断边界")
+
+    for path, target, refs in _references(value):
+        unknown = list(dict.fromkeys(ref for ref in refs if ref not in entries))
+        if unknown:
+            emit("unknown_source", [target], path, source_ids=unknown)
+        if len(refs) != len(set(refs)):
+            emit("duplicate_source", [target], path)
+    people = {p.id: p for p in [*draft.characters, *draft.participants]}
+    visible, event_ids = {p.id for p in draft.characters}, {e.id for e in draft.events}
+    claims = {key: (claim, owner) for key, claim, owner in _claims(draft)}
+    if wire in SPARSE_SOURCE_REPORT_WIRES:
+        used_people = {endpoint for claim, _ in claims.values() for endpoint in (claim.subject_id, claim.object_id)}
+        for person in draft.participants:
+            if person.id not in used_people:
+                emit("unused_participant", ["participants/" + person.id], "id")
+    claim_targets = {}
+    for key, _, owner in _claims(draft):
+        if owner in visible:
+            target = "characters/" + owner
+        elif owner in event_ids:
+            target = "events/" + owner
+        elif key.startswith("contradictions."):
+            target = "contradictions/" + key.split(".")[1]
+        else:
+            target = "findings/" + key
+        claim_targets[key] = target
+    for group in ("characters", "participants"):
+        for person in getattr(draft, group):
+            target = f"{group}/{person.id}"
+            refs = person.name_source_ids
+            if person.name in NON_PEOPLE or (all(ref in entries for ref in refs)
+                    and not any(person.name in bank[entries[ref]].quote for ref in refs)):
+                emit("person_name", [target], "name")
+            if group == "characters":
+                if (len(person.aliases) != len(set(person.aliases))
+                        or len(person.alias_basis) != len(person.aliases)
+                        or {a.name for a in person.alias_basis} != set(person.aliases)):
+                    emit("alias_basis", [target], "alias_basis")
+                for alias in person.alias_basis:
+                    if alias.name in NON_PEOPLE or (all(ref in entries for ref in alias.source_ids)
+                            and not any(alias.name in bank[entries[ref]].quote for ref in alias.source_ids)):
+                        emit("alias_name", [target], "alias_basis")
+    for key, (claim, owner) in claims.items():
+        if any(endpoint is not None and endpoint not in people for endpoint in (claim.subject_id, claim.object_id)):
+            emit("claim_endpoint", [claim_targets[key]], key)
+        if ((claim.kind in {"knowledge", "feeling"} and claim.subject_id is None)
+                or (owner in visible and (owner not in (claim.subject_id, claim.object_id)
+                    or (claim.kind in {"knowledge", "feeling"} and claim.subject_id != owner)))):
+            emit("claim_holder", [claim_targets[key]], key)
+    for event in draft.events:
+        if wire == SOURCE_REPORT_V4_WIRE:
+            continue  # Only final projection has an event index in this wire.
+        event_claims = [event.action, event.consequence, *event.sub_events]
+        participants = {key for c in event_claims for key in (c.subject_id, c.object_id) if key is not None}
+        subjects = {c.subject_id for c in event_claims if c.subject_id is not None}
+        if (not set(event.actor_ids) <= participants & visible or not subjects & visible <= set(event.actor_ids)
+                or len(event.actor_ids) != len(set(event.actor_ids))):
+            emit("event_actors", ["events/" + event.id], "actor_ids")
+
+    def action(key, target, event=None):
+        if key not in claims or claims[key][1] not in event_ids or (event and claims[key][1] != event):
+            emit("action_endpoint", [target], key)
+            return None
+        return claims[key]
+
+    dependencies, action_edges, relation_keys, person_keys = [], [], set(), set()
+    kinds = SOURCE_RELATION_KINDS
+    for i, edge in enumerate(draft.relations):
+        target = f"relations/{i}"
+        kind = kinds[edge.basis] if wire == SOURCE_REPORT_V4_WIRE else edge.kind
+        key = edge.from_id, edge.to_id, kind
+        if key in relation_keys:
+            emit("duplicate_relation", [target], target)
+        relation_keys.add(key)
+        first, second = action(edge.from_action, target, edge.from_id), action(edge.to_action, target, edge.to_id)
+        if edge.from_id not in event_ids or edge.to_id not in event_ids or edge.from_id == edge.to_id:
+            emit("relation_endpoint", [target], target)
+        if not first or not second:
+            continue
+        if edge.from_action == edge.to_action or kinds[edge.basis] != kind:
+            emit("relation_kind", [target], target)
+        if edge.status == "fact" and any(c.status != "fact" for c in (first[0], second[0])):
+            emit("relation_status", [target], target)
+        if edge.basis in {"cause", "purpose"} and any(c.phase != "actual" for c in (first[0], second[0])):
+            emit("relation_phase", [target, claim_targets[edge.from_action], claim_targets[edge.to_action]], target)
+        if edge.basis in {"cause", "purpose", "before"} and edge.status in {"fact", "reported"}:
+            dependencies.append((first[1], second[1], target))
+            action_edges.append((edge.from_action, edge.to_action, target))
+    for i, edge in enumerate(draft.character_relations):
+        target = f"character_relations/{i}"
+        key = edge.from_id, edge.to_id, edge.label
+        if key in person_keys:
+            emit("duplicate_character_relation", [target], target)
+        person_keys.add(key)
+        if edge.from_id not in visible or edge.to_id not in visible or edge.from_id == edge.to_id:
+            emit("character_endpoint", [target], target)
+        if edge.action_ref not in claims:
+            emit("character_action", [target], "action_ref")
+            continue
+        claim = claims[edge.action_ref][0]
+        if ((claim.subject_id, claim.object_id) != (edge.from_id, edge.to_id)
+                or not set(edge.source_ids).intersection(claim.source_ids)
+                or (edge.status == "fact" and claim.status != "fact")):
+            emit("character_direction", [target, claim_targets[edge.action_ref]], "action_ref")
+    for i, edge in enumerate(draft.order_constraints):
+        target = f"order_constraints/{i}"
+        first, second = action(edge.from_action, target), action(edge.to_action, target)
+        if first and second:
+            action_edges.append((edge.from_action, edge.to_action, target))
+            if first[1] != second[1]:
+                dependencies.append((first[1], second[1], target))
+    for label, nodes, edges in (("action_cycle", claims, action_edges), ("event_cycle", event_ids, dependencies)):
+        cycle = _cycle_targets(nodes, edges)
+        if cycle:
+            emit(label, cycle, "order_constraints/relations")
+    positions = {key: i for i, key in enumerate(draft.story_order)}
+    if len(draft.story_order) != len(event_ids) or set(draft.story_order) != event_ids:
+        emit("story_order_coverage", ["story_order"], "story_order")
+    else:
+        inverted = [target for first, second, target in dependencies if positions[first] >= positions[second]]
+        if inverted:
+            emit("story_order_dependency", ["story_order", *inverted], "story_order")
+    if sorted(q.index for q in draft.question_sources) != list(range(len(draft.open_questions))):
+        emit("question_sources", [f"question_sources/{i}" for i in range(len(draft.question_sources))]
+             + [f"open_questions/{i}" for i in range(len(draft.open_questions))], "question_sources")
+    if not diagnostics:
+        # A backstop here is also intentional. Unexpected validator failures
+        # must stop, not be silently relabelled as a reviewable content issue.
+        validate_source_candidate(value, entries, bank, read_text, producer=producer, wire=wire)
+    return value, diagnostics
+
+
+def _review_sources(refs, entries, bank, read_text):
+    if len(refs) != len(set(refs)) or any(ref not in entries for ref in refs):
+        raise ValueError("审查引用了未知或重复短来源")
+    # Keep the exact unique quotation checks on correction reasons too.
+    from app.core.preview_analysis import _source_check
+    _source_check([entries[ref] for ref in refs], bank, read_text)
+
+
+def validate_source_review(data, draft, entries, bank, read_text, *, final=False, wire=SOURCE_REPORT_WIRE):
+    check_source_entries(entries, bank, read_text)
+    if wire in RAW_SOURCE_REPORT_WIRES:
+        normalized = source_report_model(wire).model_validate(draft, strict=True).model_dump(mode="json")
+        if object_hash(normalized) != object_hash(draft):
+            raise ValueError("审查对象必须是同版本的规范化草稿")
+    else:
+        source_report_model(wire)
+    review = (ReportVerification if final else ReportReview).model_validate(data, strict=True).root
+    if review.draft_hash != object_hash(draft):
+        raise ValueError("审查绑定了其他草稿")
+    if isinstance(review, ReviewAccept):
+        if sorted(review.checked_chapters) != sorted(read_text):
+            raise ValueError("审查没有覆盖全部当前章节")
+    elif isinstance(review, ReviewBlocked):
+        for issue in review.issues:
+            _review_sources(issue.source_ids, entries, bank, read_text)
+    else:
+        if len(canonical(review.model_dump(mode="json")).encode("utf-8")) > MAX_REVISION_BYTES:
+            raise ValueError("修订总量超过12KiB")
+        targets = [c.target for c in review.changes]
+        if len(targets) != len(set(targets)):
+            raise ValueError("修订对象重复")
+        for change in review.changes:
+            if wire == SOURCE_REPORT_V4_WIRE and change.replacement is not None:
+                if change.target.startswith("events/") and "actor_ids" in change.replacement:
+                    raise ValueError("v4事件不接受actor_ids")
+                if change.target.startswith("relations/") and "kind" in change.replacement:
+                    raise ValueError("v4事件关系不接受kind")
+            _review_sources(change.source_ids, entries, bank, read_text)
+    return review
+
+
+def apply_source_revision(review, draft, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
+    if not isinstance(review, ReviewRevise):
+        raise ValueError("只允许一次有源修订")
+    validate_source_review(review.model_dump(mode="json"), draft, entries, bank, read_text, wire=wire)
+    original, revised, removals = source_target_index(draft), deepcopy(draft), {}
+    for change in review.changes:
+        exists = change.target in original
+        if change.before_hash != (object_hash(original[change.target]) if exists else None):
+            raise ValueError("修订对象原值哈希不一致")
+        replacement = change.replacement
+        if change.target in SOURCE_SCALARS:
+            if replacement is None or set(replacement) != {"value"}:
+                raise ValueError("报告元信息须完整替换")
+            revised[change.target] = replacement["value"]
+            continue
+        parts = change.target.split("/")
+        if len(parts) != 2 or parts[0] not in (*SOURCE_ID_GROUPS, *INDEX_GROUPS):
+            raise ValueError("修订目标不在白名单")
+        group, key = parts
+        if group in SOURCE_ID_GROUPS:
+            index = next((i for i, item in enumerate(draft[group]) if item["id"] == key), None)
+            if replacement is not None and replacement.get("id") != key:
+                raise ValueError("修订不能更换稳定ID")
+            if index is None:
+                if replacement is None:
+                    raise ValueError("不能撤回不存在的对象")
+                revised[group].append(replacement)
+                continue
+        else:
+            if not key.isdigit() or str(int(key)) != key or int(key) > len(draft[group]):
+                raise ValueError("修订索引无效")
+            index = int(key)
+        if replacement is None:
+            if index == len(draft[group]):
+                raise ValueError("不能撤回不存在的对象")
+            removals.setdefault(group, []).append(index)
+        else:
+            if group == "open_questions":
+                if set(replacement) != {"value"}:
+                    raise ValueError("未解项格式无效")
+                replacement = replacement["value"]
+            if index == len(draft[group]):
+                revised[group].append(replacement)
+            else:
+                revised[group][index] = replacement
+    for group, indices in removals.items():
+        for index in sorted(indices, reverse=True):
+            del revised[group][index]
+    # A revision is only applied once and must immediately pass the ORIGINAL
+    # full validator. No second diagnostic/revision round is opened here.
+    return validate_source_candidate(revised, entries, bank, read_text, producer=producer, wire=wire)[0]

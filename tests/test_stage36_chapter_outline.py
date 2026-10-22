@@ -187,9 +187,30 @@ class OutlineApiTest(unittest.TestCase):
 
     def test_read_projection_does_not_persist_or_change_manuscript(self):
         project = self._project()
-        preview = self.preview(project, "第一章\n" + bare_source())
-        self.assertEqual(len(preview["chapter_sections"]["1"]), 4)
+        text = "第一章\n" + bare_source()
+        cuts = [0, text.index("  归航前  "), text.index("听雨轩"), text.index("秋社"), len(text)]
+        contents = [text[start:end] for start, end in zip(cuts, cuts[1:])]
+        titles = ["第一章", "归航前", "听雨轩", "秋社"]
+        preview = self.preview(project, text)
+        # The normal upload contract now promotes supported bare titles to
+        # formal chapters; pure parsing/navigation compatibility stays above.
+        self.assertEqual(preview["chapter_count"], 4)
+        self.assertEqual([c["chapter_number"] for c in preview["chapters"]], [1, 2, 3, 4])
+        self.assertEqual([c["title"] for c in preview["chapters"]], titles)
+        self.assertEqual([c["content"] for c in preview["chapters"]], contents)
+        self.assertEqual("".join(c["content"] for c in preview["chapters"]), text)
+        self.assertEqual(set(preview["chapter_sections"]), {"1", "2", "3", "4"})
+        for number, content in enumerate(contents, 1):
+            sections = preview["chapter_sections"][str(number)]
+            self.assertEqual(len(sections), 1)
+            self.assertEqual((sections[0]["start"], sections[0]["end"]), (0, utf16_length(content)))
         workspace = self.confirm(project, preview)
+        chapters = workspace["active_version"]["chapters"]
+        self.assertEqual([c["chapter_number"] for c in chapters], [1, 2, 3, 4])
+        self.assertEqual([c["title"] for c in chapters], titles)
+        self.assertEqual([c["content"] for c in chapters], contents)
+        self.assertEqual([c["formal_content"] for c in chapters], contents)
+        self.assertEqual("".join(c["content"] for c in chapters), text)
         path = self.independent.store.base_dir / f"{project}.json"
         original = path.read_bytes()
         for _ in range(3):
@@ -199,7 +220,7 @@ class OutlineApiTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), original)
         self.assertNotIn('"chapter_sections"', original.decode())
         self.assertNotIn('"section_id"', original.decode())
-        self.assertEqual(len(workspace["active_version"]["chapters"]), 1)
+        self.assertEqual(len(workspace["active_version"]["chapters"]), 4)
 
     def test_save_returns_fresh_projection_preserves_formal_source_and_conflicts(self):
         project = self._project()

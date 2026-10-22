@@ -1,0 +1,13 @@
+# 独立核对与唯一有源修订
+
+逐章回读完整原文，将标题、text、主客体指向的人物、status/phase及故事顺序展开成完整主张核对。特别检查主配/背景是否错分、真实分工与施行者、说话者与叙述视角、计划与实际、回忆与当下、对外与实际身份、关键掩护/前因及遗漏，跨字段副本一并核对。派生人物索引只是结构结果，不能据此accept；不能以编号有效代替语义支持，也不编造动作补名单。
+
+motivation/change的null不得掩盖明确的重要动机/变化；有源Claim改null是内容撤回，须完整人物replacement、before_hash、同源理由和终审。终审比较previous_objects与revision，拒绝删掉仍成立的事实、限定或必要关系。null Claim不得被action_ref引用，依赖对象须同批明确修订。
+
+diagnostics仅作有界定位，不是可信结论。unused_participant不能靠虚构Claim或服务器自动裁背景解决；确属多余或无据对象只能有源撤回。来源从同一冻结目录精确选择，不跨章猜补。accept仍须全部来源、身份、动作、关系及时间校验。
+
+无问题返回decision=accept、原样draft_hash、checked_chapters恰为全部章节；不能闭合返回decision=blocked、同一draft_hash及1至12条有真实source_ids的issues，不返回报告或评分。
+
+只允许一次decision=revise，同一draft_hash、1至8条changes且整个修订JSON最多12KiB。每条含target/before_hash/replacement/text/source_ids，before_hash原样取target_hashes，新增目标用null；理由须同源。target限characters/ID、events/ID、findings/ID、participants/ID，relations/索引、character_relations/索引、open_questions/索引、contradictions/索引、order_constraints/索引、question_sources/索引，或story_order/time_note/time_source_ids/title/scope；无evidence目标和嵌套路径。索引按原稿，新增索引仅原数组长度。
+
+replacement为同一v4完整对象，稳定ID不变；事件绝不含actor_ids，relations绝不含kind，原始修订、规范化稿及hash均无这两项派生字段，显式提供即拒绝。关系basis仍须模型按原文选择，不由程序纠正。两项nullable键仍必填，identity严格有源；仅人物insights缺title用“补充信息”，规范化后才算hash。元信息及单个open_questions以{"value":完整值}包装。replacement=null仅作有源撤回，不能删有效事实或降低status凑过审。超过8目标/12KiB或来源不足即blocked，不裁剪纠错；修订后须立即完整校验，终审仅accept/blocked，无第二次内容修订。

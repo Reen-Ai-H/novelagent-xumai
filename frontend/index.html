@@ -7,11 +7,11 @@
     <title>叙脉｜新一代写作体验</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=stage32" />
     <!-- Release CSS and JS together; browser_stage36_visual.cjs checks this token on normal reload. -->
-    <link rel="stylesheet" href="/static/styles.css?v=stage37-status3" />
-    <link rel="stylesheet" href="/static/deconstruction-report.css?v=stage37-status3" />
-    <link rel="stylesheet" href="/static/workspace-ui.css?v=stage37-status3" />
-    <link rel="stylesheet" href="/static/visual-reading.css?v=stage37-status3" />
-    <link rel="stylesheet" href="/static/workspace-reader.css?v=stage37-status3" />
+    <link rel="stylesheet" href="/static/styles.css?v=stage38-platform12" />
+    <link rel="stylesheet" href="/static/deconstruction-report.css?v=stage38-platform12" />
+    <link rel="stylesheet" href="/static/workspace-ui.css?v=stage38-platform12" />
+    <link rel="stylesheet" href="/static/visual-reading.css?v=stage38-platform12" />
+    <link rel="stylesheet" href="/static/workspace-reader.css?v=stage38-platform12" />
   </head>
   <body>
     <div class="site-noise" aria-hidden="true"></div>
@@ -203,7 +203,7 @@
         <aside class="spine-nav" aria-label="作品空间导航">
           <a class="spine-brand" href="/library" data-route="/library" aria-label="返回书架"><span>叙</span><span>脉</span><b>印</b></a>
           <nav class="spine-links"><a class="spine-link is-active" href="/library" data-route="/library"><span class="spine-icon">▥</span><strong>书架</strong></a></nav>
-          <div class="spine-bottom"><span class="spine-rule"></span><span class="mono">A / 01</span><button id="logoutButton" class="spine-logout" type="button">退出</button></div>
+          <div class="spine-bottom"><div class="spine-account" data-account-identity hidden><span class="account-initial" data-account-avatar aria-hidden="true"></span><strong data-account-name></strong></div><button id="logoutButton" class="spine-logout" type="button">退出</button></div>
         </aside>
         <div class="workspace-main">
           <header class="workspace-header">
@@ -233,7 +233,7 @@
             <div id="chapterList" class="chapter-list"></div>
             <div class="chapter-column-foot"><button id="openVersionButton" type="button" class="quiet-link">查看稿本历史</button></div>
           </aside>
-          <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">WORK / 02</span><button id="editorLogoutButton" class="spine-logout" type="button">退出</button></div>
+          <div class="spine-bottom"><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><div class="spine-account" data-account-identity hidden><span class="account-initial" data-account-avatar aria-hidden="true"></span><strong data-account-name></strong></div><button id="editorLogoutButton" class="spine-logout" type="button">退出</button></div>
         </aside>
         <div class="editor-main">
           <header class="editor-header">
@@ -252,7 +252,7 @@
             <div class="editor-layout">
               <section class="writing-column" aria-label="正文编辑区">
                 <div class="writing-toolbar"><label for="chapterTitleInput">章节标题</label><span id="writingModeNote">独立创作 · 正式正文</span></div>
-                <input id="chapterTitleInput" class="chapter-title-input" type="text" maxlength="200" aria-label="章节标题" />
+                <div class="chapter-title-line"><span id="chapterTitlePrefix" class="chapter-title-prefix" hidden></span><input id="chapterTitleInput" class="chapter-title-input" type="text" maxlength="200" aria-label="章节标题" /></div>
                 <textarea id="chapterEditor" class="chapter-editor" spellcheck="false" aria-label="中文正文" placeholder="从这里开始写下你的故事……"></textarea>
                 <div class="writing-footer"><span>自动保存 · Ctrl / ⌘ S 立即保存</span><span id="editorRevisionLabel" class="mono">REV / 0</span></div>
               </section>
@@ -303,17 +303,18 @@
             </div>
             <button class="spine-link is-hidden" type="button" data-action="deconstruction-open-versions"><span class="spine-icon">◫</span><strong>版本记录</strong></button>
           </nav>
-          <div class="spine-bottom"><span class="spine-rule"></span><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><span class="mono">XRAY / 04</span><button id="deconstructionLogoutButton" class="spine-logout" type="button">退出</button></div>
+          <div class="spine-bottom"><button class="spine-notification-button" type="button" data-action="open-notifications">通知 <b data-notification-count>0</b></button><div class="spine-account" data-account-identity hidden><span class="account-initial" data-account-avatar aria-hidden="true"></span><strong data-account-name></strong></div><button id="deconstructionLogoutButton" class="spine-logout" type="button">退出</button></div>
         </aside>
         <main class="deconstruction-main">
           <header class="deconstruction-header">
             <div class="deconstruction-heading"><p class="kicker"><span class="kicker-line"></span>独立创作 / <span id="deconstructionProjectTitle">—</span></p><h1 id="deconstructionPageTitle">作品拆解</h1></div>
-            <div class="deconstruction-header-actions"><span id="deconstructionStatusPill" class="deconstruction-status-pill">等待读取</span><button class="button button-outline" type="button" data-action="open-workspace-tools">分析与来源</button></div>
+            <div class="deconstruction-header-actions"><section id="reportWorkflow" class="report-workflow" aria-live="polite"></section><span id="deconstructionStatusPill" class="deconstruction-status-pill">等待读取</span><button class="button button-outline" type="button" data-action="open-workspace-tools">分析与来源</button></div>
           </header>
           <div id="deconstructionNotice" class="notice deconstruction-notice is-hidden" role="status"></div>
+          <dialog id="reportConfirmDialog" class="review-dialog report-confirm-dialog" aria-labelledby="reportConfirmTitle"><div class="review-dialog-shell"><button class="dialog-close" type="button" data-action="close-report-confirm" aria-label="关闭拆书确认">×</button><h2 id="reportConfirmTitle">确认开始拆书</h2><p id="reportConfirmScope"></p><p id="reportConfirmBudget"></p><p>模型调用会产生费用，并与其他作品共用本机预算；失败与重试也会计入。完成后自动显示报告，离开页面也会继续。</p><p id="reportConfirmError" role="alert"></p><div class="review-actions"><button class="button button-outline" type="button" data-action="close-report-confirm">暂不开始</button><button id="reportConfirmButton" class="button button-primary" type="button" data-action="confirm-report">确认费用并开始拆书</button></div></div></dialog>
           <dialog id="workspaceToolsDialog" class="review-dialog workspace-tools-dialog" aria-labelledby="workspaceToolsTitle"><div class="review-dialog-shell"><button class="dialog-close" type="button" data-action="close-workspace-tools" aria-label="关闭分析与来源">×</button><h2 id="workspaceToolsTitle">分析与来源</h2><div id="workspaceSource"></div><button id="deconstructionRefreshButton" class="quiet-link" type="button" data-action="deconstruction-refresh">刷新结果</button><button class="quiet-link" type="button" data-action="deconstruction-section" data-section="guide">全书导读</button>
-          <details class="model-analysis-options"><summary>模型分析<span id="modelAnalysisActivity"></span></summary><p id="modelSharedBudget" role="status">正在读取本机共用预算…</p><div class="model-analysis-controls"><button class="button button-outline" data-action="book-start">开始 / 继续分析（付费）</button><button class="quiet-link" data-action="book-pause">暂停</button><span id="bookAnalysisStatus" role="status">由你主动开始，模型调用会产生费用。</span></div>
-          <details class="model-analysis-panel"><summary>试拆选定章节</summary><div class="model-analysis-controls"><label>章节范围 <input id="modelAnalysisChapters" type="text" value="1-6" placeholder="连续章节，例如 1-6" /></label><button type="button" class="button button-outline" data-action="model-analyze">开始试拆</button><span id="modelAnalysisStatus" role="status">先预览，再采用。</span></div><div id="modelAnalysisPreview"></div></details>
+          <details class="model-analysis-options"><summary>高级分析（旧版）<span id="modelAnalysisActivity"></span></summary><p id="modelSharedBudget" role="status">正在读取本机共用预算…</p><div class="model-analysis-controls"><button class="button button-outline" data-action="book-start" disabled>旧版分段分析（付费）</button><button class="quiet-link" data-action="book-pause" disabled>暂停旧版任务</button><span id="bookAnalysisStatus" role="status">由你主动开始，模型调用会产生费用。</span></div>
+          <details class="model-analysis-panel"><summary>试拆选定章节</summary><div class="model-analysis-controls"><label>章节范围 <input id="modelAnalysisChapters" type="text" value="1-6" placeholder="连续章节，例如 1-6" /></label><button type="button" class="button button-outline" data-action="model-analyze" disabled>开始试拆</button><span id="modelAnalysisStatus" role="status">先预览，再采用。</span></div><div id="modelAnalysisPreview"></div></details>
           </details>
           </div></dialog>
           <section id="deconstructionPageContent" class="deconstruction-page-content" aria-busy="false"></section>
@@ -387,7 +388,7 @@
         <button class="dialog-close" value="cancel" type="submit" aria-label="关闭新建作品">×</button>
         <p class="kicker"><span class="kicker-line"></span>新建作品</p>
         <h2 id="newProjectTitle">先选一种创作方式</h2>
-        <p class="dialog-intro">作品模式创建后会固定。你可以随时回来继续，下一阶段再进入具体工作区。</p>
+        <p class="dialog-intro">作品模式创建后固定。</p>
         <div class="mode-options">
           <button class="mode-option" type="button" data-mode="independent"><span class="mode-icon mode-icon-paper">▤</span><span><strong>独立创作</strong><small>上传旧稿或从空白章节开始</small></span><span class="mode-chevron">→</span></button>
           <button class="mode-option mode-option-ai" type="button" data-mode="ai_assisted"><span class="mode-icon mode-icon-ai">✦</span><span><strong>AI 辅助写作</strong><small>先与主编聊清蓝图，再由导演台持续创作</small></span><span class="mode-chevron">→</span></button>
@@ -397,7 +398,7 @@
           <label for="projectTitleInput">作品标题</label><input id="projectTitleInput" type="text" maxlength="120" placeholder="例如：雾港来信" autocomplete="off" />
           <label for="projectBriefInput">一句话简介 <span>可选</span></label><textarea id="projectBriefInput" rows="3" maxlength="1000" placeholder="这部故事从哪里开始？"></textarea>
           <p id="projectError" class="field-error" role="alert"></p>
-          <button id="createProjectButton" class="button button-primary button-wide" type="submit">保存作品并进入下一阶段 <span aria-hidden="true">→</span></button>
+          <button id="createProjectButton" class="button button-primary button-wide" type="submit">创建作品 <span aria-hidden="true">→</span></button>
         </div>
         <button class="dialog-cancel" value="cancel" type="submit">取消</button>
       </form>
@@ -459,24 +460,24 @@
 
     <dialog id="deconstructionEvidenceDialog" class="review-dialog deconstruction-evidence-dialog" aria-labelledby="deconstructionEvidenceTitle">
       <div class="review-dialog-shell">
-        <button id="closeDeconstructionEvidenceButton" class="dialog-close" type="button" data-action="close-deconstruction-evidence" aria-label="关闭证据抽屉">×</button>
-        <p class="kicker"><span class="kicker-line"></span>证据回链 / 只读</p>
-        <h2 id="deconstructionEvidenceTitle">证据详情</h2>
+        <button id="closeDeconstructionEvidenceButton" class="dialog-close" type="button" data-action="close-deconstruction-evidence" aria-label="关闭原文回看">×</button>
+        <p class="kicker"><span class="kicker-line"></span>来源原文</p>
+        <h2 id="deconstructionEvidenceTitle">原文回看</h2>
         <div id="deconstructionEvidenceContent" class="deconstruction-evidence-dialog-content" aria-live="polite"></div>
         <div class="review-actions deconstruction-evidence-dialog-actions">
-          <button id="locateDeconstructionEvidenceButton" class="button button-primary" type="button" data-action="locate-deconstruction-evidence" disabled>在当前正文中定位</button>
+          <button id="locateDeconstructionEvidenceButton" class="button button-primary" type="button" data-action="locate-deconstruction-evidence" disabled>在正文中定位</button>
           <button id="dismissDeconstructionEvidenceButton" class="button button-outline" type="button" data-action="close-deconstruction-evidence">关闭</button>
         </div>
       </div>
     </dialog>
 
-    <script src="/static/report-browser.js?v=stage37-status3" defer></script>
-    <script src="/static/visual-reading.js?v=stage37-status3" defer></script>
-    <script src="/static/chapter-sections.js?v=stage37-status3" defer></script>
-    <script src="/static/chapter-preview.js?v=stage37-status3" defer></script>
-    <script src="/static/workspace-reader.js?v=stage37-status3" defer></script>
-    <script src="/static/rule-report.js?v=stage37-status3" defer></script>
-    <script src="/static/deconstruction-report.js?v=stage37-status3" defer></script>
-    <script src="/static/app.js?v=stage37-status3" defer></script>
+    <script src="/static/report-browser.js?v=stage38-platform12" defer></script>
+    <script src="/static/visual-reading.js?v=stage38-platform12" defer></script>
+    <script src="/static/chapter-sections.js?v=stage38-platform12" defer></script>
+    <script src="/static/chapter-preview.js?v=stage38-platform12" defer></script>
+    <script src="/static/workspace-reader.js?v=stage38-platform12" defer></script>
+    <script src="/static/rule-report.js?v=stage38-platform12" defer></script>
+    <script src="/static/deconstruction-report.js?v=stage38-platform12" defer></script>
+    <script src="/static/app.js?v=stage38-platform12" defer></script>
   </body>
 </html>

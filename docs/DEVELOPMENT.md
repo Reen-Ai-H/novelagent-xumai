@@ -19,7 +19,7 @@ Windows PowerShell 的等价步骤见 [`docs/WINDOWS_MIGRATION.md`](WINDOWS_MIGR
 
 阶段 34 增加显式 `LLM_PROVIDER=mimo`、`MIMO_API_KEY`、`MIMO_BASE_URL` 和 `MIMO_MODEL`。选择 MiMo 后只读取该供应商凭据，不回退旧 OpenAI/DeepSeek 配置；默认官方按量端点和 `mimo-v2.6-pro`。用户授权的 macOS RTF 凭据可通过 `scripts/configure_mimo.py <文件路径>` 安全配置，不输出密钥并保留其他配置。
 
-有 Key 的开发测试会显示“模型已连接·开发测试，不结算创作积分”。供应商错误必须进入 failed/retryable，不得悄悄回退模板。自动化测试使用 fake runtime，不调用真实模型。
+有 Key 的开发测试会显示“模型已连接·开发测试，不结算创作积分”。供应商错误必须显示真实状态，不得悄悄回退模板。普通report-v2拆书中，完整错误回应属于已知失败；真实传输超时/断流（含格式修复）则保留双账占用，暂停为report_request_unknown，重启及显式启动都不得重新发送。自动化测试使用fake runtime，不调用真实模型。
 
 ## 检查命令
 
@@ -47,7 +47,7 @@ git diff --check
 
 ## GitHub 阶段工作流
 
-当前叠加阶段例外（2026-10-17）：阶段34–37仍为Draft PR，最新候选在 `codex/stage-37-usable-workspace`；工程、真实内容及独立复核状态分别见PROGRESS，候选不自动等于已验收。网页端接续应从该分支最新远端提交创建下一阶段分支，不能直接从旧 `main` 开始；不因此自动合并既有PR。详见 [网页端交接](CODEX_WEB_HANDOFF.md)。下列“从main创建”适用于前置阶段已合并的常规流程。
+当前叠加阶段例外（2026-10-20）：阶段34–38仍为Draft PR，最新候选在 `codex/stage-38-platform-deconstruction`（PR15，基于阶段37 PR14）；工程、真实内容及独立复核状态分别见PROGRESS，候选不自动等于已验收。网页端接续应从该分支最新远端提交创建下一阶段分支，不能直接从旧 `main` 开始；不因此自动合并既有PR。下列“从main创建”适用于前置阶段已合并的常规流程。
 
 1. 从最新 `main` 创建 `codex/stage-<编号>-<主题>` 分支；一个阶段只承载一个可验收目标。
 2. 开工时记录基线，完成后运行与改动匹配的测试、静态检查和安全检查，并把真实结果写入 `PROGRESS.md`。
@@ -100,7 +100,7 @@ GitHub `main` 是当前 V1 开发基线，但不是 deployed 或 live verified�
 
 官方配置和计价依据为 [MiMo 首次调用](https://mimo.mi.com/docs/zh-CN/quick-start/summary/first-api-call) 与 [按量定价](https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go)。模型价格按精确名称选取并持久化版本，不能用历史 DeepSeek 价格估算 MiMo。
 
-`scripts/live_deconstruction.py` 是旧阶段独立研究入口，默认10元不是当前授权；不得用它的默认值推导用户许可。阶段37必须从产品 `analyze-preview` / 全文接口验证来源绑定，并沿用授权轮次对应的持久数据目录、`model_budget_cny`和`model_budget_scope`。10/17旧轮2元账保留；10/18明确新增5元使用另一scope，失败与重试均计入该轮，最新余额见PROGRESS。只有新明确授权才能新建授权轮，不得更换scope、重置账本、转移余额或启动默认10元路径绕过上限。自动化测试断网并用fake runtime，真实接口运行单独记录。
+`scripts/live_deconstruction.py` 是旧阶段独立研究入口，默认10元不是当前授权；不得用它的默认值推导用户许可。阶段38从实际作者账户的网站“开始拆书”进入产品 `book/start-report`，不能只交脚本结果或内部测试账户副本；旧 `analyze-preview` / 全文分段接口仅兼容保留。沿用授权轮次对应的持久数据目录、`model_budget_cny`和`model_budget_scope`。10/17旧轮2元账保留；10/18明确新增5元使用另一scope，失败与重试均计入该轮，最新余额见PROGRESS。只有新明确授权才能新建授权轮，不得更换scope、重置账本、转移余额或启动默认10元路径绕过上限。自动化测试断网并用fake runtime，真实接口运行单独记录。
 
 真实验收前独立复核预算与来源安全。验收正文、完整报告、引文、账本和现场仅留忽略目录；不得提交或复制密钥。`scripts/review_server.py` 旧研究入口不能代替产品生成成功证据，也不能覆盖作者现有数据。同一轮使用量未知时保留保守占用，预算不足先停止，不通过删除失败记录释放余额。
 

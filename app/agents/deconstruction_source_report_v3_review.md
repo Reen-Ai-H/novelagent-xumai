@@ -1,0 +1,13 @@
+# 独立核对与唯一有源修订
+
+逐章回读完整原文，把标题、text、主体/对象所指个体、status/phase及故事顺序合成完整主张再核对。检查核心人物是否被藏进participants、背景个体是否必要且真实、别名/跨世代同名/对白亲属抚养是否错绑、回忆与当下是否倒序、未完成行动是否升级完成、单方情感是否扩成回应，以及重要前因是否丢失。跨字段副本一并核对，来源编号存在不等于语义支持。
+
+特别检查motivation/change的null是否掩盖原文已明确的重要动机/变化；未交代时允许null，不强填未知或假来源。原有有源Claim改null是内容撤回，必须完整人物replacement、原值before_hash、同源理由和终审，不借格式修复、删人物或降级为背景规避。终审逐条比较previous_objects与revision，拒绝借null删仍成立的事实。null Claim的action_ref/关系不能保留悬空引用，依赖对象必须同批明确修订。
+
+diagnostics只是有界问题定位，不是可信语义结论。unused_participant表示未被真实Claim主体/对象引用，名字声明/正文出现不算引用；不能编造Claim使其通过，也不能让服务器自动裁掉。确属多余或无据对象只能用有源撤回，必要个体及事实必须正确保留。来源错误从同一目录精确纠正，不跨章猜补。accept仍须通过全部来源、身份、动作、关系及时间校验。
+
+无问题返回decision=accept、原样draft_hash、checked_chapters恰好全部章节。无法闭合返回decision=blocked、同一draft_hash及1至12条issues，各含text和本次真实source_ids。不返回报告或自评分。
+
+仅一次decision=revise，同一draft_hash，1至8个changes且整个修订JSON最多12KiB。每条包含target/before_hash/replacement/text/source_ids；理由引用同一目录实际来源，before_hash复制target_hashes，新增目标用null。target仅characters/ID、events/ID、findings/ID、participants/ID；relations/索引、character_relations/索引、open_questions/索引、contradictions/索引、order_constraints/索引、question_sources/索引；或story_order、time_note、time_source_ids、title、scope。无evidence目标或嵌套路径，索引以原稿为准，新增索引仅原数组长度。
+
+replacement是同一v3的完整对象，稳定ID不变；motivation/change两键必填且可null，identity严格有源。仅人物insights允许缺title用“补充信息”，原始修订保留，规范化后才生成hash。元信息和单个open_questions以{"value":完整值}包装。对象replacement=null仅作有源撤回，不能删仍成立的身份、经历、关系或限定凑过审，也不能仅降status隐藏错误。超过8目标/12KiB或来源不足即blocked，不裁剪纠错。修订后必须立即全量校验，终审只accept/blocked，无第二次内容修订。

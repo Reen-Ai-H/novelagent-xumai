@@ -151,6 +151,7 @@
     deconstructionRefreshButton: $("#deconstructionRefreshButton"),
     deconstructionNotice: $("#deconstructionNotice"),
     deconstructionPageContent: $("#deconstructionPageContent"),
+    reportWorkflow: $("#reportWorkflow"),
     deconstructionEvidenceDialog: $("#deconstructionEvidenceDialog"),
     deconstructionEvidenceTitle: $("#deconstructionEvidenceTitle"),
     deconstructionEvidenceContent: $("#deconstructionEvidenceContent"),
@@ -326,6 +327,8 @@
     if (state.screen === "archive" && screen !== "archive") state.archiveScrollSpyCleanup?.();
     if (state.screen === "deconstruction" && screen !== "deconstruction") {
       document.getElementById('workspaceToolsDialog')?.close();
+      document.getElementById('reportConfirmDialog')?.close();
+      window.clearTimeout(state.bookPollTimer);
       window.clearTimeout(state.deconstructionPollTimer);
       state.deconstructionPollTimer = null;
       closeDeconstructionEvidenceDialog?.();
@@ -402,7 +405,7 @@
     elements.sessionExpiredNotice.classList.toggle("is-hidden", !state.sessionExpired);
     elements.emailError.textContent = "";
     elements.emailField.classList.remove("has-error");
-    elements.loginStatus.textContent = "";
+    elements.loginStatus.textContent = state.account?.email ? `当前已登录 ${state.account.email}。输入其他邮箱可切换账户。` : "";
     elements.loginStatus.classList.remove("is-error");
   }
 
@@ -463,10 +466,22 @@
   }
 
   function renderLibraryHeader() {
+    renderAccountIdentity();
     const account = state.account || {};
     elements.accountEmail.textContent = account.email || "—";
     elements.creditBalance.textContent = Number(account.credit_balance || 0).toLocaleString("zh-CN");
     elements.librarySearch.value = state.query;
+  }
+
+  function renderAccountIdentity() {
+    const email=String(state.account?.email || '').trim();
+    const name=email.split('@')[0] || '账户';
+    $$('[data-account-identity]').forEach(node=>{
+      node.hidden=!email;
+      node.querySelector('[data-account-name]').textContent=name;
+      node.querySelector('[data-account-name]').title=email;
+      node.querySelector('[data-account-avatar]').textContent=Array.from(name)[0]?.toLocaleUpperCase() || '';
+    });
   }
 
   function updateNotificationCount() {
@@ -577,7 +592,7 @@
     const target = project.target_chapter_count ? ` / ${project.target_chapter_count}` : "";
     const statusClass = project.status.includes("失败") ? "status-failed" : project.status.includes("处理") ? "status-processing" : "";
     return `
-      <article class="project-card" data-project-id="${escapeHtml(project.project_id)}">
+      <a class="project-card" data-project-id="${escapeHtml(project.project_id)}" href="/${ai ? 'ai' : 'independent'}/${encodeURIComponent(project.project_id)}" data-route aria-label="${escapeHtml(`打开《${project.title}》${ai ? '创作室' : '工作台'}`)}">
         <div class="project-cover">
           <small>PROJECT / ${String(index + 1).padStart(2, "0")}</small>
           <h3>${escapeHtml(project.title)}</h3>
@@ -585,15 +600,14 @@
         <div class="project-body">
           <div class="project-meta">
             ${ai ? '<span class="mode-flag">AI 辅助写作</span>' : '<span class="mode-note">独立创作</span>'}
-            <button class="project-menu" type="button" aria-label="作品选项" disabled>···</button>
           </div>
           <h4>${escapeHtml(project.brief || modeText[project.mode]?.description || "作品基础已保存")}</h4>
           <div class="project-stats"><span>${project.chapter_count} 章${target}</span><span>${Number(project.total_word_count || 0).toLocaleString("zh-CN")} 字</span>${ai ? `<span>创作积分 ${Number(project.credits_used || 0).toLocaleString("zh-CN")} · 暂不结算</span>` : ""}</div>
           <div class="progress-line" aria-label="创作进度 ${project.progress_percent}%"><b style="width: ${project.progress_percent}%"></b></div>
-          <div class="project-footer"><span class="project-status ${statusClass}">${escapeHtml(project.status)}</span><button class="project-continue" type="button" data-action="open-project">查看作品 →</button></div>
+          <div class="project-footer"><span class="project-status ${statusClass}">${escapeHtml(project.status)}</span><span class="project-continue">进入工作台 →</span></div>
           <div class="project-footer"><span>最近编辑：${escapeHtml(formatDate(project.latest_edited_at))}</span><span class="mono">${project.progress_percent}%</span></div>
         </div>
-      </article>`;
+      </a>`;
   }
 
   function renderProjects(projects) {
@@ -673,7 +687,13 @@
 
   function restoreDialogFocus(dialog) {
     const target = dialog ? state.dialogFocus.get(dialog) : null;
-    if (target && typeof target.focus === "function") window.setTimeout(() => target.focus(), 0);
+    if (target && typeof target.focus === "function") window.setTimeout(() => {
+      // Native close events can arrive after another control/modal has taken
+      // focus. A delayed restoration must not override that newer choice.
+      const active = document.activeElement;
+      if (target.isConnected !== false && (!active || active === document.body
+        || active === target || dialog?.contains?.(active))) target.focus();
+    }, 0);
   }
 
   function trapDialogFocus(event) {
@@ -699,7 +719,7 @@
     elements.projectBriefInput.value = "";
     elements.projectError.textContent = "";
     elements.createProjectButton.disabled = false;
-    elements.createProjectButton.innerHTML = '保存作品并进入下一阶段 <span aria-hidden="true">→</span>';
+    elements.createProjectButton.innerHTML = '创建作品 <span aria-hidden="true">→</span>';
   }
 
   function chooseMode(mode) {
@@ -724,7 +744,7 @@
     }
     elements.projectError.textContent = "";
     elements.createProjectButton.disabled = true;
-    elements.createProjectButton.textContent = "正在保存作品…";
+    elements.createProjectButton.textContent = "正在创建…";
     try {
       const payload = await requestJson("/api/library/projects", {
         method: "POST",
@@ -737,20 +757,19 @@
       elements.dialog.close();
       if (payload.project.mode === "independent") {
         const nextPath = `/independent/${encodeURIComponent(payload.project.project_id)}`;
-        navigate(nextPath, { replace: true });
-        await loadIndependentWorkspace(payload.project.project_id);
+        await navigate(nextPath, { replace: true });
       } else {
         const nextPath = `/ai/${encodeURIComponent(payload.project.project_id)}`;
         navigate(nextPath, { replace: true });
         await loadAIWorkspace(payload.project.project_id, false);
       }
-      showToast("作品已保存到你的账户书架。");
+      showToast("作品已创建。");
     } catch (error) {
       elements.projectError.textContent = error.status === 401
         ? "会话已失效，请重新登录后再保存。"
         : error.message || "作品保存失败，请重试。";
       elements.createProjectButton.disabled = false;
-      elements.createProjectButton.innerHTML = '保存作品并进入下一阶段 <span aria-hidden="true">→</span>';
+      elements.createProjectButton.innerHTML = '创建作品 <span aria-hidden="true">→</span>';
     }
   }
 
@@ -763,6 +782,9 @@
       return;
     }
     state.account = null;
+    renderAccountIdentity();
+    state.reportTask=null;
+    state.reportConfirmation=null;
     state.projects = [];
     state.notifications = [];
     state.unreadNotifications = 0;
@@ -778,7 +800,12 @@
       const payload = await requestJson("/api/auth/session");
       if (payload.authenticated) {
         state.account = payload.account;
+        renderAccountIdentity();
         state.sessionExpired = false;
+        if (preferredScreen === 'login') {
+          window.history.replaceState({}, '', '/library');
+          preferredScreen = 'library';
+        }
         if (preferredScreen === "library") {
           setActiveScreen("library");
           await loadLibrary();
@@ -864,7 +891,41 @@
     return state.workspace?.active_version || null;
   }
 
+  function clearEditorChapterSurface() {
+    state.activeChapterId = null;
+    state.editorBuffer = "";
+    state.editorTitleBuffer = "";
+    state.editorRevision = 0;
+    state.editorDirty = false;
+    state.editorSaving = false;
+    state.editorConflict = null;
+    state.editorSaveFailed = false;
+    state.editorSavedRevision = null;
+    state.editorChangeToken = 0;
+    elements.chapterList.innerHTML = "";
+    elements.chapterTitleInput.value = "";
+    elements.chapterEditor.value = "";
+    elements.chapterTitleInput.disabled = true;
+    elements.chapterEditor.disabled = true;
+    const prefix = $("#chapterTitlePrefix");
+    if (prefix) { prefix.textContent = ""; prefix.hidden = true; }
+    elements.archiveSummary.innerHTML = "";
+    elements.editorWorkspaceContent.classList.add("is-hidden");
+    elements.startWorkspaceContent.classList.add("is-hidden");
+    elements.startWorkspaceContent.innerHTML = "";
+    elements.completeChapterButton.disabled = true;
+    $('#addChapterButton').disabled = true;
+    $('[data-action="save-editor"]').disabled = true;
+    elements.editorChapterHeading.textContent = "—";
+    elements.editorWordCount.textContent = "0 字";
+    elements.editorRevisionLabel.textContent = "REV / —";
+    setEditorSaveState("正在读取…");
+    setEditorAnalysisState("—");
+    setEditorNotice("");
+  }
+
   function renderStartWorkspace(workspace) {
+    clearEditorChapterSurface();
     elements.editorWorkspaceContent.classList.add("is-hidden");
     elements.startWorkspaceContent.classList.remove("is-hidden");
     elements.completeChapterButton.disabled = true;
@@ -907,7 +968,7 @@
         <div class="import-preview-head"><div><span class="eyebrow">${failure ? "导入失败，输入已保留" : "导入预览"}</span><strong>${escapeHtml(preview.filename)}</strong></div><span class="mono">${escapeHtml(preview.format || "未知格式")}</span></div>
         ${failure ? `<p class="import-error-text">${escapeHtml(preview.error_message || "文件无法识别，请重新选择。")}</p>` : `
           <div class="import-facts"><span><strong>${preview.chapter_count}</strong> 章</span><span><strong>${Number(preview.total_word_count || 0).toLocaleString("zh-CN")}</strong> 字</span><span><strong>${preview.unrecognized_fragments?.length || 0}</strong> 段待确认</span></div>
-          <div class="import-chapter-list">${(preview.chapters || []).map((chapter) => `<details class="import-chapter-preview"><summary><span class="mono">第 ${chapter.chapter_number} 章</span><strong>${escapeHtml(chapter.title)}</strong><span>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字</span></summary><div class="import-chapter-body" tabindex="0" aria-label="${escapeHtml(chapter.title)}的导入正文">${escapeHtml(chapter.content)}</div></details>`).join("")}</div>
+          <div class="import-chapter-list">${(preview.chapters || []).map((chapter) => `<details class="import-chapter-preview"><summary><strong>${escapeHtml(chapterTitle(chapter))}</strong><span>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字</span></summary><div class="import-chapter-body" tabindex="0" aria-label="${escapeHtml(chapterTitle(chapter))}的导入正文">${escapeHtml(chapter.content)}</div></details>`).join("")}</div>
           ${(preview.unrecognized_fragments || []).length ? `<details class="unrecognized-fragments" open><summary>未归类片段 · ${preview.unrecognized_fragments.length}</summary>${preview.unrecognized_fragments.map((fragment) => `<p>${escapeHtml(fragment)}</p>`).join("")}</details>` : ""}
           <label class="book-import-choice"><input id="analyzeWholeImport" type="checkbox" /> 导入后查看基础索引（免费，无模型）</label><div class="import-confirm-actions"><button class="button button-outline" type="button" data-action="open-import">重新选择文件</button><button class="button button-primary" type="button" data-action="confirm-import" data-preview-id="${escapeHtml(preview.preview_id)}">确认预览并写入正式正文 <span aria-hidden="true">→</span></button></div>`}
       </div>`;
@@ -1017,16 +1078,14 @@
     const loadToken = ++state.editorLoadToken;
     const projectChanged = state.editorProjectId !== projectId;
     if (projectChanged) {
-      state.activeChapterId = null;
-      state.editorBuffer = "";
-      state.editorTitleBuffer = "";
-      state.editorRevision = 0;
-      state.editorDirty = false;
-      state.editorSaving = false;
-      state.editorConflict = null;
-      state.editorSaveFailed = false;
-      state.editorSavedRevision = null;
-      state.editorChangeToken = 0;
+      window.clearTimeout(state.saveTimer);
+      window.clearTimeout(state.editorTaskPollTimer);
+      state.saveTimer = null;
+      state.editorTaskPollTimer = null;
+      state.workspace = null;
+      state.activeArchive = null;
+      state.editorAnalysis = null;
+      clearEditorChapterSurface();
     }
     state.editorProjectId = projectId;
     setActiveScreen("independent");
@@ -1036,7 +1095,7 @@
       if (loadToken !== state.editorLoadToken || state.editorProjectId !== projectId) return;
       state.workspace = workspace;
       state.editorAnalysis = null;
-      if (workspace.mode !== "ai_assisted") {
+      if (workspace.initialized && workspace.mode !== "ai_assisted") {
         void deconstructionApi.read(projectId).then(data => {
           if (state.editorProjectId === projectId && state.workspace === workspace) { state.editorAnalysis = data; renderArchiveSummary(workspace.archive); }
         }).catch(() => { if (state.workspace === workspace) { state.editorAnalysis = null; renderArchiveSummary(workspace.archive); } });
@@ -1065,6 +1124,7 @@
         } catch (error) { setEditorNotice(error.message || '分章预览读取失败。', 'red'); }
       }
     } catch (error) {
+      if (loadToken !== state.editorLoadToken || state.editorProjectId !== projectId) return;
       if (error.status === 401) {
         state.account = null;
         state.sessionExpired = error.code === "session_expired";
@@ -1072,6 +1132,7 @@
         return;
       }
       elements.editorProjectTitle.textContent = "读取失败";
+      if (projectChanged) setEditorSaveState("读取失败", "error");
       elements.startWorkspaceContent.classList.remove("is-hidden");
       elements.editorWorkspaceContent.classList.add("is-hidden");
       setEditorNotice(error.message || "独立作品读取失败，请稍后重试。", "red");
@@ -1082,6 +1143,57 @@
     // Independent imports become ready on confirmation, without any analysis task.
     if (chapter.status === 'ready') return state.workspace?.mode === 'ai_assisted' ? '已分析' : '正式稿';
     return chapter.status === 'analyzing' ? '分析中' : chapter.status === 'failed' ? '分析失败' : '写作中';
+  }
+
+  // The heading is a view of chapter structure, never a manuscript rewrite.
+  const numberedChapterTitle = /^\s*(?:第\s*([\d〇零一二三四五六七八九十百千万两]+)\s*[章节回]|chapter\s+(\d+))/iu;
+  function chapterHeading(title) {
+    const match=String(title || '').match(numberedChapterTitle);
+    if(!match)return null;
+    const raw=match[1] || match[2],digits={'零':0,'〇':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+    let number;
+    if(/^\d+$/u.test(raw))number=Number(raw);
+    else if(/^[〇零一二三四五六七八九两]+$/u.test(raw))number=Number(Array.from(raw,c=>digits[c]).join(''));
+    else {
+      let total=0,section=0,digit=0;
+      for(const c of raw){
+        if(c in digits){digit=digits[c];continue;}
+        const unit={'十':10,'百':100,'千':1000,'万':10000}[c];
+        if(unit===10000){total+=(section+digit)*unit;section=0;}
+        else section+=(digit || 1)*unit;
+        digit=0;
+      }
+      number=total+section+digit;
+    }
+    return {number,length:match[0].length};
+  }
+  function chapterNumber(number) {
+    const n=Number(number);
+    if(!Number.isInteger(n) || n<1)return '';
+    if(n>9999)return String(n);
+    const digits='零一二三四五六七八九',units=['','十','百','千'];
+    let value=n,text='',zero=false;
+    for(let i=3;i>=0;i--){
+      const digit=Math.floor(value / (10 ** i));value %= 10 ** i;
+      if(digit){if(zero)text+='零';text+=digits[digit]+units[i];zero=false;}
+      else if(text && value)zero=true;
+    }
+    return text.replace(/^一十/u,'十');
+  }
+  function chapterPrefix(chapter) {
+    const structural=Number(chapter.chapter_number ?? chapter.number),heading=chapterHeading(chapter.title);
+    if(heading?.number===structural)return '';
+    const number=chapterNumber(structural);
+    return number?`第${number}章`:'';
+  }
+  function chapterTitle(chapter) {
+    const prefix=chapterPrefix(chapter),heading=chapterHeading(chapter.title);
+    const raw=String(chapter.title || '');
+    const title=prefix && heading?raw.slice(heading.length).replace(/^\s*[:：·、.．\-—]\s*/u,'').trim():raw.trim();
+    return [prefix,title].filter(Boolean).join(' ');
+  }
+  function chapterEditTitle(chapter) {
+    return chapterHeading(chapter.title)?chapterTitle(chapter):String(chapter.title || '');
   }
 
   function nextIndependentChapter() {
@@ -1101,11 +1213,12 @@
   }
 
   function renderChapterList(version) {
-    const mobile=`<select class="mobile-chapter-navigation" aria-label="正式章节，共 ${version.chapters.length} 章">${version.chapters.map(c=>`<option value="${escapeHtml(c.chapter_id)}" ${c.chapter_id===state.activeChapterId?'selected':''}>${escapeHtml(c.title || `第${c.chapter_number}章`)}</option>`).join('')}</select>`;
-    elements.chapterList.innerHTML = mobile + version.chapters.map((chapter) => {
+    const chapters=version.chapters.map(c=>c.chapter_id===state.activeChapterId && state.editorDirty?{...c,title:state.editorTitleBuffer}:c);
+    const mobile=`<select class="mobile-chapter-navigation" aria-label="正式章节，共 ${chapters.length} 章">${chapters.map(c=>`<option value="${escapeHtml(c.chapter_id)}" ${c.chapter_id===state.activeChapterId?'selected':''}>${escapeHtml(chapterTitle(c))}</option>`).join('')}</select>`;
+    elements.chapterList.innerHTML = mobile + chapters.map((chapter) => {
       return `<div class="chapter-directory-entry">
       <button class="chapter-list-item ${chapter.chapter_id === state.activeChapterId ? "is-active" : ""} ${chapter.status === "failed" ? "is-failed" : ""}" type="button" data-action="select-chapter" data-chapter-id="${escapeHtml(chapter.chapter_id)}" ${chapter.chapter_id === state.activeChapterId ? 'aria-current="page"' : ""}>
-        <span class="chapter-list-number mono" aria-hidden="true">${/^(?:第\s*[\d〇零一二三四五六七八九十百千两]+\s*[章节回]|chapter\s+\d+)/iu.test(chapter.title || '') ? '' : String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapter.title || `第${chapter.chapter_number}章`)}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapterStateLabel(chapter))}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
+        <span class="chapter-list-number mono" aria-hidden="true">${numberedChapterTitle.test(chapter.title || '') ? '' : String(chapter.chapter_number).padStart(2, "0")}</span><span class="chapter-list-copy"><strong>${escapeHtml(chapterTitle(chapter))}</strong><small>${Number(chapter.word_count || 0).toLocaleString("zh-CN")} 字 · ${escapeHtml(chapterStateLabel(chapter))}</small></span><span class="chapter-list-arrow">${chapter.chapter_id === state.activeChapterId ? "·" : ""}</span>
       </button></div>`;
     }).join("");
   }
@@ -1128,7 +1241,7 @@
       elements.archiveDrawerTitle.textContent = "最新状态";
       const data = state.editorAnalysis;
       const result = data?.projectId === state.editorProjectId && data.sourceMatch && data.effectiveStatus === "completed" && !state.editorDirty ? data.result : null;
-      const report = result?.analysisContractVersion === "model.1" ? result.report : null;
+      const report = isModelAnalysisContract(result?.analysisContractVersion) ? result.report : null;
       const depth = result?.depthReport;
       const counts = depth
         ? [["人物", depth.characters.characters.length, "characters"], ["剧情事件", depth.plot.events.length, "plot"], ["伏笔", depth.foreshadowing.threads.length, "foreshadowing"], ["正文证据", depth.evidence.length, "overview"]]
@@ -1174,6 +1287,9 @@
     }
     const chapter = version.chapters.find((item) => item.chapter_id === state.activeChapterId);
     if (!chapter) return;
+    elements.chapterTitleInput.disabled = false;
+    elements.chapterEditor.disabled = false;
+    $('#addChapterButton').disabled = false;
     $('[data-action="save-editor"]').disabled = state.editorReadOnly || state.restoreInFlight;
     if (!state.editorDirty) {
       state.editorBuffer = chapter.content || "";
@@ -1181,8 +1297,9 @@
       state.editorRevision = chapter.server_revision || 0;
       state.editorSavedRevision = chapter.server_revision || 0;
     }
-    elements.editorChapterHeading.textContent = chapter.title || `第${chapter.chapter_number}章`;
-    elements.chapterTitleInput.value = state.editorTitleBuffer;
+    renderAccountIdentity();
+    renderEditorChapterTitle(chapter);
+    elements.chapterTitleInput.value = chapterEditTitle({...chapter,title:state.editorTitleBuffer});
     elements.chapterEditor.value = state.editorBuffer;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
     elements.editorRevisionLabel.textContent = `REV / ${state.editorRevision}`;
@@ -1213,21 +1330,36 @@
     else setEditorSaveState("等待保存");
   }
 
-  function handleEditorInput() {
-    if (state.editorReadOnly) return;
-    state.editorBuffer = elements.chapterEditor.value;
-    state.editorTitleBuffer = elements.chapterTitleInput.value;
+  function handleEditorInput(event) {
+    if (state.editorReadOnly || !state.workspace?.initialized || elements.chapterEditor.disabled || elements.chapterTitleInput.disabled) return;
+    // A title edit must not round-trip the body through textarea's LF-only
+    // value; imported CRLF remains byte-for-byte intact until a body edit.
+    if(event?.target !== elements.chapterTitleInput)state.editorBuffer = elements.chapterEditor.value;
+    // Display-only chapter numbering must not become a title save when the
+    // author only edits the body. Keep the original stored title in that case.
+    if(event?.target !== elements.chapterEditor)state.editorTitleBuffer = elements.chapterTitleInput.value;
     state.editorDirty = true; if (state.workspace?.mode !== "ai_assisted") { state.editorAnalysis = null; renderArchiveSummary(state.activeArchive); }
     state.editorChangeToken += 1;
     state.editorConflict = null;
     state.editorSaveFailed = false;
     elements.editorWordCount.textContent = `${countEditorWords(state.editorBuffer).toLocaleString("zh-CN")} 字`;
     const version=activeEditorVersion();
+    const chapter=version?.chapters.find(c=>c.chapter_id===state.activeChapterId);
+    if(chapter){renderEditorChapterTitle(chapter);renderChapterList(version);}
     renderCompleteChapterAction(version?.chapters.find(chapter=>chapter.chapter_id===state.activeChapterId),
       (state.workspace?.tasks || []).some(task=>task.version_id===version?.version_id && ['queued','running'].includes(task.status)));
     setEditorSaveState("本地待保存");
     window.clearTimeout(state.saveTimer);
     state.saveTimer = window.setTimeout(() => { flushPendingSave(); }, 720);
+  }
+
+  function renderEditorChapterTitle(chapter) {
+    const display={...chapter,title:state.editorTitleBuffer};
+    const prefix=$('#chapterTitlePrefix');
+    if(prefix){prefix.textContent=chapterHeading(chapterEditTitle(display))?'':chapterPrefix(display);prefix.hidden=!prefix.textContent;}
+    elements.editorChapterHeading.textContent=chapterTitle(display);
+    elements.chapterTitleInput.placeholder='为这一章命名';
+    elements.chapterTitleInput.setAttribute('aria-label',`${chapterTitle({chapter_number:chapter.chapter_number})}标题`);
   }
 
   function renderSaveConflict(error) {
@@ -1366,18 +1498,22 @@
 
   function scheduleIndependentTaskPoll(taskId) {
     if (!taskId || state.editorTaskPollTimer || state.screen !== "independent") return;
+    const projectId = state.editorProjectId;
     state.editorTaskPollTimer = window.setTimeout(async () => {
       state.editorTaskPollTimer = null;
-      if (state.screen !== "independent") return;
+      if (state.screen !== "independent" || state.editorProjectId !== projectId) return;
       try {
-        const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(state.editorProjectId)}/tasks/${encodeURIComponent(taskId)}`);
+        const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`);
+        if (state.screen !== "independent" || state.editorProjectId !== projectId) return;
         if (["completed", "failed"].includes(payload.task.status)) {
-          await loadIndependentWorkspace(state.editorProjectId);
+          await loadIndependentWorkspace(projectId);
+          if (state.screen !== "independent" || state.editorProjectId !== projectId) return;
           if (payload.task.status === "completed") setEditorNotice("本章完成，故事档案已更新；来源章节已记录。", "blue");
           return;
         }
         scheduleIndependentTaskPoll(taskId);
       } catch (error) {
+        if (state.screen !== "independent" || state.editorProjectId !== projectId) return;
         setEditorNotice(error.message || "后台分析状态暂时读不到，稍后会自动重试。", "red");
         scheduleIndependentTaskPoll(taskId);
       }
@@ -1399,6 +1535,7 @@
   }
 
   async function selectEditorChapter(chapterId) {
+    if (!activeEditorVersion()?.chapters.some(chapter => chapter.chapter_id === chapterId)) return;
     if (chapterId === state.activeChapterId) return;
     if (state.editorDirty) {
       const saved = await flushPendingSave();
@@ -1414,7 +1551,7 @@
   }
 
   async function addIndependentChapter() {
-    if (state.completeInFlight || state.addChapterInFlight) return;
+    if (!state.workspace?.initialized || state.completeInFlight || state.addChapterInFlight) return;
     state.addChapterInFlight = true;
     elements.completeChapterButton.disabled = true;
     try {
@@ -2118,8 +2255,26 @@
     };
   }
 
-  function isModelAnalysisReport(report) {
+  function isModelAnalysisContract(version) {
+    return version === "model.1" || version === "model.2";
+  }
+
+  function isModelAnalysisReport(report, version = "model.1") {
     if (!report || typeof report !== "object") return false;
+    if (version === "model.2") {
+      if (report.schema_version !== "2" || report.report_version !== undefined) return false;
+      if (!["characters", "events", "evidence", "chapter_numbers"].every(key => Array.isArray(report[key]))) return false;
+      const evidenceIds = new Set(report.evidence.map(item => item.id));
+      const sourcedClaim = claim => claim && typeof claim === "object" && !Array.isArray(claim)
+        && typeof claim.text === "string" && claim.text.trim().length > 0
+        && ["fact", "reported", "inferred", "unknown"].includes(claim.status)
+        && Array.isArray(claim.evidence_ids) && claim.evidence_ids.length > 0
+        && claim.evidence_ids.every(id => typeof id === "string" && evidenceIds.has(id));
+      return report.characters.every(person => person && sourcedClaim(person.identity)
+        && ["motivation", "change"].every(key => Object.hasOwn(person, key)
+          && (person[key] === null || sourcedClaim(person[key]))));
+    }
+    if (version !== "model.1" || (report.schema_version !== undefined && report.schema_version !== "1")) return false;
     const validVersion = report.report_version !== undefined
       ? report.report_version === "1.0"
       : report.schema_version === "1";
@@ -2129,13 +2284,14 @@
   function normalizeResult(value) {
     if (!value || typeof value !== "object" || value.status !== "completed") return null;
     const analysisContractVersion = String(value.analysis_contract_version || "1.0");
+    if (value.report?.schema_version === "2" && analysisContractVersion !== "model.2") throw new Error("语义拆解报告版本不一致。 ");
     const reportVersion = String(value.report?.report_version || value.report?.reportVersion || "");
     const isDepthReport = analysisContractVersion === "2.0" || reportVersion === "2.0";
     const depthReport = value.report && isDepthReport ? normalizeDepthReport(value.report) : null;
     if (analysisContractVersion === "2.0" && !depthReport) throw new Error("正式深度报告不完整。 ");
     if (depthReport && analysisContractVersion !== "2.0") throw new Error("深度报告版本不一致。 ");
-    if (analysisContractVersion === "model.1" && !isModelAnalysisReport(value.report)) throw new Error("语义拆解报告版本不完整。 ");
-    if (!["1.0", "2.0", "model.1"].includes(analysisContractVersion)) throw new Error("拆解结果合同版本无法识别。");
+    if (isModelAnalysisContract(analysisContractVersion) && !isModelAnalysisReport(value.report, analysisContractVersion)) throw new Error("语义拆解报告版本不完整。 ");
+    if (!["1.0", "2.0", "model.1", "model.2"].includes(analysisContractVersion)) throw new Error("拆解结果合同版本无法识别。");
     return {
       documentId: String(value.document_id || ""),
       sourceVersionId: String(value.source_version_id || ""),
@@ -2176,7 +2332,7 @@
 
   function normalizeHistoryItem(value) {
     if (!value || typeof value !== "object") return null;
-    const analysisContractVersion = ["1.0", "2.0", "model.1"].includes(value.analysis_contract_version)
+    const analysisContractVersion = ["1.0", "2.0", "model.1", "model.2"].includes(value.analysis_contract_version)
       ? value.analysis_contract_version
       : "unknown";
     return {
@@ -2245,7 +2401,7 @@
         throw new Error("正式结果没有绑定当前来源。");
       }
     }
-    if (result && result.analysisContractVersion !== "model.1" && (
+    if (result && !isModelAnalysisContract(result.analysisContractVersion) && (
       result.sourceVersionId !== String(payload.source.version_id || "")
       || result.sourceRevision !== deconstructionNumber(payload.source.revision)
       || result.sourceHash !== String(payload.source.hash || "")
@@ -2261,13 +2417,13 @@
     )) {
       throw new Error("深度报告与当前来源版本不一致。");
     }
-    if (result?.analysisContractVersion === "model.1"
+    if (isModelAnalysisContract(result?.analysisContractVersion)
       && (!result.scopeStart || !result.scopeEnd || result.scopeEnd < result.scopeStart || !result.scopeHash)) {
       throw new Error("卷级语义拆解缺少服务端范围校验字段。");
     }
-    if (result?.analysisContractVersion === "model.1") {
+    if (isModelAnalysisContract(result?.analysisContractVersion)) {
       const run = normalizeActiveRun(payload.active_run);
-      if (!run || run.analysisContractVersion !== "model.1" || run.runStatus !== "completed"
+      if (!run || run.analysisContractVersion !== result.analysisContractVersion || run.runStatus !== "completed"
         || result.sourceVersionId !== String(payload.source.version_id || "")
         || String(payload.focus_document_id || "") !== result.documentId
         || !["documentId", "sourceVersionId", "sourceRevision", "sourceHash"].every(key => run[key] === result[key])) {
@@ -2316,8 +2472,8 @@
     return Boolean(
       (data?.result?.analysisContractVersion === "2.0"
         && data.result.depthReport?.reportVersion === "2.0")
-      || (data?.result?.analysisContractVersion === "model.1"
-        && isModelAnalysisReport(data.result.report)),
+      || (isModelAnalysisContract(data?.result?.analysisContractVersion)
+        && isModelAnalysisReport(data.result.report, data.result.analysisContractVersion)),
     );
   }
 
@@ -2624,7 +2780,7 @@
   function renderDeconstructionHistoryItem(data, item) {
     const rule = item.analysisContractVersion === "2.0";
     const versionLabel = rule ? "深度 2.0"
-      : item.analysisContractVersion === "model.1" ? "模型报告" : item.analysisContractVersion === "1.0" ? "基础 1.0" : "版本未知";
+      : isModelAnalysisContract(item.analysisContractVersion) ? "模型报告" : item.analysisContractVersion === "1.0" ? "基础 1.0" : "版本未知";
     const ruleLabel = !rule ? "" : data.requiredEngineRevision
       ? item.engineRevision === data.requiredEngineRevision ? "现行规则" : "旧版规则"
       : item.engineRevision ? "规则版本待核对" : "规则版本未记录";
@@ -2673,7 +2829,7 @@
   function renderDeconstructionResult(data) {
     const result = data.result;
     if (!result) return "";
-    if (result.analysisContractVersion === "model.1" && window.XumaiAnalysis) {
+    if (isModelAnalysisContract(result.analysisContractVersion) && window.XumaiAnalysis) {
       const range = result.scopeStart === result.scopeEnd
         ? `第 ${result.scopeStart} 章`
         : `第 ${result.scopeStart}–${result.scopeEnd} 章`;
@@ -2692,7 +2848,7 @@
   function renderAnalysisSource(data, label, range) {
     const result = data.result;
     const origin = result.report?.producer || result.analysisLabel || label;
-    const note = result.analysisContractVersion === "model.1" ? "仅涵盖所选章节；事实、人物说法与分析推断分别标注。" : "未调用模型 · 仅整理原文线索，不判断心理或因果。";
+    const note = isModelAnalysisContract(result.analysisContractVersion) ? "仅涵盖所选章节；事实、人物说法与分析推断分别标注。" : "未调用模型 · 仅整理原文线索，不判断心理或因果。";
     return `<header class="analysis-source-banner"><div class="analysis-source-main"><strong>${escapeHtml(label)}${result.analysisContractVersion === "2.0" ? ' · 无模型' : ''}</strong><span>${escapeHtml(range)} · ${data.sourceMatch ? "来源有效" : "历史只读"}</span></div>${renderAnalysisDetails("范围与来源", `<p>${note}</p><dl class="analysis-source-facts"><div><dt>分析来源</dt><dd>${escapeHtml(origin)}</dd></div><div><dt>报告版本</dt><dd>${escapeHtml(result.analysisContractVersion)}</dd></div><div><dt>规则版本</dt><dd>${escapeHtml(result.engineRevision || data.engineRevision || "旧版未记录")}</dd></div><div><dt>稿本</dt><dd>${escapeHtml(result.sourceVersionId)}</dd></div><div><dt>修订</dt><dd>${escapeHtml(result.sourceRevision ?? "—")}</dd></div><div><dt>内容指纹</dt><dd>${escapeHtml(result.scopeHash || result.sourceHash)}</dd></div></dl>`)}</header>`;
   }
 
@@ -2725,36 +2881,41 @@
   }
 
   function renderDeconstructionPage(data) {
+    renderAccountIdentity();
     state.deconstructionWorkspace = data;
     state.deconstructionProjectId = data.projectId || state.deconstructionProjectId;
+    ensureReportTask(state.deconstructionProjectId);
     elements.deconstructionProjectTitle.textContent = data.title || "—";
     const isRule = data.result?.analysisContractVersion === "2.0";
-    elements.deconstructionStatusPill.textContent = data.effectiveStatus === "completed"
-      ? isRule ? "规则线索已整理" : data.result?.analysisContractVersion === "model.1" ? "模型报告已就绪" : "基础结果已保存"
-      : data.statusLabel;
-    if (data.updateAvailable) elements.deconstructionStatusPill.textContent = "旧规则 · 可更新";
     const routeSection = new URLSearchParams(location.search).get("section");
     if (isRule) state.deconstructionView = depthPerspectiveMeta[routeSection] ? routeSection : "characters";
     const sections = [["characters", "人物", "♙"], ["plot", "剧情", "⌇"]];
     document.getElementById("deconstructionSubnav").innerHTML = sections.map(([id, label, icon]) => `<button class="spine-link" type="button" data-action="deconstruction-section" data-section="${id}"><span class="spine-icon">${icon}</span><strong>${label}</strong></button>`).join("");
     setDeconstructionSectionCurrent(isRule ? state.deconstructionView : routeSection || "characters");
-    elements.deconstructionStatusPill.className = `deconstruction-status-pill is-${data.effectiveStatus}`;
     const working = ["queued", "running"].includes(data.runStatus);
     elements.deconstructionRefreshButton.disabled = working;
     elements.deconstructionPageContent.setAttribute("aria-busy", String(working));
     state.deconstructionVolumeId = data.focusDocumentId || "";
-    document.getElementById("workspaceSource").innerHTML = (data.result ? renderAnalysisSource(data, isRule ? "规则分析" : "模型报告", data.scopeLabel || `${data.result.scopeStart || 1}–${data.result.scopeEnd || data.source.chapterCount || '—'} 章`) : "") + renderDeconstructionDiagnostics(data);
+    const sourcePanel = document.getElementById("workspaceSource");
+    const sourceContent = (data.result ? renderAnalysisSource(data, isRule ? "规则分析" : "模型报告", data.scopeLabel || `${data.result.scopeStart || 1}–${data.result.scopeEnd || data.source.chapterCount || '—'} 章`) : "") + renderDeconstructionDiagnostics(data);
+    // A failed attempt can live here beside a valid report. Keep its sole
+    // workflow node connected while replacing the source/history content.
+    if (elements.reportWorkflow.parentElement === sourcePanel) {
+      Array.from(sourcePanel.childNodes).forEach(node => {
+        if (node !== elements.reportWorkflow) node.remove();
+      });
+      sourcePanel.insertAdjacentHTML('afterbegin', sourceContent);
+    } else sourcePanel.innerHTML = sourceContent;
     const volumeBar = renderDeconstructionVolumeBar(data);
     const readableRuleUpgrade = data.effectiveStatus === "rebuild_required" && data.updateAvailable
       && data.error?.code === "engine_update_available" && isRule && data.runStatus === "completed";
-    let content = (data.effectiveStatus === "completed" || readableRuleUpgrade) && data.sourceMatch ? [] : [renderDeconstructionStatus(data)];
+    const statusContent=(data.effectiveStatus === "completed" || readableRuleUpgrade) && data.sourceMatch ? '' : renderDeconstructionStatus(data);
+    // The normal action uses report-v2. Rule retry and diagnostics remain
+    // available in the source tools, outside the author's primary workflow.
+    if(statusContent)document.getElementById('workspaceSource').insertAdjacentHTML('beforeend',renderAnalysisDetails('基础索引状态',statusContent));
+    let content = [];
     if (hasDeconstructionResults(data) && (data.effectiveStatus === "completed" || readableRuleUpgrade) && data.sourceMatch) {
       content.push(renderDeconstructionResult(data));
-    } else if (data.effectiveStatus === "completed") {
-      const legacy = data.result?.analysisContractVersion === "1.0";
-      content.push(legacy
-        ? `<section class="deconstruction-working-panel is-upgrade-required"><div class="deconstruction-empty-mark">↗</div><h2>基础拆解已有，深度拆解可生成</h2><p>当前是分析合同 1.0 的基础结果，不会在六个视角中冒充完成。请从服务端提供的升级入口生成 2.0 深度报告；旧结果会保留为历史只读。</p>${data.actions.rebuild ? `<button class="button button-primary" type="button" data-action="deconstruction-rebuild">生成深度拆解 <span aria-hidden="true">→</span></button>` : ""}</section>`
-        : `<section class="deconstruction-working-panel"><div class="deconstruction-empty-mark">⌁</div><h2>服务端还没有返回可引用内容</h2><p>当前响应没有正式结果，页面保留空白，不将不完整响应冒充分析完成。</p></section>`);
     }
     document.getElementById('workspaceSource').insertAdjacentHTML('beforeend',renderDeconstructionHistory(data));
     elements.deconstructionPageContent.innerHTML = (volumeBar ? volumeBar : "") + content.join("");
@@ -2764,6 +2925,7 @@
       state.deconstructionGuideMode = true;
       state.analysisView = null;
       setDeconstructionSectionCurrent("guide");
+      renderReportWorkflow();
       elements.deconstructionStatusPill.textContent = "全书导读";
       elements.deconstructionStatusPill.className = "deconstruction-status-pill is-completed";
       elements.deconstructionPageContent.innerHTML = (volumeBar ? volumeBar : "") + deconstructionGuideShell();
@@ -2786,7 +2948,7 @@
         relationLabel: type => depthRelationText[type] || "关系待核对",
       });
     }
-    if (data.result?.analysisContractVersion === "model.1" && data.result.report && window.XumaiAnalysis) {
+    if (isModelAnalysisContract(data.result?.analysisContractVersion) && data.result.report && window.XumaiAnalysis) {
       const params = new URLSearchParams(location.search);
       const section = ["plot", "characters", "time"].includes(params.get("section")) ? params.get("section") : "characters";
       let initialView = true;
@@ -2810,6 +2972,7 @@
         if (questions) { questions.open = true; questions.scrollIntoView(); }
       }
     }
+    renderReportWorkflow();
     scheduleDeconstructionPoll(data);
   }
 
@@ -2889,7 +3052,7 @@
       const loaded = [];
       for (const volume of volumes) {
         const doc = await deconstructionApi.read(projectId, { documentId: volume.documentId });
-        if (doc.result?.analysisContractVersion === "model.1" && doc.result.report) loaded.push({ volume, report: doc.result.report });
+        if (isModelAnalysisContract(doc.result?.analysisContractVersion) && doc.result.report) loaded.push({ volume, report: doc.result.report });
       }
       if (token !== state.deconstructionGuideToken) return;
       if (body) body.innerHTML = renderDeconstructionGuideContent(loaded, Array.isArray(guide.characters) ? guide.characters : []);
@@ -2919,9 +3082,11 @@
       state.deconstructionGuideMode = true;
       state.analysisView = null;
       setDeconstructionSectionCurrent("guide");
+      renderReportWorkflow();
       elements.deconstructionStatusPill.textContent = "全书导读";
       elements.deconstructionStatusPill.className = "deconstruction-status-pill is-completed";
       const volumeBar = renderDeconstructionVolumeBar(state.deconstructionWorkspace || {});
+      elements.deconstructionPageContent.setAttribute('aria-busy','false');
       elements.deconstructionPageContent.innerHTML = (volumeBar ? volumeBar : "") + deconstructionGuideShell();
       void loadGuideAggregate(projectId);
       return;
@@ -2952,7 +3117,11 @@
   }
 
   function renderDeconstructionLoading() {
+    // The retained workflow reference survives replacement of the reader DOM.
+    elements.reportWorkflow.hidden = true;
+    elements.reportWorkflow.innerHTML = '';
     elements.deconstructionProjectTitle.textContent = "正在读取…";
+    elements.deconstructionStatusPill.hidden = false;
     elements.deconstructionStatusPill.textContent = "读取中";
     elements.deconstructionStatusPill.className = "deconstruction-status-pill is-loading";
     elements.deconstructionRefreshButton.disabled = true;
@@ -2961,6 +3130,8 @@
   }
 
   function renderDeconstructionReadError(message) {
+    elements.reportWorkflow.hidden = true;
+    elements.deconstructionStatusPill.hidden = false;
     elements.deconstructionStatusPill.textContent = "读取失败";
     elements.deconstructionStatusPill.className = "deconstruction-status-pill is-error";
     elements.deconstructionRefreshButton.disabled = false;
@@ -3167,11 +3338,13 @@
     }
     const loadToken = ++state.deconstructionLoadToken;
     if (state.deconstructionProjectId !== projectId) {
+      state.reportTask=null;
       state.modelAnalysisCandidate = null;
       document.getElementById("modelAnalysisPreview").innerHTML = "";
       document.getElementById("modelAnalysisStatus").textContent = "先预览，再采用。";
     }
     state.deconstructionProjectId = projectId;
+    if(!silent){const task=ensureReportTask(projectId);task.loaded=false;task.available=null;task.budget=null;}
     document.getElementById("deconstructionSubnav").hidden = false;
     document.querySelector('[data-action="deconstruction-open-self"]')?.setAttribute("aria-expanded", "true");
     window.clearTimeout(state.deconstructionPollTimer);
@@ -3188,6 +3361,7 @@
       if (!silent) void pollBook(projectId);
       setWorkspaceNotice(elements.deconstructionNotice, "");
       void loadNotifications();
+      return true;
     } catch (error) {
       if (loadToken !== state.deconstructionLoadToken || state.deconstructionProjectId !== projectId) return;
       if (error.status === 401) {
@@ -3198,6 +3372,7 @@
       }
       setWorkspaceNotice(elements.deconstructionNotice, error.message || "作品拆解读取失败，请稍后重试。", "red");
       renderDeconstructionReadError(error.message);
+      return false;
     }
   }
 
@@ -3261,7 +3436,7 @@
 
   function deconstructionEvidenceMatchesSource(data, evidence, result) {
     const source = data?.source;
-    if (result?.analysisContractVersion === "model.1") {
+    if (isModelAnalysisContract(result?.analysisContractVersion)) {
       return Boolean(
         data?.effectiveStatus === "completed"
         && data.runStatus === "completed"
@@ -3322,10 +3497,10 @@
   }
 
   function renderDeconstructionEvidenceLoading() {
-    elements.deconstructionEvidenceTitle.textContent = "正在读取证据";
-    elements.deconstructionEvidenceContent.innerHTML = `<div class="deconstruction-evidence-dialog-loading" role="status">正在从服务端读取这条证据……</div>`;
+    elements.deconstructionEvidenceTitle.textContent = "正在读取原文";
+    elements.deconstructionEvidenceContent.innerHTML = `<div class="deconstruction-evidence-dialog-loading" role="status">正在读取原文……</div>`;
     elements.locateDeconstructionEvidenceButton.disabled = true;
-    elements.locateDeconstructionEvidenceButton.textContent = "等待证据校验";
+    elements.locateDeconstructionEvidenceButton.textContent = "读取中";
   }
 
   function renderDeconstructionEvidenceDialog(payload, fallbackEvidence = null, current = false, reason = "") {
@@ -3356,23 +3531,23 @@
       && evidence.charEnd !== null
       && evidence.charEnd >= evidence.charStart,
     );
-    elements.deconstructionEvidenceTitle.textContent = sourceIsCurrent ? "证据回链" : "历史证据回链";
-    elements.deconstructionEvidenceContent.innerHTML = `<article class="deconstruction-evidence-dialog-card ${sourceIsCurrent ? "is-current" : "is-historical"}"><div class="depth-card-topline"><span class="depth-card-label">${sourceIsCurrent ? "当前稿本 · 只读" : "历史稿本 · 只读"}</span><span class="mono">${chapterNumber === null ? "章节待定位" : `第 ${escapeHtml(chapterNumber)} 章`}</span></div><h3>${escapeHtml(evidence?.label || "正文证据")}</h3><p class="deconstruction-evidence-dialog-chapter">${escapeHtml(chapterTitle)}</p>${evidence?.excerpt ? `<blockquote>“${escapeHtml(evidence.excerpt)}”</blockquote>` : `<p class="depth-empty-note">这条证据只提供章节级定位，没有保留正文片段。</p>`}<dl class="depth-fact-list"><div><dt>定位精度</dt><dd>${precise ? "UTF-16 字符位移已校验" : "章节级回看"}</dd></div>${precise ? `<div><dt>字符范围</dt><dd>${escapeHtml(`${evidence.charStart}–${evidence.charEnd}`)} · UTF-16 code unit</dd></div>` : ""}<div><dt>回看边界</dt><dd>${sourceIsCurrent ? "仅可定位到当前稿本，不会改写正文" : "历史来源只读，不跳转当前同编号章节"}</dd></div></dl>${reason ? `<p class="depth-evidence-reason">${escapeHtml(reason)}</p>` : ""}</article>`;
+    elements.deconstructionEvidenceTitle.textContent = sourceIsCurrent ? "原文回看" : "历史原文";
+    elements.deconstructionEvidenceContent.innerHTML = `<article class="deconstruction-evidence-dialog-card ${sourceIsCurrent ? "is-current" : "is-historical"}"><div class="depth-card-topline"><span class="depth-card-label">${sourceIsCurrent ? "当前稿本" : "历史稿本 · 只读"}</span><span class="mono">${chapterNumber === null ? "章节待定位" : `第 ${escapeHtml(chapterNumber)} 章`}</span></div><h3>${escapeHtml(chapterTitle)}</h3>${evidence?.excerpt ? `<blockquote>“${escapeHtml(evidence.excerpt)}”</blockquote>` : `<p class="depth-empty-note">未保留原句，仅可回看章节。</p>`}${reason ? `<p class="depth-evidence-reason">${escapeHtml(reason)}</p>` : ""}</article>`;
     elements.locateDeconstructionEvidenceButton.disabled = !precise;
-    elements.locateDeconstructionEvidenceButton.textContent = precise ? "在当前正文中定位" : "当前仅可章节级回看";
-    elements.locateDeconstructionEvidenceButton.title = precise ? "按 UTF-16 字符位移在当前稿本定位" : "历史或章节级证据不能定位当前正文";
+    elements.locateDeconstructionEvidenceButton.textContent = precise ? "在正文中定位" : sourceIsCurrent ? "仅可回看章节" : "历史稿本不可定位";
+    elements.locateDeconstructionEvidenceButton.title = precise ? "在正文中选中原句" : sourceIsCurrent ? "这条引用暂不能在正文中定位" : "历史稿本只读，不能定位当前正文";
     if (historicalContent !== null) {
       elements.deconstructionEvidenceContent.insertAdjacentHTML('beforeend', '<section class="historical-source"><h3>来源旧稿</h3><textarea readonly aria-label="历史来源正文" spellcheck="false"></textarea></section>');
       const source = elements.deconstructionEvidenceContent.querySelector('.historical-source textarea');
       source.value = historicalContent;
       if (historicalSpan) window.XumaiChapterSections?.locate(source, {start:evidence.charStart,end:evidence.charEnd}, historicalContent);
-      elements.locateDeconstructionEvidenceButton.textContent = '历史来源仅供只读查看';
+      elements.locateDeconstructionEvidenceButton.textContent = '历史稿本不可定位';
     }
     state.pendingEvidence = sourceIsCurrent && evidence ? { ...evidence, projectId: state.deconstructionProjectId } : null;
   }
 
   function showHistoricalDeconstructionEvidence(payload, reason) {
-    renderDeconstructionEvidenceDialog(payload, null, false, reason || "来源版本、修订号或哈希未通过校验；当前页面只保留章节级回看。");
+    renderDeconstructionEvidenceDialog(payload, null, false, reason || "这条引用的来源与当前稿本不一致，暂不能定位。");
     openDeconstructionEvidenceDialog();
   }
 
@@ -3394,8 +3569,8 @@
     } catch (error) {
       if (requestToken !== state.deconstructionEvidenceRequestToken) return;
       state.pendingEvidence = null;
-      elements.deconstructionEvidenceTitle.textContent = "证据暂时读不到";
-      elements.deconstructionEvidenceContent.innerHTML = `<p class="depth-evidence-reason">${escapeHtml(error.message || "证据回链读取失败，请稍后重试。")} </p><button type="button" class="button button-outline" data-action="open-deconstruction-evidence" ${deconstructionEvidenceAttributes(clickedEvidence)}>重新读取证据</button>`;
+      elements.deconstructionEvidenceTitle.textContent = "原文暂时读不到";
+      elements.deconstructionEvidenceContent.innerHTML = `<p class="depth-evidence-reason">${escapeHtml(error.message || "原文读取失败，请稍后重试。")} </p><button type="button" class="button button-outline" data-action="open-deconstruction-evidence" ${deconstructionEvidenceAttributes(clickedEvidence)}>重新读取</button>`;
       elements.locateDeconstructionEvidenceButton.disabled = true;
       return;
     }
@@ -3413,7 +3588,7 @@
       && endpointIsCurrent;
     if (!precondition) {
       state.pendingEvidence = null;
-      showHistoricalDeconstructionEvidence(endpoint, current.sourceMatch ? "这条证据的文档、来源版本、修订号或哈希未通过校验。" : "当前正文已经变化，这条证据属于历史稿本。");
+      showHistoricalDeconstructionEvidence(endpoint, current.sourceMatch ? "这条引用与当前稿本不一致，暂不能定位。" : "正文已变化，当前显示历史稿本。");
       return;
     }
     state.deconstructionWorkspace = current;
@@ -3427,7 +3602,7 @@
     const current = state.deconstructionWorkspace;
     if (!deconstructionEvidenceMatchesSource(current, evidence, current?.result)) {
       closeDeconstructionEvidenceDialog();
-      setWorkspaceNotice(elements.deconstructionNotice, "当前正文已经变化，这条证据只保留章节级回看。", "red");
+      setWorkspaceNotice(elements.deconstructionNotice, "正文已变化，暂不能定位这条引用。", "red");
       return;
     }
     closeDeconstructionEvidenceDialog({ clear: false });
@@ -3459,7 +3634,7 @@
       : null;
     if (!chapter) {
       state.pendingEvidence = null;
-      setEditorNotice("已回到正文，但来源稿本已经变化；当前只保留章节级回看。", "red");
+      setEditorNotice("已回到正文，但来源稿本已变化，未定位原句。", "red");
       return;
     }
     state.activeChapterId = chapter.chapter_id;
@@ -3486,13 +3661,13 @@
       elements.chapterEditor.focus({ preventScroll: true });
     }
     const anchorText = excerptMatches
-      ? `已按 UTF-16 字符位移选择正文中的第 ${evidence.charStart}–${evidence.charEnd} 位。`
+      ? "已选中原句。"
       : sourceStillMatches
         ? evidence.excerpt
-          ? "正文片段与证据摘录不一致，已降级为章节级回看。"
-          : "当前证据未提供正文片段，已降级为章节级回看。"
-        : "证据来自另一稿本，当前只保留章节级回看。";
-    setEditorNoticeHtml(`<strong>已回到来源证据。</strong> 第 ${chapter.chapter_number} 章 · ${escapeHtml(anchorText)}${evidence.excerpt ? `<span class="editor-evidence-excerpt">“${escapeHtml(evidence.excerpt)}”</span>` : ""}`, "blue");
+          ? "原句与正文不一致，已打开来源章节。"
+          : "未提供原句，已打开来源章节。"
+        : "来源稿本已变化，未定位原句。";
+    setEditorNoticeHtml(`<strong>第 ${chapter.chapter_number} 章</strong> · ${escapeHtml(anchorText)}`, "blue");
     state.pendingEvidence = null;
   }
 
@@ -3773,25 +3948,63 @@
     loadAIWorkspace(state.aiProjectId, false);
   }
 
+  function isCurrentReportTask(project, task) {
+    return state.screen === 'deconstruction' && state.deconstructionProjectId === project && state.reportTask === task;
+  }
+
   async function refreshModelBudget(project) {
+    if (state.deconstructionProjectId !== project) return;
+    const task = ensureReportTask(project);
+    const current = () => state.deconstructionProjectId === project && state.reportTask === task;
     const node = document.getElementById('modelSharedBudget');
     try {
-      const {budget} = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/model-budget`);
-      if (state.deconstructionProjectId !== project) return;
+      const payload = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/model-budget`);
+      const {budget}=payload;
+      if (!current()) return;
+      task.budget=budget;
+      // Unknown availability is a disabled state, not permission to send.
+      task.available=typeof payload.model_available==='boolean'?payload.model_available:null;
+      task.budgetError='';
+      renderReportWorkflow();
       const amount = value => Number.isFinite(Number(value)) ? `¥${Number(value).toFixed(4)}` : '未知';
       node.textContent = `本机模型共用预算 ${amount(budget.budget_cny)} · 已计 ${amount(budget.estimated_spent_cny)} · 在途 ${amount(budget.reserved_cny)} · 剩余 ${amount(budget.remaining_cny)}`;
       if (budget.unknown_usage_calls) node.textContent += ' · 部分用量按保守上限记账';
     } catch (error) {
-      if (state.deconstructionProjectId === project) node.textContent = `共用预算暂不可读：${error.message}`;
+      if (current()) {
+        node.textContent = `共用预算暂不可读：${error.message}`;
+        task.budget=null;task.available=null;task.budgetError='暂时无法读取预算，请刷新重试。';renderReportWorkflow();
+      }
     }
   }
 
   async function pollBook(project) {
+    // Check ownership before touching the shared timer, not only after GET.
+    if (state.screen !== 'deconstruction' || state.deconstructionProjectId !== project) return;
+    const task = ensureReportTask(project), pollToken = (task.pollToken || 0) + 1;
+    task.pollToken = pollToken;
+    const current = () => isCurrentReportTask(project, task) && task.pollToken === pollToken;
     clearTimeout(state.bookPollTimer);
     void refreshModelBudget(project);
     try {
       const { job } = await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book`);
-      if (state.screen !== "deconstruction" || state.deconstructionProjectId !== project) return;
+      if (!current()) return;
+      task.job=job;task.loaded=true;task.pollError='';
+      renderReportWorkflow();
+      if(job?.kind==='report-v2') {
+        const token=`${job.run_id}:${job.status}:${job.stage}:${job.document_id || ''}`;
+        // Refresh once after a persisted successful publication, including a
+        // fresh page that discovers an already completed background task.
+        if(job.status==='completed' && task.published!==token) {
+          task.published=token;
+          // Keep an explicit historical volume/object URL. A later user
+          // selection also supersedes this read through the workspace token.
+          const loaded=await loadDeconstructionWorkspace(project,{silent:true});
+          if (!current()) return;
+          if(!loaded){task.published='';task.pollError='报告暂时无法读取，请刷新重试。';renderReportWorkflow();}
+        }
+        if(['queued','running'].includes(job.status))state.bookPollTimer=setTimeout(()=>pollBook(project),3000);
+        return;
+      }
       const budgetText = job?.budget
         ? ` · 本任务估算 ¥${Number(job.budget.estimated_spent_cny || 0).toFixed(4)}`
         : "";
@@ -3801,15 +4014,156 @@
         state.bookCursor = `${project}:${job.cursor}`;
         if (job.cursor) await loadDeconstructionWorkspace(project, { silent:true });
       }
-      if (job?.status === "running") elements.deconstructionStatusPill.textContent = "全文分析中";
+      if (!current()) return;
       if (job?.status === "running") state.bookPollTimer = setTimeout(() => pollBook(project), 8000);
     } catch (error) {
-      if (state.deconstructionProjectId === project) document.getElementById("bookAnalysisStatus").textContent = error.message;
+      if (current()) {
+        document.getElementById("bookAnalysisStatus").textContent = error.message;
+        task.pollError='暂时无法读取任务状态，请刷新重试。';task.loaded=false;renderReportWorkflow();
+        if(state.screen==='deconstruction')state.bookPollTimer=setTimeout(()=>pollBook(project),8000);
+      }
     }
+  }
+
+  function ensureReportTask(projectId) {
+    if(state.reportTask?.projectId!==projectId)state.reportTask={projectId,job:null,budget:null,available:null,loaded:false,sending:false,checking:false,published:'',pollError:'',budgetError:''};
+    return state.reportTask;
+  }
+  function reportStartBlock(data,task) {
+    if(task.sending || task.checking || task.controlling)return '正在确认任务…';
+    if(!task.loaded)return task.pollError || '正在读取任务状态…';
+    if(['queued','running'].includes(task.job?.status))return '分析正在后台继续';
+    if(task.job?.kind==='report-v2' && !['running','paused','failed','completed'].includes(task.job.status))return '任务状态待确认';
+    if(task.job?.error_code==='report_request_unknown')return '上次请求尚待确认，费用占用已保留';
+    if(task.budgetError)return task.budgetError;
+    if(task.available===false)return '模型服务当前未启用';
+    if(task.available!==true)return '模型服务状态待确认';
+    if(!task.budget || !Number.isFinite(task.budget.remaining_cny))return '预算尚未确认';
+    if(Number(task.budget.remaining_cny)<=0)return '当前预算不足';
+    if(!data?.source?.versionId || data.source.revision===null || !data.source.contentHash)return '请先保存并确认正文';
+    if(!(data.source.wordCount>0))return '请先写作或导入正文';
+    if(data.source.wordCount>30000)return '当前拆书支持三万字以内的稿本';
+    return '';
+  }
+  function reportJobMessage(job) {
+    if(!job)return '';
+    if(job.kind!=='report-v2')return job.status==='running'?'已有分析任务在后台运行':'';
+    if(job.status==='completed')return '拆书完成，报告已自动采用';
+    if(job.status==='failed' || job.status==='failed_retryable')return '本次拆书未完成，原报告保留';
+    if(job.status==='paused')return '拆书已暂停';
+    const stages={queued:'拆书已排队',draft:'正在整理人物与剧情',review:'正在核对原文依据',revise:'正在修正报告',verify:'正在校验报告',adopt:'正在保存报告'};
+    return `${stages[job.stage] || '正在分析正文'}，离开页面也会继续`;
+  }
+  function renderReportWorkflow() {
+    const root=elements.reportWorkflow,data=state.deconstructionWorkspace,task=state.reportTask;
+    if(!root || !task || data?.projectId!==task.projectId)return;
+    const block=reportStartBlock(data,task),hasReport=isModelAnalysisContract(data.result?.analysisContractVersion) && hasDeconstructionResults(data);
+    $$('[data-action="book-start"],[data-action="model-analyze"]').forEach(node=>node.disabled=Boolean(block || state.modelAnalysisBusy));
+    const legacyPause=$('[data-action="book-pause"]');
+    if(legacyPause)legacyPause.disabled=task.job?.kind==='report-v2' || task.job?.status!=='running';
+    const job=task.job,running=['queued','running'].includes(job?.status);
+    const currentReport=hasReport && data.sourceMatch===true && data.effectiveStatus==='completed';
+    const unknown=job?.error_code==='report_request_unknown';
+    const failedAttempt=currentReport && task.loaded && job?.kind==='report-v2' && job.status==='failed'
+      && !unknown && !task.pollError && !task.budgetError;
+    const unsettled=running || (job?.kind==='report-v2' && ['paused','failed'].includes(job.status))
+      || unknown || !task.loaded || task.pollError || task.budgetError;
+    root.hidden=currentReport && !unsettled;
+    // Legacy rule state belongs in source tools. The primary header has one
+    // status: the report workflow, or a ready badge for a source-matched report.
+    elements.deconstructionStatusPill.hidden=(!root.hidden && !failedAttempt) || !currentReport;
+    const producer=data.result?.report?.producer || data.result?.analysisLabel;
+    elements.deconstructionStatusPill.textContent=failedAttempt
+      ? ['报告已就绪',producer].filter(Boolean).join(' · ')
+      : currentReport && root.hidden?'模型报告已就绪':'';
+    elements.deconstructionStatusPill.className = `deconstruction-status-pill is-${data.effectiveStatus}`;
+    const message=job?.status==='completed' && !currentReport?'':reportJobMessage(job);
+    const action=job?.kind==='report-v2' && job.status==='paused'?'继续拆书':job?.kind==='report-v2' && ['completed','failed'].includes(job.status)?'重新分析':'开始拆书';
+    const reason=task.pollError || task.budgetError || (unknown?block:job?.kind==='report-v2' && job.status==='failed'?job.message:message || block);
+    const empty=!hasDeconstructionResults(data) && new URLSearchParams(location.search).get('section')!=='guide';
+    elements.deconstructionPageContent.setAttribute('aria-busy',String(empty && running));
+    const focused=root.contains?.(document.activeElement)?document.activeElement?.dataset?.action:null;
+    // Move, never clone, the existing safe controls; polling and confirmation
+    // continue to use the same task ownership and source checks.
+    const container=failedAttempt?document.getElementById('workspaceSource'):empty?elements.deconstructionPageContent:$('.deconstruction-header-actions');
+    if(root.parentElement!==container)container.appendChild?.(root);
+    root.className=`report-workflow ${empty?'is-empty':'is-compact'}`;
+    let heading='',steps='',detail=reason;
+    if(empty) {
+      const reportJob=job?.kind==='report-v2'?job:null;
+      const stage=reportJob && reportJob.status!=='completed'
+        ? ({queued:0,draft:0,review:1,revise:1,verify:1,adopt:1}[reportJob.stage] ?? -1) : -1;
+      heading=task.pollError?'状态暂不可读':!task.loaded?'正在读取状态':!reportJob?(running?'已有分析任务运行中':'尚未开始'):reportJob.status==='paused'?'拆书已暂停':reportJob.status==='failed'?'拆书未完成':reportJob.status==='completed'?'报告尚未载入':reportJob.stage==='adopt'?'正在保存报告':reportJob.stage==='queued'?'等待整理':stage===1?'正在核对':'正在整理';
+      steps=`<ol class="report-stage-list" aria-label="拆书阶段">${['整理','核对','完成'].map((label,index)=>`<li class="${index===stage?'is-current':index<stage?'is-done':''}"${index===stage?' aria-current="step"':''}><span aria-hidden="true">${String(index+1).padStart(2,'0')}</span><strong>${label}</strong></li>`).join('')}</ol>`;
+      // Running needs a stage, not the same long sentence in two places.
+      detail=task.pollError || task.budgetError || (reportJob?.error_code==='report_request_unknown'?block:reportJob?.status==='failed'?reportJob.message:!running?block:'');
+      if(detail===heading || (!task.loaded && !task.pollError))detail='';
+    }
+    root.innerHTML=`${steps}${heading?`<h2>${escapeHtml(heading)}</h2>`:''}${detail?`<p class="report-workflow-status${job?.status==='failed'?' report-workflow-error':''}" role="status">${escapeHtml(detail)}</p>`:''}<div class="report-workflow-action"><button class="button button-primary" type="button" data-action="open-report-confirm" ${block?'disabled':''}>${running?'拆书进行中':action}</button>${running && job?.kind==='report-v2'?`<button type="button" class="quiet-link" data-action="pause-report" ${task.controlling?'disabled':''}>暂停拆书</button>`:''}${task.pollError || task.budgetError?'<button class="quiet-link" type="button" data-action="refresh-report-status">刷新状态</button>':''}</div>`;
+    if(focused && !root.hidden)root.querySelector(`[data-action="${focused}"]:not(:disabled)`)?.focus({preventScroll:true});
+  }
+  async function pauseReport() {
+    const project=state.deconstructionProjectId,task=ensureReportTask(project);
+    if(task.controlling || task.job?.kind!=='report-v2' || task.job.status!=='running')return;
+    task.controlling=true;renderReportWorkflow();
+    try {
+      await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book/pause`,{method:'POST'});
+      if(state.screen==='deconstruction' && state.deconstructionProjectId===project)await pollBook(project);
+    } catch(error){if(state.deconstructionProjectId===project)setWorkspaceNotice(elements.deconstructionNotice,error.message || '暂停没有完成，请重试。','red');}
+    finally {task.controlling=false;renderReportWorkflow();}
+  }
+  async function openReportConfirmation() {
+    const project=state.deconstructionProjectId,task=ensureReportTask(project);
+    if(reportStartBlock(state.deconstructionWorkspace,task))return;
+    task.checking=true;renderReportWorkflow();
+    try {
+      const current=await deconstructionApi.read(project);
+      await Promise.all([refreshModelBudget(project),pollBook(project)]);
+      if(!isCurrentReportTask(project,task))return;
+      task.checking=false;
+      const block=reportStartBlock(current,task);if(block)throw new Error(block);
+      state.reportConfirmation={projectId:project,source:{...current.source}};
+      const amount=value=>`¥${Number(value).toFixed(4)}`;
+      $('#reportConfirmScope').textContent=`《${current.title}》 · 当前完整稿本 ${current.source.chapterCount} 章 · ${Number(current.source.wordCount).toLocaleString('zh-CN')} 字`;
+      $('#reportConfirmBudget').textContent=`本机共用上限 ${amount(task.budget.budget_cny)} · 已计 ${amount(task.budget.estimated_spent_cny)} · 在途 ${amount(task.budget.reserved_cny)} · 剩余 ${amount(task.budget.remaining_cny)}。按实际用量计费，以上余额不是本次费用报价。`;
+      $('#reportConfirmError').textContent='';$('#reportConfirmButton').disabled=false;
+      const dialog=$('#reportConfirmDialog');rememberDialogFocus(dialog);dialog.showModal();
+    } catch(error) {if(isCurrentReportTask(project,task))setWorkspaceNotice(elements.deconstructionNotice,error.message || '暂时无法确认拆书，请重试。','red');}
+    finally {task.checking=false;if(isCurrentReportTask(project,task))renderReportWorkflow();}
+  }
+  async function confirmReport() {
+    const pending=state.reportConfirmation,project=state.deconstructionProjectId,task=ensureReportTask(project);
+    if(!pending || pending.projectId!==project || task.sending)return;
+    let submitted=false;
+    task.sending=true;$('#reportConfirmButton').disabled=true;renderReportWorkflow();
+    try {
+      await Promise.all([refreshModelBudget(project),pollBook(project)]);
+      if(!isCurrentReportTask(project,task) || state.reportConfirmation!==pending)return;
+      const block=reportStartBlock(state.deconstructionWorkspace,{...task,sending:false});
+      if(block)throw new Error(block);
+      // Server CAS validates this exact reviewed source. A concurrent change
+      // cannot silently change the scope or start analysis of another draft.
+      submitted=true;
+      await requestJson(`/api/independent/projects/${encodeURIComponent(project)}/deconstruction/book/start-report`,{method:'POST',body:JSON.stringify({expected_source_version_id:pending.source.versionId,expected_source_revision:pending.source.revision,expected_source_hash:pending.source.contentHash})});
+      task.published='';
+      if(isCurrentReportTask(project,task)){
+        if(state.reportConfirmation===pending){$('#reportConfirmDialog').close();state.reportConfirmation=null;}
+        // Closing after POST cannot cancel a backend job; keep observing it
+        // without reopening the dialog or touching another project's timer.
+        await pollBook(project);
+      }
+    } catch(error) {
+      if(!isCurrentReportTask(project,task) || (!submitted && state.reportConfirmation!==pending))return;
+      if(state.reportConfirmation===pending)$('#reportConfirmError').textContent=error.message || '拆书没有启动，请重试。';
+      // A rejected source requires a new review, not a second stale submit.
+      if(state.reportConfirmation?.projectId===project)state.reportConfirmation=null;
+      await Promise.all([refreshModelBudget(project),pollBook(project)]);
+    } finally {task.sending=false;if(isCurrentReportTask(project,task))renderReportWorkflow();}
   }
 
   async function controlBook(action) {
     const project = state.deconstructionProjectId;
+    if(action==='start' && reportStartBlock(state.deconstructionWorkspace,ensureReportTask(project)))return;
     const button = document.querySelector(`[data-action="book-${action}"]`);
     button.disabled = true;
     try {
@@ -3843,6 +4197,8 @@
     let numbers;
     try { numbers = parseModelChapterRange(document.getElementById("modelAnalysisChapters").value); }
     catch (error) { status.textContent = error.message; return; }
+    const block=reportStartBlock(state.deconstructionWorkspace,ensureReportTask(projectId));
+    if(block){status.textContent=block;return;}
     state.modelAnalysisBusy = true; button.disabled = true;
     state.modelAnalysisCandidate = null; preview.innerHTML = "";
     status.textContent = "正在阅读和拆解，可能需要数分钟。试拆期间请保持本页打开；长范围可使用后台全文拆解。";
@@ -4008,6 +4364,11 @@
     if (action === "select-chapter") selectEditorChapter(actionNode.dataset.chapterId);
     if (action === "resegment-chapters") await previewResegment();
     if (action === "open-workspace-tools") { const dialog=$('#workspaceToolsDialog'); rememberDialogFocus(dialog); dialog.showModal(); void refreshModelBudget(state.deconstructionProjectId); }
+    if(action==='open-report-confirm')await openReportConfirmation();
+    if(action==='confirm-report')await confirmReport();
+    if(action==='pause-report')await pauseReport();
+    if(action==='close-report-confirm'){state.reportConfirmation=null;$('#reportConfirmDialog').close();}
+    if(action==='refresh-report-status')await pollBook(state.deconstructionProjectId);
     if (action === "close-workspace-tools") $('#workspaceToolsDialog').close();
     if (action === "save-editor") {
       if (state.workspace?.initialized && !state.editorReadOnly && await flushPendingSave()) showToast("正文已保存。");
@@ -4125,6 +4486,7 @@
     document.addEventListener("click", async (event) => {
       const routeLink = event.target.closest("[data-route]");
       if (routeLink) {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         const path = routeLink.getAttribute("href") || "/";
         if (path.startsWith("#")) return;
@@ -4159,6 +4521,12 @@
     elements.deconstructionEvidenceDialog?.addEventListener("click", handleAction);
     elements.deconstructionEvidenceDialog?.addEventListener("close", () => restoreDialogFocus(elements.deconstructionEvidenceDialog));
     $('#workspaceToolsDialog').addEventListener('close', () => restoreDialogFocus($('#workspaceToolsDialog')));
+    $('#reportConfirmDialog').addEventListener('close',()=>{
+      state.reportConfirmation=null;
+      if(state.screen==='deconstruction')$('#reportWorkflow [data-action="open-report-confirm"]')?.focus({preventScroll:true});
+    });
+    $('#reportConfirmDialog').addEventListener('cancel',()=>{state.reportConfirmation=null;});
+    $('#reportConfirmDialog').addEventListener('keydown',trapDialogFocus);
     $('#workspaceToolsDialog').addEventListener('keydown', trapDialogFocus);
     elements.deconstructionEvidenceDialog?.addEventListener("cancel", () => {
       state.deconstructionEvidenceRequestToken += 1;
@@ -4298,5 +4666,6 @@
     }
   }
 
+  window.XumaiChapterTitles=Object.freeze({title:chapterTitle,prefix:chapterPrefix,edit:chapterEditTitle});
   start();
 })();
