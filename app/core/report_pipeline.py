@@ -109,6 +109,18 @@ class ReportDraft(PreviewGroundedReport):
     time_evidence_ids: list[str] = Field(min_length=1, max_length=12)
 
 
+class DraftCharacterV3(DraftCharacter):
+    motivation: DraftClaim | None
+    change: DraftClaim | None
+
+
+class ReportDraftV3(ReportDraft):
+    """Final evidence-ID projection of source-v3, not a widened legacy wire."""
+
+    schema_version: Literal["2"]
+    characters: list[DraftCharacterV3] = Field(min_length=1, max_length=100)
+
+
 class SourceIssue(StrictModel):
     text: str = Field(min_length=1, max_length=500)
     source_ids: list[str] = Field(min_length=1, max_length=12)
@@ -214,11 +226,14 @@ def public_wire(draft):
     return data
 
 
-def validate_draft(data, bank, read_text, *, producer):
-    draft = ReportDraft.model_validate(data, strict=True)
+def validate_draft(data, bank, read_text, *, producer, schema_version="1"):
+    models = {"1": ReportDraft, "2": ReportDraftV3}
+    if schema_version not in models:
+        raise ValueError("未知的公开分析报告版本")
+    draft = models[schema_version].model_validate(data, strict=True)
     if set(draft.chapter_numbers) != set(read_text) or len(draft.chapter_numbers) != len(read_text):
         raise ValueError("报告必须覆盖全部当前正文")
-    report = bind_preview_selections(public_wire(draft), bank, read_text, producer=producer)
+    report = bind_preview_selections(public_wire(draft), bank, read_text, producer=producer, schema_version=schema_version)
     evidence = {item.id: bank[item.source_id] for item in draft.evidence}
 
     def refs(ids):
@@ -244,6 +259,10 @@ def validate_draft(data, bank, read_text, *, producer):
             if alias.name in NON_PEOPLE or not any(alias.name in evidence[key].quote for key in alias.evidence_ids):
                 raise ValueError("别名没有原文依据")
     claims = {key: (claim, owner) for key, claim, owner in _claims(draft)}
+    if schema_version == "2":
+        used_people = {endpoint for claim, _ in claims.values() for endpoint in (claim.subject_id, claim.object_id)}
+        if any(p.id not in used_people for p in draft.participants):
+            raise ValueError("背景个体必须被事实主张的主体或对象实际引用")
     for claim, owner in claims.values():
         if any(key is not None and key not in people for key in (claim.subject_id, claim.object_id)):
             raise ValueError("动作或身份端点不存在，不能以字符串null代替null")

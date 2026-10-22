@@ -9,7 +9,7 @@ import re
 from pydantic import Field, create_model
 
 from schemas.analysis_delta import AnalysisDelta
-from schemas.analysis_report import AnalysisReport, Event, ReportEvidence, StrictModel, validate_character_relations
+from schemas.analysis_report import AnalysisReport, AnalysisReportV2, Event, ReportEvidence, StrictModel, validate_character_relations
 
 
 class SourceSelection(StrictModel):
@@ -40,6 +40,14 @@ PreviewEvent = create_model("PreviewEvent", __base__=StrictModel, **{
     if key not in {"chapter_number", "chapter_end"}
 })
 PreviewGroundedReport = _selector_model("PreviewGroundedReport", GroundedReport, {
+    "events": (list[PreviewEvent], Field(min_length=1, max_length=300)),
+})
+
+# Separate final projection for the explicitly versioned source-v3 path. The
+# old generation/preview selector schemas above remain byte-for-byte strict.
+PreviewGroundedReportV2 = _selector_model("PreviewGroundedReportV2", AnalysisReportV2, {
+    "producer": (str, Field(default="server", exclude=True)),
+    "evidence": (list[SourceSelection], Field(min_length=1, max_length=500)),
     "events": (list[PreviewEvent], Field(min_length=1, max_length=300)),
 })
 
@@ -123,7 +131,7 @@ def _validate_preview_references(preview, evidence):
     event_ids = {x.id for x in preview.events}
     claims = [*preview.findings, *preview.relations, *preview.character_relations, *preview.contradictions]
     for person in preview.characters:
-        claims.extend((person.identity, person.motivation, person.change, *person.insights))
+        claims.extend(c for c in (person.identity, person.motivation, person.change, *person.insights) if c is not None)
         if person.portrait is not None:
             claims.append(person.portrait)
     for event in preview.events:
@@ -151,9 +159,13 @@ def _derive_preview_event_ranges(payload):
         event["chapter_number"], event["chapter_end"] = min(numbers), max(numbers)
 
 
-def bind_preview_selections(data, bank, read_text, *, producer):
+def bind_preview_selections(data, bank, read_text, *, producer, schema_version="1"):
     """Bind strict preview selectors, validate every reference, then derive ranges."""
-    preview = PreviewGroundedReport.model_validate(data, strict=True)
+    models = {"1": (PreviewGroundedReport, AnalysisReport), "2": (PreviewGroundedReportV2, AnalysisReportV2)}
+    if schema_version not in models:
+        raise ValueError("未知的公开分析报告版本")
+    preview_model, report_model = models[schema_version]
+    preview = preview_model.model_validate(data, strict=True)
     evidence = []
     for selection in preview.evidence:
         passage = bank.get(selection.source_id)
@@ -178,7 +190,7 @@ def bind_preview_selections(data, bank, read_text, *, producer):
     payload["evidence"] = [item.model_dump(mode="json") for item in evidence]
     payload["producer"] = producer
     _derive_preview_event_ranges(payload)
-    report = AnalysisReport.model_validate(payload, strict=True)
+    report = report_model.model_validate(payload, strict=True)
     validate_event_evidence(report.model_dump(mode="json"))
     return report
 

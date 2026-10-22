@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
-from schemas.analysis_report import AnalysisReport
+from schemas.analysis_report import AnalysisReport, MODEL_REPORT_CONTRACTS, PublicAnalysisReport, model_report_contract
 
 
 DeconstructionStatus = Literal[
@@ -779,11 +779,13 @@ def validate_depth_report_source(
 
 def _validate_report_binding(container) -> None:
     report = container.report
+    if container.analysis_contract_version == "model.2" and container.status == "completed" and not isinstance(report, AnalysisReport):
+        raise ValueError("completed model.2 document requires a schema 2 report")
     if report is None:
         return
     if isinstance(report, AnalysisReport):
-        if container.analysis_contract_version != "model.1" or container.status != "completed":
-            raise ValueError("model report requires completed model.1 document")
+        if container.analysis_contract_version != model_report_contract(report) or container.status != "completed":
+            raise ValueError("model report requires its matching completed model document")
         evidence = {item.evidence_id: item for item in container.evidence}
         if any(item.document_id != container.document_id
                or item.source_version_id != container.source_version_id
@@ -809,7 +811,8 @@ def _read_legacy_model_report(value):
     """Read PR8 model reports in memory without rewriting persisted history."""
     if isinstance(value, dict) and value.get("analysis_contract_version", "1.0") == "1.0":
         report = value.get("report")
-        if isinstance(report, AnalysisReport) or (isinstance(report, dict) and report.get("schema_version") == "1" and "producer" in report):
+        if ((isinstance(report, AnalysisReport) and report.schema_version == "1")
+                or (isinstance(report, dict) and report.get("schema_version") == "1" and "producer" in report)):
             return {**value, "analysis_contract_version": "model.1"}
     return value
 
@@ -850,11 +853,11 @@ class DeconstructionDocument(BaseModel):
     # 1.0 is the stage 31 compatibility run; 2.0 is the six-perspective
     # report contract.  A source snapshot may have one document per version so
     # an upgrade never mutates the old history in place.
-    analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    analysis_contract_version: Literal["1.0", "2.0", "model.1", "model.2"] = "1.0"
     engine_revision: str | None = Field(default=None, max_length=80)
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview | None = None
-    report: DeconstructionDepthReport | AnalysisReport | None = None
+    report: DeconstructionDepthReport | PublicAnalysisReport | None = None
     timeline: list[TimelineNode] = Field(default_factory=list)
     chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
@@ -903,7 +906,7 @@ class DeconstructionProjectRecord(BaseModel):
             raise ValueError("active document does not belong to project")
         source_keys = [
             (item.source_version_id, item.source_revision, item.source_hash, item.analysis_contract_version, item.engine_revision)
-            for item in self.documents if item.analysis_contract_version != "model.1"
+            for item in self.documents if item.analysis_contract_version not in MODEL_REPORT_CONTRACTS
         ]
         if len(source_keys) != len(set(source_keys)):
             raise ValueError("duplicate deconstruction source and contract")
@@ -951,7 +954,7 @@ class DeconstructionActiveRun(BaseModel):
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
-    analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    analysis_contract_version: Literal["1.0", "2.0", "model.1", "model.2"] = "1.0"
     engine_revision: str | None = Field(default=None, max_length=80)
     retry_count: int = Field(default=0, ge=0)
     # Accepted only so the stage 31 in-memory constructor can be parsed; it is
@@ -974,7 +977,7 @@ class DeconstructionDocumentPublic(BaseModel):
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
-    analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    analysis_contract_version: Literal["1.0", "2.0", "model.1", "model.2"] = "1.0"
     engine_revision: str | None = Field(default=None, max_length=80)
     status: DeconstructionStatus
     progress_percent: int = Field(default=0, ge=0, le=100)
@@ -985,7 +988,7 @@ class DeconstructionDocumentPublic(BaseModel):
     retry_count: int = Field(default=0, ge=0)
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview | None = None
-    report: DeconstructionDepthReport | AnalysisReport | None = None
+    report: DeconstructionDepthReport | PublicAnalysisReport | None = None
     timeline: list[TimelineNode] = Field(default_factory=list)
     chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
@@ -1043,11 +1046,11 @@ class DeconstructionResult(BaseModel):
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
-    analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    analysis_contract_version: Literal["1.0", "2.0", "model.1", "model.2"] = "1.0"
     engine_revision: str | None = Field(default=None, max_length=80)
     analysis_label: str = "确定性结构拆解（无模型）"
     overview: DeconstructionOverview
-    report: DeconstructionDepthReport | AnalysisReport | None = None
+    report: DeconstructionDepthReport | PublicAnalysisReport | None = None
     timeline: list[TimelineNode] = Field(default_factory=list)
     chapter_breakdowns: list[ChapterBreakdown] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
@@ -1074,7 +1077,7 @@ class DeconstructionHistoryItem(BaseModel):
     source_version_id: str
     source_revision: int = Field(default=0, ge=0)
     source_hash: str
-    analysis_contract_version: Literal["1.0", "2.0", "model.1"] = "1.0"
+    analysis_contract_version: Literal["1.0", "2.0", "model.1", "model.2"] = "1.0"
     engine_revision: str | None = Field(default=None, max_length=80)
     retry_count: int = Field(default=0, ge=0)
     analysis_label: str = "确定性结构拆解（无模型）"
@@ -1178,7 +1181,7 @@ class DeconstructionResponse(BaseModel):
             raise ValueError("运行态必须与 active effective status 一致")
         if self.active_run is None and self.run_status != "none":
             raise ValueError("非 none 的 run_status 必须有 active_run")
-        if self.active_run is not None and self.effective_status in active_statuses and self.source_match and self.active_run.analysis_contract_version != "model.1":
+        if self.active_run is not None and self.effective_status in active_statuses and self.source_match and self.active_run.analysis_contract_version not in MODEL_REPORT_CONTRACTS:
             if (
                 self.active_run.source_version_id != self.source.version_id
                 or self.active_run.source_revision != self.source.revision
@@ -1234,8 +1237,9 @@ class DeconstructionResponse(BaseModel):
         if document_report is not None and document_report != report:
             raise ValueError("document report must equal canonical result report")
         if isinstance(report, AnalysisReport):
-            if self.active_run is None or self.result.analysis_contract_version != "model.1" or self.active_run.analysis_contract_version != "model.1":
-                raise ValueError("model report requires matching model.1 run")
+            contract = model_report_contract(report)
+            if self.active_run is None or self.result.analysis_contract_version != contract or self.active_run.analysis_contract_version != contract:
+                raise ValueError("model report requires matching versioned model run")
             for key in ("document_id", "source_version_id", "source_revision", "source_hash"):
                 if getattr(self.active_run, key) != getattr(self.result, key):
                     raise ValueError("model report active run mismatch")

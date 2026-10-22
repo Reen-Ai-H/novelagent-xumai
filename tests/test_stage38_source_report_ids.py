@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from app.agents.llm_runtime import LLMRuntime
 from app.core.report_pipeline import ReportDraft, validate_draft
 from app.core.source_report import (
-    SOURCE_ID_GROUPS, SourceReportDraft, prepare_source_draft,
+    SOURCE_ID_GROUPS, SOURCE_REPORT_V2_WIRE, SourceReportDraft, prepare_source_draft,
     validate_source_candidate,
 )
 from stage38_report_fixtures import acceptance
@@ -52,7 +52,10 @@ class SourceReportIDTest(unittest.TestCase):
             return draft, bank, texts
 
         with patch.object(api.old, "report_case", side_effect=with_background_people):
-            case.prepare()
+            if legacy:
+                case.prepare()
+            else:
+                case.prepare(wire=SOURCE_REPORT_V2_WIRE)
         return case
 
     def pair(self, case):

@@ -25,7 +25,7 @@ from typing import Iterable, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from schemas.analysis_report import Character, CharacterInsight, Claim, AnalysisReport
+from schemas.analysis_report import Character, CharacterInsight, Claim, PublicAnalysisReport
 
 
 def _normalize(value: str) -> str:
@@ -48,8 +48,8 @@ class CharacterStage(BaseModel):
     aliases: list[str] = Field(default_factory=list, max_length=20)
     role: str = Field(min_length=1, max_length=80)
     identity: Claim
-    motivation: Claim
-    change: Claim
+    motivation: Claim | None
+    change: Claim | None
     portrait: Claim | None = None
     insights: list[CharacterInsight] = Field(default_factory=list, max_length=8)
 
@@ -92,7 +92,7 @@ class CharacterReportSlice:
     source_key: str
     scope_start: int
     scope_end: int
-    report: AnalysisReport
+    report: PublicAnalysisReport
 
     def __post_init__(self) -> None:
         if not self.source_key.strip():

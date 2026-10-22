@@ -26,7 +26,7 @@ from app.core.independent_service import IndependentServiceError, IndependentWor
 from app.core.person_recognition import assess_person_identities
 from app.core.project_lock import ProjectLockError
 from app.core.character_aggregation import CharacterReportSlice, aggregate_character_slices
-from schemas.analysis_report import AnalysisImport, AnalysisRequest, AnalysisReport
+from schemas.analysis_report import AnalysisImport, AnalysisRequest, AnalysisReport, MODEL_REPORT_CONTRACTS, model_report_contract
 from schemas.deconstruction import (
     ChapterBreakdown,
     DeconstructionActions,
@@ -621,7 +621,7 @@ class DeconstructionService:
             error=error_model,
             update_available=update_available,
             engine_revision=active.engine_revision if active else None,
-            required_engine_revision=RULE_ENGINE_REVISION if active is None or active.analysis_contract_version != "model.1" else None,
+            required_engine_revision=RULE_ENGINE_REVISION if active is None or active.analysis_contract_version not in MODEL_REPORT_CONTRACTS else None,
         )
         public_active = (
             self._public_document(active)
@@ -916,6 +916,7 @@ class DeconstructionService:
                 if not source.sufficient or source.pending_changes:
                     raise DeconstructionServiceError("source_not_ready", "请先确认并保存正文。", status_code=409)
                 report = payload.report
+                contract = model_report_contract(report)
                 chapters = {x.chapter_number: x for x in source.chapters}
                 if not set(report.chapter_numbers) <= set(chapters):
                     raise DeconstructionServiceError("report_scope_invalid", "拆解范围包含当前稿本不存在的章节。", status_code=422)
@@ -934,7 +935,7 @@ class DeconstructionService:
                 legacy = self._document(record, legacy_id)
                 # Keep already-persisted IDs stable for exact same-version retries only.
                 # Never migrate an old document or replace its frozen evidence bindings.
-                if (legacy is not None and legacy.analysis_contract_version == "model.1"
+                if (legacy is not None and legacy.analysis_contract_version == contract
                         and legacy.status == "completed"
                         and legacy.project_id == project_id and legacy.account_id == account_id
                         and legacy.source_version_id == source.version_id
@@ -962,7 +963,7 @@ class DeconstructionService:
                         document_id=document_id, project_id=project_id, account_id=account_id,
                         source_version_id=source.version_id, source_revision=source.source_revision,
                         source_hash=source.source_hash, status="completed", progress_percent=100,
-                        analysis_contract_version="model.1",
+                        analysis_contract_version=contract,
                         current_stage="拆解结果已导入", idempotency_key=digest,
                         analysis_label=f"{report.producer} · 导入分析",
                         overview=DeconstructionOverview(title=report.title, chapter_count=len(report.chapter_numbers),
@@ -1857,7 +1858,7 @@ class DeconstructionService:
         if (source.project_id != document.project_id or source.account_id != document.account_id
                 or source.version_id != document.source_version_id):
             return False
-        if document.analysis_contract_version == "model.1" and self._scoped(document):
+        if document.analysis_contract_version in MODEL_REPORT_CONTRACTS and self._scoped(document):
             return bool(document.scope_hash and document.scope_start <= document.scope_end
                         and self._scope_hash(source, document.scope_start, document.scope_end) == document.scope_hash)
         return bool(source.source_hash and source.source_hash == document.source_hash)
@@ -1877,7 +1878,7 @@ class DeconstructionService:
                 or item.source_revision != document.source_revision
                 or item.source_hash != document.source_hash):
             return None
-        if (document.analysis_contract_version == "model.1" and self._scoped(document)
+        if (document.analysis_contract_version in MODEL_REPORT_CONTRACTS and self._scoped(document)
                 and not document.scope_start <= item.chapter_number <= document.scope_end):
             return None
         chapter = next((c for c in source.chapters if c.chapter_id == item.chapter_id
@@ -1904,7 +1905,7 @@ class DeconstructionService:
                 return None
         if quote == item.excerpt:
             return item
-        if not item.excerpt or item.excerpt != quote.strip() or document.analysis_contract_version == "model.1":
+        if not item.excerpt or item.excerpt != quote.strip() or document.analysis_contract_version in MODEL_REPORT_CONTRACTS:
             return None
         if canonical is not None:
             if canonical.granularity != "span" or canonical.excerpt != quote:
@@ -1965,7 +1966,7 @@ class DeconstructionService:
                 )
                 chapter = next((chapter for chapter in source.chapters if chapter.chapter_id == item.chapter_id), None)
                 scope_current = bool(
-                    document.analysis_contract_version == "model.1"
+                    document.analysis_contract_version in MODEL_REPORT_CONTRACTS
                     and document.status == "completed"
                     and not source.pending_changes
                     and document.document_id in current_scope_ids

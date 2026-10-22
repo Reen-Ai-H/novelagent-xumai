@@ -15,7 +15,7 @@ from app import deconstruction_routes
 from app.core.book_analysis import BookAnalysis
 from app.core.report_pipeline import ReportDraft, object_hash, validate_draft
 from app.core.source_report import (
-    SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, SourceReportDraft,
+    SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE, SourceReportDraft,
     SourceReportDraftV2, _legacy_projection, apply_source_revision,
     report_wire, source_report_model, source_target_hashes,
     validate_source_candidate, validate_source_review,
@@ -174,7 +174,7 @@ class SourceV2ApiTest(unittest.TestCase):
         case = api.SourceReportApiTest("runTest")
         case.setUp()
         self.addCleanup(case.doCleanups)
-        case.prepare()
+        case.prepare(wire=SOURCE_REPORT_WIRE if v1 else SOURCE_REPORT_V2_WIRE)
         if v1:
             with patch.object(case.runner, "ensure_task"):
                 case.start()
@@ -464,17 +464,18 @@ class SourceV2ApiTest(unittest.TestCase):
         self.assertNotIn("title", case.job()["draft_response"]["characters"][0]["insights"][0])
         self.assertEqual(case.job()["draft"]["characters"][0]["insights"][0]["title"], "补充信息")
 
-    def test_failed_v1_history_is_preserved_while_explicit_new_job_uses_v2(self):
+    def test_failed_v1_history_is_preserved_while_explicit_new_job_uses_v3(self):
         case = self.case(v1=True)
         old = case.job()
         add_insight(case.draft)
         old.update(status="failed", stage="draft", error_code="report_evidence_invalid", draft_response=deepcopy(case.draft))
         case.runner.save(old)
         before = deepcopy(old)
+        case.draft["schema_version"] = "2"
         case.start(); final = case.wait()
         self.assertEqual(final["status"], "completed", final)
         job = case.job()
-        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_V2_WIRE)
+        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_V3_WIRE)
         self.assertEqual(job["report_history"][-1], {key:value for key,value in before.items() if key != "report_history"})
         self.assertEqual(len(case.calls), 2)
         self.assertNotIn("title", job["report_history"][-1]["draft_response"]["characters"][0]["insights"][0])

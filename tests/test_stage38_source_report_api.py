@@ -8,8 +8,9 @@ from unittest.mock import patch
 
 from app import deconstruction_routes
 from app.core.book_analysis import BookAnalysis
+from app.core.model_budget import BudgetLedger, pricing_for_model
 from app.core.report_pipeline import object_hash
-from app.core.source_report import SOURCE_REPORT_V2_WIRE, check_source_directory, source_target_hashes
+from app.core.source_report import SOURCE_REPORT_V3_WIRE, check_source_directory, freeze_source_directory, source_target_hashes
 from stage38_report_fixtures import acceptance
 from stage38_source_report_fixtures import source_case
 import test_stage38_report_api as old
@@ -33,9 +34,24 @@ class SourceReportApiTest(unittest.TestCase):
     assert_known_transport_failure = old.ReportApiTest.assert_known_transport_failure
     timeout_on = staticmethod(old.ReportApiTest.timeout_on)
 
-    def prepare(self, count=2, *, bulk=False):
+    def prepare(self, count=2, *, bulk=False, wire=SOURCE_REPORT_V3_WIRE):
         old.ReportApiTest.prepare(self, count, bulk=bulk, legacy=False)
         self.draft, _, _, _ = source_case(texts=self.texts)
+        if wire == SOURCE_REPORT_V3_WIRE:
+            self.draft["schema_version"] = "2"
+        else:
+            # Explicit persisted historical wire. Never patch the production
+            # default or infer a version from the synthetic response's shape.
+            binding = dict(project_id=self.project, account_id=self.account,
+                source_version=self.body["expected_source_version_id"],
+                source_revision=self.body["expected_source_revision"],
+                source_hash=self.body["expected_source_hash"])
+            self._legacy_fixture = dict(**binding, model=old.MODEL, kind="report-v2",
+                report_wire_version=wire, source_directory=freeze_source_directory(binding, self.bank, self.texts),
+                run_id="historical-source-fixture", status="paused", stage="queued", cursor=0, total=2,
+                message="旧来源合同待继续", error_code=None, document_id=None,
+                budget=BudgetLedger(budget_cny=5, reserve_cny=0, pricing=pricing_for_model(old.MODEL)).public(),
+                inflight=False, report_history=[])
 
     def revised_reply(self):
         draft = self.job()["draft"]
@@ -65,7 +81,8 @@ class SourceReportApiTest(unittest.TestCase):
         final = self.wait()
         self.assertEqual((final["status"], final["stage"], final["cursor"], final["total"]), ("completed", "completed", 2, 2))
         job = self.job()
-        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_V2_WIRE)
+        self.assertEqual(job["report_wire_version"], SOURCE_REPORT_V3_WIRE)
+        self.assertEqual(job["draft"]["schema_version"], "2")
         entries = check_source_directory(job, self.bank, self.texts)
         self.assertEqual(len(entries), len(self.bank))
         self.assertEqual(job["draft_diagnostics"], [])
@@ -272,7 +289,7 @@ class SourceReportApiTest(unittest.TestCase):
         self.assertEqual(final["error_code"], "provider_bad_json")
         self.assertEqual(len(self.calls), 2)
         self.assertNotIn("draft", self.job())
-        self.assertEqual(self.job()["report_wire_version"], SOURCE_REPORT_V2_WIRE)
+        self.assertEqual(self.job()["report_wire_version"], SOURCE_REPORT_V3_WIRE)
         self.unchanged()
 
     def test_failed_legacy_json_is_preserved_in_history_not_converted_or_adopted(self):
@@ -293,7 +310,7 @@ class SourceReportApiTest(unittest.TestCase):
         self.assertEqual(current["report_history"][-1], {k: v for k, v in before.items() if k != "report_history"})
         self.assertEqual(current["report_history"][-1]["draft_response"], old_draft)
         self.assertNotEqual(current["run_id"], "failed-legacy")
-        self.assertEqual(current["report_wire_version"], SOURCE_REPORT_V2_WIRE)
+        self.assertEqual(current["report_wire_version"], SOURCE_REPORT_V3_WIRE)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(current["draft_response"], self.draft)
 

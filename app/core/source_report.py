@@ -5,7 +5,9 @@ failed old report, fuzzy-matched, or used as proof of literary entailment.
 """
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
+from typing import Literal
 
 from pydantic import Field, create_model, model_validator
 
@@ -22,7 +24,9 @@ from schemas.analysis_report import Claim, StrictModel
 
 SOURCE_REPORT_WIRE = "source-report-v1"
 SOURCE_REPORT_V2_WIRE = "source-report-v2"
-SOURCE_REPORT_WIRES = (SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE)
+SOURCE_REPORT_V3_WIRE = "source-report-v3"
+SOURCE_REPORT_WIRES = (SOURCE_REPORT_WIRE, SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE)
+RAW_SOURCE_REPORT_WIRES = (SOURCE_REPORT_V2_WIRE, SOURCE_REPORT_V3_WIRE)
 LEGACY_REPORT_WIRE = "report-draft-v1"
 REF_NAMES = {"evidence_ids": "source_ids", "name_evidence_ids": "name_source_ids",
              "time_evidence_ids": "time_source_ids"}
@@ -131,12 +135,99 @@ SourceReportDraftV2 = create_model("SourceReportDraftV2", __base__=SourceReportD
         "不两两枚举或补传递闭包，同一(from_id,to_id,label)多机制合并保留事实。")))
 
 
+class SourceInsightV3(SourceDetail):
+    title: str = Field(default="补充信息", min_length=1, max_length=80,
+                       description="仅人物insights缺title时使用固定展示标签补充信息；提供值仍严格，null/空/超长不兜底。")
+
+
+SourceCharacterV3 = _source_model("SourceCharacterV3", SourceCharacter,
+    motivation=SourceDraftClaim | None, change=SourceDraftClaim | None, insights=list[SourceInsightV3])
+
+
+class SourceReportDraftV3(SourceReportDraftV2):
+    """输出报告实例JSON，不输出schema定义。全部对象id全局唯一，引用同步。
+
+    人物identity严格有源；所有主配角motivation/change键必填，未交代时值为null，
+    不生成未知话术或假来源，不借null隐藏明确事实。非null保留完整Claim约束。
+    先确定核心人物与经历，participants仅按实际主张subject_id/object_id需要建立，
+    不枚举名词、不凑数组上限、不以背景分类隐藏核心人物。来源及个体身份仍须核对。
+    relations只连事件及合法动作，character_relations只连人物及非null同向Claim；
+    只保留直接必要有源机制，不扩传递闭包，不删事实或固定截断节点边。
+    status为fact/reported/inferred/unknown，phase为actual/planned/requested/negated/unknown。
+    仅人物insights缺title可用补充信息，其他标题必填；格式修复不合并、删对象或清空事实。
+    """
+
+    schema_version: Literal["2"] = "2"
+    characters: list[SourceCharacterV3] = Field(min_length=1, max_length=100)
+    participants: list[SourceParticipant] = Field(max_length=100,
+        description="仅实际Claim的subject_id/object_id引用且不上卡的有据个体；名字声明或正文提及不算引用，不凑上限。")
+
+
 def source_report_model(wire=SOURCE_REPORT_WIRE):
     if wire == SOURCE_REPORT_WIRE:
         return SourceReportDraft
     if wire == SOURCE_REPORT_V2_WIRE:
         return SourceReportDraftV2
+    if wire == SOURCE_REPORT_V3_WIRE:
+        return SourceReportDraftV3
     raise ValueError("未知的私有来源报告合同版本")
+
+
+def source_response_model(wire):
+    """One live draft/repair pair; no state on shared schemas or old wires.
+
+    A parseable, complete Claim cannot disappear into null during a schema
+    repair. This is a structural loss check, not a judgement of source meaning.
+    Real retractions still require the sourced review and final verification.
+    """
+    base = source_report_model(wire)
+    if wire != SOURCE_REPORT_V3_WIRE:
+        return base
+    protected = None
+
+    def analysis_state(value):
+        counts, anchors, ids = Counter(), {}, Counter()
+        if not isinstance(value, dict) or not isinstance(value.get("characters"), list):
+            return counts, anchors, ids
+        people = [p for p in value["characters"] if isinstance(p, dict)]
+        ids.update(p["id"] for p in people if isinstance(p.get("id"), str))
+        for person in people:
+            if not isinstance(person.get("name"), str):
+                continue
+            for field in ("motivation", "change"):
+                claim = person.get(field)
+                if not isinstance(claim, dict):
+                    continue
+                try:
+                    # Even a Claim with malformed/missing action annotations
+                    # already carries factual text and sources. Repairing those
+                    # annotations must not become permission to erase it.
+                    SourceClaim.model_validate({k: claim[k] for k in SourceClaim.model_fields if k in claim}, strict=True)
+                except ValueError:
+                    continue
+                # Names are only exact repair anchors, never aliases or entity
+                # inference. Counts preserve separate same-name individuals.
+                counts[(person["name"].strip(), field)] += 1
+                if isinstance(person.get("id"), str) and ids[person["id"]] == 1:
+                    anchors[(person["id"], field)] = person["name"].strip()
+        return counts, anchors, ids
+
+    def preserve_analysis(cls, value):
+        nonlocal protected
+        counts, anchors, ids = analysis_state(value)
+        if protected is None:
+            protected = counts, anchors
+        else:
+            prior_counts, prior_anchors = protected
+            # Stable IDs prevent shuffling null between same-name people. An
+            # explicitly repaired ID still has the exact-name count backstop.
+            lost = any(key[0] in ids and anchors.get(key) != name for key, name in prior_anchors.items())
+            if lost or prior_counts - counts:
+                raise ValueError("格式修复不能清空已有分析主张，须经有源修订和终审")
+        return value
+
+    return create_model(base.__name__, __base__=base, __doc__=base.__doc__, __validators__={
+        "preserve_analysis": model_validator(mode="before")(preserve_analysis)})
 
 
 def report_wire(job):
@@ -269,7 +360,8 @@ def _legacy_projection(data, entries):
 def validate_source_candidate(data, entries, bank, read_text, *, producer, wire=SOURCE_REPORT_WIRE):
     check_source_entries(entries, bank, read_text)
     draft = _shape(data, entries, read_text, wire=wire).model_dump(mode="json")
-    _, report = validate_draft(_legacy_projection(draft, entries), bank, read_text, producer=producer)
+    _, report = validate_draft(_legacy_projection(draft, entries), bank, read_text, producer=producer,
+                               schema_version="2" if wire == SOURCE_REPORT_V3_WIRE else "1")
     return draft, report
 
 
@@ -330,6 +422,11 @@ def prepare_source_draft(data, entries, bank, read_text, *, producer, wire=SOURC
     people = {p.id: p for p in [*draft.characters, *draft.participants]}
     visible, event_ids = {p.id for p in draft.characters}, {e.id for e in draft.events}
     claims = {key: (claim, owner) for key, claim, owner in _claims(draft)}
+    if wire == SOURCE_REPORT_V3_WIRE:
+        used_people = {endpoint for claim, _ in claims.values() for endpoint in (claim.subject_id, claim.object_id)}
+        for person in draft.participants:
+            if person.id not in used_people:
+                emit("unused_participant", ["participants/" + person.id], "id")
     claim_targets = {}
     for key, _, owner in _claims(draft):
         if owner in visible:
@@ -454,7 +551,7 @@ def _review_sources(refs, entries, bank, read_text):
 
 def validate_source_review(data, draft, entries, bank, read_text, *, final=False, wire=SOURCE_REPORT_WIRE):
     check_source_entries(entries, bank, read_text)
-    if wire == SOURCE_REPORT_V2_WIRE:
+    if wire in RAW_SOURCE_REPORT_WIRES:
         normalized = source_report_model(wire).model_validate(draft, strict=True).model_dump(mode="json")
         if object_hash(normalized) != object_hash(draft):
             raise ValueError("审查对象必须是同版本的规范化草稿")

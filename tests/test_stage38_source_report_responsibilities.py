@@ -46,7 +46,7 @@ class SourceV2ResponsibilitiesTest(unittest.TestCase):
         case = api.SourceReportApiTest("runTest")
         case.setUp()
         self.addCleanup(case.doCleanups)
-        case.prepare()
+        case.prepare(wire=SOURCE_REPORT_V2_WIRE)
         return case
 
     def test_v1_full_schema_and_v2_every_non_description_property_are_unchanged(self):
