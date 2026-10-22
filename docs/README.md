@@ -1,6 +1,6 @@
 # 叙脉文档索引
 
-10/23新任务的[派生索引合同](STAGE_38_DERIVED_ACTORS_CONTRACT.md)已集成：事件人物名单及关系kind由已有字段确定性生成，减少模型重复写入，保持原文事实、旧版本、最终校验和费用限制。独立复核与真实效果尚待完成，当前状态见PROGRESS。
+10/23新任务的[派生索引合同](STAGE_38_DERIVED_ACTORS_CONTRACT.md)已集成：事件人物名单及关系kind由已有字段确定性生成，减少模型重复写入，保持原文事实、旧版本、最终校验和费用限制。主回归与独立工程复核通过，真实报告仍未通过校验，当前状态见PROGRESS。
 
 2026-10-20当前：[阶段38 · 作者账户的拆书闭环](goals/STAGE_38_PLATFORM_DECONSTRUCTION.md)，分支`codex/stage-38-platform-deconstruction`。已发现并纠正测试账户与作者账户不一致；正在把正常上传自动分章、主拆书入口、持久报告与人物/事件总图接成同一网站体验。最新目标和合同见任务书与DECISIONS，实际进度见PROGRESS；下方“六章副本可验收”不替代本阶段完成。
 
