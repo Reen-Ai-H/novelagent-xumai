@@ -15,6 +15,7 @@
   const chapterLabel = e => e.chapter_end && e.chapter_end !== e.chapter_number ? `第 ${e.chapter_number}–${e.chapter_end} 章` : `第 ${e.chapter_number} 章`;
   const details = (title, body) => `<details class="analysis-details"><summary>${esc(title)}</summary><div class="analysis-details-body">${body}</div></details>`;
   let graphSerial=0;
+  const graphResizeCleanup=new WeakMap();
   // Geometry is shared by SVG lines and HTML hit targets; no window listeners
   // or scale-dependent text. A page bounds work, never the source collection.
   const personSlots=count=>Array.from({length:count},(_,i)=>({x:i%2?88:12,y:count<=2?50:count<=4?30+40*Math.floor(i/2):16+34*Math.floor(i/2)}));
@@ -307,6 +308,7 @@
   }
 
   function mount(root, data, options) {
+    graphResizeCleanup.get(root)?.();
     const people=new Map(data.people.map(p=>[String(p.id),p])), events=new Map(data.events.map(e=>[String(e.id),e]));
     const key=`xumai-reader:${options.projectId}:${options.documentId}`;
     let saved={};
@@ -403,7 +405,13 @@
     function orderSwitch() {
       return `<div class="workspace-order" role="group" aria-label="事件顺序"><button data-reader-order="narrative" aria-pressed="${state().order==='narrative'}">叙述顺序</button><button data-reader-order="story" aria-pressed="${state().order==='story'}" ${data.storyOrder.length?'':'disabled title="本报告未提供故事顺序"'}>故事顺序</button></div>${data.timeNote?`<details class="workspace-time-note" data-reader-time-note ${timeNoteOpen?'open':''}><summary>时间与不确定性</summary><p>${esc(data.timeNote)}</p></details>`:''}`;
     }
-    function totalGraph(kind) {
+    let renderedGraphSize='';
+    function graphSize(kind=section) {
+      const width=root.clientWidth,count=kind==='characters'?data.people.length:data.events.length;
+      if(width<=0)return '';
+      return `${kind}:${width<620?'compact:'+Math.max(300,width-2):count<=7?'wide:'+Math.max(660,Math.min(1000,width-20)):'wide'}`;
+    }
+    function totalGraph(kind,reflow=false) {
       const character=kind==='characters',items=character?data.people:orderEvents();
       const compactWidth=root.clientWidth>0 && root.clientWidth<620?root.clientWidth-2:0;
       const layout=graphLayout(items,character?list(data.personEdges):data.eventEdges,!character,compactWidth,root.clientWidth?root.clientWidth-20:920);
@@ -421,7 +429,22 @@
       const nodes=items.map((item,i)=>{const p=layout.positions.get(String(item.id));
         return `<article class="total-graph-node ${character?'is-person':'is-event'}" style="left:${p.x}px;top:${p.y}px" ${character?`data-person-id="${esc(item.id)}"`:`data-event-id="${esc(item.id)}"`}><span class="eyebrow">${character?esc(item.group):`<span class="total-graph-position">${String(i+1).padStart(2,'0')}</span> ${esc(item.label)}`}</span><h2>${link(kind,item.id,character?item.name:item.title,'total-graph-link')}</h2></article>`;
       }).join('');
-      root.innerHTML=`<div class="workspace-reader-index" data-reader-index="${kind}">${mapSwitch()}${character?'':orderSwitch()}<div ${character?'data-person-index':'data-event-index'}><div class="total-graph-meta"><span>${items.length} ${character?'个人物':'个事件'} · ${edgeChoices.length} 条联系</span>${character?'':`<span>${state().order==='story'?'故事顺序':'叙述顺序'}</span>`}</div>${items.length?`<div class="total-graph-scroll" role="region" tabindex="0" aria-label="${character?'人物关系总图':'事件关系总图'}，可滚动查看"><div class="total-graph-canvas" style="width:${layout.width}px;height:${layout.height}px;--graph-node-width:${layout.nodeWidth || 210}px;--graph-label-width:${layout.labelWidth || 138}px"><svg class="total-graph-lines" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true">${arrow(marker)}</svg>${labels.join('')}${nodes}</div></div>`:'<p class="workspace-empty">报告中尚未记录'+(character?'人物':'事件')+'。</p>'}${items.length && !edgeChoices.length?`<p class="total-graph-empty">${character?'暂无已记录的语义关系，可点人物查看经历。':'暂无已记录的事件联系，可点节点查看经过。'}</p>`:''}</div><section data-edge-basis hidden></section></div>`;
+      if(!reflow)root.innerHTML=`<div class="workspace-reader-index" data-reader-index="${kind}">${mapSwitch()}${character?'':orderSwitch()}<div ${character?'data-person-index':'data-event-index'}><div class="total-graph-meta"><span>${items.length} ${character?'个人物':'个事件'} · ${edgeChoices.length} 条联系</span>${character?'':`<span>${state().order==='story'?'故事顺序':'叙述顺序'}</span>`}</div>${items.length?`<div class="total-graph-scroll" role="region" tabindex="0" aria-label="${character?'人物关系总图':'事件关系总图'}，可滚动查看"><div class="total-graph-canvas" style="width:${layout.width}px;height:${layout.height}px;--graph-node-width:${layout.nodeWidth || 210}px;--graph-label-width:${layout.labelWidth || 138}px"><svg class="total-graph-lines" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true">${arrow(marker)}</svg>${labels.join('')}${nodes}</div></div>`:'<p class="workspace-empty">报告中尚未记录'+(character?'人物':'事件')+'。</p>'}${items.length && !edgeChoices.length?`<p class="total-graph-empty">${character?'暂无已记录的语义关系，可点人物查看经历。':'暂无已记录的事件联系，可点节点查看经过。'}</p>`:''}</div><section data-edge-basis hidden></section></div>`;
+      else {
+        // Keep links, controls and an open basis mounted: only geometry moves.
+        const canvas=root.querySelector('.total-graph-canvas');
+        if(!canvas)return;
+        canvas.style.width=`${layout.width}px`;canvas.style.height=`${layout.height}px`;
+        canvas.style.setProperty('--graph-node-width',`${layout.nodeWidth || 210}px`);
+        canvas.style.setProperty('--graph-label-width',`${layout.labelWidth || 138}px`);
+        root.querySelectorAll('.total-graph-node').forEach(node=>{
+          const p=layout.positions.get(node.dataset.personId || node.dataset.eventId);
+          node.style.left=`${p.x}px`;node.style.top=`${p.y}px`;
+        });
+        const svg=canvas.querySelector('.total-graph-lines');
+        svg.setAttribute('viewBox',`0 0 ${layout.width} ${layout.height}`);svg.innerHTML=arrow(marker);
+      }
+      renderedGraphSize=graphSize(kind);
       // Measure the real, two-line-clamped buttons before any routing. The
       // fixed-width direction glyph can change without changing their size.
       // The same dimensions drive ordinary obstacles, reservations and bays.
@@ -439,8 +462,7 @@
         const svg=canvas.querySelector('.total-graph-lines');
         svg.setAttribute('viewBox',`0 0 ${layout.width} ${layout.height}`);svg.insertAdjacentHTML('beforeend',paths.join(''));
       }
-      if(!character)updatePlotFocus();
-      sync(false);
+      if(!reflow){if(!character)updatePlotFocus();sync(false);}
     }
     function drawPlot(node,visible) {
       edgeChoices=[];
@@ -551,6 +573,20 @@
     root.addEventListener('focusin',event=>{if(!object && section==='plot' && event.target.matches('[data-reader-open]')){state().selected=event.target.dataset.readerOpen;sync(false);updatePlotFocus();}});
     const returning=history.state?.xumaiReaderReturn;
     sync(false);draw(!object && returning?.key===key && returning.section===section?'restore':'top');
+    if(typeof ResizeObserver==='function') {
+      let timer;
+      const cleanup=()=>{observer.disconnect();clearTimeout(timer);if(graphResizeCleanup.get(root)===cleanup)graphResizeCleanup.delete(root);};
+      const observer=new ResizeObserver(()=>{
+        clearTimeout(timer);
+        if(!root.isConnected){cleanup();return;}
+        if(object || state().map==='index' || !graphSize() || graphSize()===renderedGraphSize)return;
+        timer=setTimeout(()=>{
+          if(!root.isConnected){cleanup();return;}
+          if(!object && state().map!=='index' && graphSize() && graphSize()!==renderedGraphSize)totalGraph(section,true);
+        },120);
+      });
+      graphResizeCleanup.set(root,cleanup);observer.observe(root);
+    }
     function revealTimeNote(){
       const note=root.querySelector('[data-reader-time-note]');
       if(note){note.open=true;note.querySelector('summary').focus({preventScroll:true});note.scrollIntoView({block:'nearest',behavior:'instant'});}
