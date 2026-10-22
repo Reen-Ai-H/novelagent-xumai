@@ -1,6 +1,6 @@
 # 叙脉架构说明
 
-10/23实施中的[派生索引合同](STAGE_38_DERIVED_ACTORS_CONTRACT.md)为新任务引入source-report-v4：私有事件不再含actor_ids，最终严格投影从Claim主客体生成公共索引；raw/规范稿/hash保持无派生字段。公共schema2/model.2、旧wire、来源/恢复/预算与最终完整校验不变，尚未集成或验证真实效果。
+10/23已集成的[派生索引合同](STAGE_38_DERIVED_ACTORS_CONTRACT.md)为新任务引入source-report-v4：私有事件不再含actor_ids、relations不再含kind，最终严格投影从Claim主客体生成公共人物索引、从basis生成kind；raw/规范稿/hash保持无派生字段。公共schema2/model.2、旧wire、来源/恢复/预算与最终完整校验不变，独立复核及真实效果尚待完成。
 
 ## 现状边界
 
