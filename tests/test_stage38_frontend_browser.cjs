@@ -145,7 +145,7 @@ if(require.main===module)(async()=>{
     if(width>=1024){assert.ok(diagram.top<260);assert.equal(diagram.allVisible,true);assert.equal(diagram.scrollX,0);assert.equal(diagram.scrollY,0);}
     assert.equal(await page.locator('#reportWorkflow').isVisible(),false,'A current valid report has no redundant workflow bar');
     const assets=await page.evaluate(()=>[...document.querySelectorAll('script[src],link[rel=stylesheet]')].map(n=>n.src || n.href));
-    assert.equal(assets.length,13);assert.ok(assets.every(url=>new URL(url).searchParams.get('v')==='stage38-platform3'));
+    assert.equal(assets.length,13);assert.ok(assets.every(url=>new URL(url).searchParams.get('v')==='stage38-platform10'));
     await capture('people-total');
     await page.locator('.total-graph-edge').first().focus();await page.keyboard.press('Enter');
     assert.equal(await page.locator('[data-edge-basis]').isVisible(),true);
