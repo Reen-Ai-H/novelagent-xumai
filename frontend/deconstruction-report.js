@@ -105,6 +105,8 @@
       return `<span class="analysis-badge is-${esc(status)}">${labels[status]}</span><p>${esc(item.text || "暂无可确认分析。")} </p>${proof}`;
     };
     const hasAnalysis = value => report.schema_version !== "2" || value !== null;
+    const hasPortrait = person => report.schema_version !== "2" || !!person.portrait;
+    const overviewLabel = person => hasPortrait(person) ? "性格 / 为人" : "身份与处境";
     const analysisSection = (title, value) => hasAnalysis(value)
       ? `<section><h3>${title}</h3>${claim(value)}</section>` : "";
 
@@ -192,7 +194,7 @@
       const chips = phraseChips(p,true);
       const together = [...new Set(report.events.filter(e=>(e.actor_ids || []).includes(p.id)).flatMap(e=>e.actor_ids || []))].filter(id=>id!==p.id && people.has(id));
       lazyConfigs.set(`person-together-${p.id}`,{label:"同场人物",items:together,renderItem:id=>`<p><button type="button" class="quiet-link" data-report-person="${esc(id)}">${esc(people.get(id))}</button></p>`});
-      return `<article class="analysis-person"><header><span class="eyebrow">${esc(roleLabel)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><div class="analysis-card-summary"><span>性格 / 为人 · ${labels[portrait?.status] || labels.unknown}</span><p class="analysis-portrait">${esc(compact(portrait?.text || "当前报告没有性格判断。"))}</p>${hasAnalysis(p.change) ? `<span>关键经历 · ${labels[p.change?.status] || labels.unknown}</span><p>${esc(compact(p.change?.text || "当前报告没有经历记录。"))}</p>` : ""}</div>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}${together.length ? lazyDetails(`同场人物 · ${together.length}（不代表关系定性）`,`person-together-${p.id}`) : ''}<details class="analysis-details"><summary>展开原文依据</summary><div class="analysis-details-body"><h4>性格 / 为人</h4>${evidence(portrait?.evidence_ids)}${hasAnalysis(p.change) ? `<h4>关键经历</h4>${evidence(p.change?.evidence_ids)}` : ""}</div></details><button type="button" class="quiet-link analysis-read-more" data-report-person="${esc(p.id)}">完整人物解析 ↗</button></article>`;
+      return `<article class="analysis-person"><header><span class="eyebrow">${esc(roleLabel)}</span><h3><a class="analysis-person-link" href="${esc(options.characterUrl?.(p.id) || '#')}" data-report-person="${esc(p.id)}">${esc(p.name)}</a></h3></header><div class="analysis-card-summary"><span>${overviewLabel(p)} · ${labels[portrait?.status] || labels.unknown}</span><p class="analysis-portrait">${esc(compact(portrait?.text || "当前报告没有性格判断。"))}</p>${hasAnalysis(p.change) ? `<span>关键经历 · ${labels[p.change?.status] || labels.unknown}</span><p>${esc(compact(p.change?.text || "当前报告没有经历记录。"))}</p>` : ""}</div>${chips ? `<div class="analysis-phrase-row is-card">${chips}</div>` : ""}${together.length ? lazyDetails(`同场人物 · ${together.length}（不代表关系定性）`,`person-together-${p.id}`) : ''}<details class="analysis-details"><summary>展开原文依据</summary><div class="analysis-details-body"><h4>${overviewLabel(p)}</h4>${evidence(portrait?.evidence_ids)}${hasAnalysis(p.change) ? `<h4>关键经历</h4>${evidence(p.change?.evidence_ids)}` : ""}</div></details><button type="button" class="quiet-link analysis-read-more" data-report-person="${esc(p.id)}">完整人物解析 ↗</button></article>`;
     }
     const G = window.XumaiVisualReading;
     function personSummary(kind, label, value, length, fallback) {
@@ -214,7 +216,7 @@
             document.querySelector('.visual-roster').addEventListener('click',event=>{const button=event.target.closest('[data-roster-person]');if(button){closeActiveModal?.();controller.reveal(button.dataset.rosterPerson);}});
           },
           onNeighbor:n=>{selected=n.id;tab='plot';browsing.plot.query='';browsing.plot.filters={};browsing.plot.page=Math.floor(report.events.findIndex(e=>e.id===n.id)/6)+1;timeMode='narrative';draw();view.querySelector(`[data-visual-node="${CSS.escape(n.id)}"]`)?.focus();},
-          detail:p=>`<article><span class="eyebrow">${esc(importance(p))}</span><h3>${esc(p.name)}</h3>${personSummary('portrait','性格 / 为人',p.portrait || p.identity,110,'当前报告没有性格判断。')}${personSummary('change','关键经历',p.change,80,'当前报告没有经历记录。')}<details class="analysis-details"><summary>完整解析与原文依据</summary>${personCard(p)}</details></article>`});
+          detail:p=>`<article><span class="eyebrow">${esc(importance(p))}</span><h3>${esc(p.name)}</h3>${personSummary(hasPortrait(p) ? 'portrait' : 'identity',overviewLabel(p),p.portrait || p.identity,110,'当前报告没有性格判断。')}${personSummary('change','关键经历',p.change,80,'当前报告没有经历记录。')}<details class="analysis-details"><summary>完整解析与原文依据</summary>${personCard(p)}</details></article>`});
       } else {
         const ordered=report.story_order.map(id=>byId.get(id)).filter(Boolean),seen=new Set(ordered.map(e=>e.id));
         const events=timeMode==='story'?[...ordered,...report.events.filter(e=>!seen.has(e.id))]:report.events;
@@ -237,7 +239,7 @@
         const chips = phraseChips(person, false);
         const identity = person.identity || {};
         const portrait = person.portrait || identity;
-        view.innerHTML = `<article class="analysis-person-page"><button type="button" class="quiet-link" data-report-back>← 返回人物卡</button><header><span class="eyebrow">${esc(person.role || "故事人物")}</span><h2>${esc(person.name || "未命名人物")}</h2><p class="analysis-person-lead">${esc(portrait.text || identity.text || "暂无人物概览。")}</p></header><section><h3>身份与处境</h3>${claim(identity)}</section>${analysisSection('想要什么，为什么行动',person.motivation)}${chips ? `<section><h3>形象速览</h3><div class="analysis-phrase-row">${chips}</div></section>` : ""}${analysisSection('关键经历与变化',person.change)}<section><h3>为人判断的依据</h3>${evidence(portrait.evidence_ids || identity.evidence_ids)}</section></article>`;
+        view.innerHTML = `<article class="analysis-person-page"><button type="button" class="quiet-link" data-report-back>← 返回人物卡</button><header><span class="eyebrow">${esc(person.role || "故事人物")}</span><h2>${esc(person.name || "未命名人物")}</h2>${hasPortrait(person) ? `<p class="analysis-person-lead">${esc(portrait.text || identity.text || "暂无人物概览。")}</p>` : ""}</header><section><h3>身份与处境</h3>${claim(identity)}</section>${analysisSection('想要什么，为什么行动',person.motivation)}${chips ? `<section><h3>形象速览</h3><div class="analysis-phrase-row">${chips}</div></section>` : ""}${analysisSection('关键经历与变化',person.change)}${hasPortrait(person) ? `<section><h3>为人判断的依据</h3>${evidence(portrait.evidence_ids || identity.evidence_ids)}</section>` : ""}</article>`;
         return;
       }
       character = null;

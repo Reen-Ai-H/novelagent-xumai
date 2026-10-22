@@ -687,7 +687,13 @@
 
   function restoreDialogFocus(dialog) {
     const target = dialog ? state.dialogFocus.get(dialog) : null;
-    if (target && typeof target.focus === "function") window.setTimeout(() => target.focus(), 0);
+    if (target && typeof target.focus === "function") window.setTimeout(() => {
+      // Native close events can arrive after another control/modal has taken
+      // focus. A delayed restoration must not override that newer choice.
+      const active = document.activeElement;
+      if (target.isConnected !== false && (!active || active === document.body
+        || active === target || dialog?.contains?.(active))) target.focus();
+    }, 0);
   }
 
   function trapDialogFocus(event) {

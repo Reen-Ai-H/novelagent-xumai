@@ -100,6 +100,14 @@ function fixtures(){
      assert.ok((await analysis.innerText()).includes(p.identity.text));assert.equal(await analysis.locator('section').evaluateAll(nodes=>nodes.every(n=>n.querySelector('h3')&&n.querySelector('p')?.textContent.trim())),true);
      assert.equal(await analysis.locator('.analysis-phrase').count(),p.insights.length);
      if(version==='2')assert.doesNotMatch(await analysis.innerText(),/暂无可确认分析|暂未绑定原文依据|未交代|当前报告没有经历记录/);
+     if(version==='2'&&[4,5].includes(i)){
+      assert.deepEqual(headings,['身份与处境']);assert.equal(await analysis.locator('section').count(),1);
+      assert.equal(await analysis.locator('section > p').evaluateAll((nodes,text)=>nodes.filter(n=>n.textContent.trim()===text).length,p.identity.text),1);
+      assert.doesNotMatch(await analysis.innerText(),/性格|为人判断|暂无|未交代/);
+      assert.equal(await analysis.locator('.analysis-proof').count(),1);
+      if(i===4){await capture('schema2-portrait-null-workspace');await proof(analysis,version);}
+      cases.push({width,portraitNullWorkspace:i,identityAnalysisOnce:true,sourceRetained:true});
+     }
      if(i===0){await capture(`schema${version}-sparse-detail`);await proof(analysis,version);
       if(version==='2'){
        await key(analysis.locator('.analysis-phrase'));await page.locator('.analysis-modal').waitFor();assert.match(await page.locator('.analysis-modal').innerText(),/有据补充/);
@@ -132,6 +140,21 @@ function fixtures(){
     assert.equal(new URL(page.url()).searchParams.get('volume'),`doc${version}`);assert.equal(await workflow.count(),1);await geometry();
     cases.push({width,version,mixedGuideAndReturn:true,sameConnectedWorkflow:true});
    }
+   // Native dialog.close queues a close event. Hold that event until after
+   // the next insight modal closes, to cover its independently delayed
+   // restore callback without relying on a lucky browser frame boundary.
+   await enter('2');await key(page.locator('[data-reader-open=C0]'));await detail.waitFor();
+   const focusAnalysis=detail.locator('details').filter({has:page.locator('summary',{hasText:'人物分析与原文'})}).last();
+   await key(focusAnalysis.locator(':scope > summary'));await key(focusAnalysis.locator('.analysis-proof > summary').first());
+   await key(focusAnalysis.locator('.deconstruction-evidence-link').first());await page.locator('#deconstructionEvidenceDialog[open]').waitFor();
+   await page.waitForFunction(()=>!document.querySelector('#locateDeconstructionEvidenceButton').disabled);
+   await page.evaluate(()=>{window.__heldSourceClose=false;document.querySelector('#deconstructionEvidenceDialog').addEventListener('close',event=>{event.stopImmediatePropagation();window.__heldSourceClose=true;},{capture:true,once:true});});
+   await page.keyboard.press('Escape');await page.waitForFunction(()=>window.__heldSourceClose);
+   const focusPhrase=focusAnalysis.locator('.analysis-phrase');await key(focusPhrase);await page.locator('.analysis-modal').waitFor();
+   await page.keyboard.press('Escape');assert.equal(await focusPhrase.evaluate(n=>n===document.activeElement),true);
+   await page.evaluate(async()=>{document.querySelector('#deconstructionEvidenceDialog').dispatchEvent(new Event('close'));await new Promise(resolve=>setTimeout(resolve,0));});
+   assert.equal(await focusPhrase.evaluate(n=>n===document.activeElement),true,'A late source close callback cannot steal the restored insight focus');
+   assert.equal(await page.locator('.analysis-modal').count(),0);cases.push({width,lateSourceCloseKeepsInsightFocus:true});
    // A newly completed schema 2 task must clear the body empty state using
    // the original DOM node, rather than leaving the reader aria-busy.
    formal=false;job={kind:'report-v2',run_id:'new-synthetic',status:'running',stage:'draft',document_id:null};
@@ -163,6 +186,35 @@ function fixtures(){
     if(version==='2')assert.doesNotMatch(await page.locator('.analysis-person-page').innerText(),/暂无可确认分析|暂未绑定原文依据|当前报告没有经历记录|未交代/);
     await key(page.locator('[data-report-back]'));assert.equal(await page.locator('.analysis-person-page').count(),0);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));cases.push({width,version,standalone:mode});
+   }
+   for(const version of ['1','2'])for(const mode of ['list','map']){
+    await page.goto(origin+'/standalone');await page.waitForFunction(()=>window.XumaiAnalysis);
+    const report=structuredClone((version==='1'?data.old:data.fresh).result.report),person=report.characters[4];person.portrait=null;
+    await page.evaluate(({report,mode})=>{sessionStorage.setItem('xumai-reading-view',mode);const root=document.querySelector('#standalone');root.innerHTML=window.XumaiAnalysis.render(report);window.XumaiAnalysis.mount(root,report,[],null,{section:'characters'});},{report,mode});
+    if(mode==='map'){
+     await key(page.locator('[data-visual-pick=C4]'));
+     const summary=page.locator('.visual-selected .visual-person-summary').first();
+     assert.equal(await summary.getAttribute('data-summary-kind'),version==='2'?'identity':'portrait');
+     assert.equal(await summary.locator('.visual-summary-label').innerText(),version==='2'?'身份与处境':'性格 / 为人');
+     await key(page.locator('.visual-selected details > summary').first());
+    }
+    const card=page.locator('.analysis-person').filter({has:page.locator('[data-report-person=C4]')});
+    assert.ok((await card.locator('.analysis-card-summary').innerText()).startsWith(version==='2'?'身份与处境':'性格 / 为人'));
+    assert.equal(await card.locator('.analysis-card-summary > p').evaluateAll((nodes,text)=>nodes.filter(n=>n.textContent.trim()===text).length,person.identity.text),1);
+    const proof=card.locator('details').filter({has:page.locator('summary',{hasText:'展开原文依据'})});await key(proof.locator(':scope > summary'));
+    assert.equal(await proof.locator('h4').first().innerText(),version==='2'?'身份与处境':'性格 / 为人');assert.ok((await proof.innerText()).includes(report.evidence[4].quote));
+    if(version==='2')assert.doesNotMatch(await card.innerText(),/性格|为人判断|暂无|未交代/);
+    await key(card.locator('.analysis-read-more'));await page.locator('.analysis-person-page').waitFor();
+    const profile=page.locator('.analysis-person-page');
+    if(version==='2'){
+     assert.deepEqual(await profile.locator('h3').allTextContents(),['身份与处境']);assert.equal(await profile.locator('section').count(),1);
+     assert.equal(await profile.locator('p').evaluateAll((nodes,text)=>nodes.filter(n=>n.textContent.trim()===text).length,person.identity.text),1);
+     assert.equal(await profile.locator('.analysis-person-lead').count(),0);assert.doesNotMatch(await profile.innerText(),/性格|为人判断|暂无|未交代/);
+     await key(profile.locator('.analysis-proof > summary'));assert.ok((await profile.innerText()).includes(report.evidence[4].quote));
+     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+     const file=path.join(out,`${width}x${height}-portrait-null-standalone-${mode}.png`);await page.screenshot({path:file,fullPage:true});screenshots.push(file);
+    }else{assert.ok((await profile.locator('h3').allTextContents()).includes('为人判断的依据'));assert.equal(await profile.locator('.analysis-person-lead').innerText(),person.identity.text);}
+    cases.push({width,portraitNullStandalone:mode,version,identityLabelAndSource:true});
    }
    assert.deepEqual(errors,[]);assert.equal(JSON.stringify(data),before,'The viewer must not mutate either stored report or synthetic manuscript');
    assert.ok(!requests.some(p=>/start-report|analyze-preview|\/pause$/.test(p)));

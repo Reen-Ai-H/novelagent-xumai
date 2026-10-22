@@ -5,7 +5,7 @@ const root=path.resolve(__dirname,'..'),template=require('./browser_stage37_fixt
 const context={window:{},document:{querySelector:()=>null,querySelectorAll:()=>[]},URL,URLSearchParams};
 const source=fs.readFileSync(path.join(root,'frontend/app.js'),'utf8').replace(/\r\n/g,'\n'),hook='  start();\n})();';
 assert.equal(source.split(hook).length,2);
-vm.runInNewContext(source.replace(hook,'  globalThis.api={normalizeDeconstructionResponse,normalizeResult,normalizeHistoryItem,hasDeconstructionResults,isModelAnalysisReport,deconstructionEvidenceMatchesSource,renderDeconstructionHistoryItem,renderDeconstructionGuideContent};\n})();'),context);
+vm.runInNewContext(source.replace(hook,'  globalThis.api={normalizeDeconstructionResponse,normalizeResult,normalizeHistoryItem,hasDeconstructionResults,isModelAnalysisReport,deconstructionEvidenceMatchesSource,renderDeconstructionHistoryItem,renderDeconstructionGuideContent,restoreDialogFocus,state};\n})();'),context);
 const a=context.api,cases=[];
 function envelope(version='2') {
  const report=structuredClone(template);report.schema_version=version;
@@ -66,5 +66,24 @@ test('guide preserves an identity snapshot when change is null without manufactu
  const raw=envelope(),p=raw.result.report.characters[0],before=JSON.stringify(raw);
  const html=a.renderDeconstructionGuideContent([{volume:{documentId:'doc',scopeLabel:'第1–6章'},report:raw.result.report}],[{name:p.name,stages:[{scope_start:1,scope_end:6,identity:p.identity,change:null}]}]);
  assert.ok(html.includes(p.identity.text));assert.ok(html.includes(raw.result.report.events[0].title));assert.doesNotMatch(html,/阶段信息待补充/);assert.equal(JSON.stringify(raw),before);
+});
+test('portrait absence never duplicates identity as a schema 2 personality claim; legacy fallback stays intact',()=>{
+ for(const version of ['1','2'])for(const portrait of [null,undefined,template.characters[0].portrait]){
+  const report=envelope(version).result.report,p=report.characters[0];p.portrait=portrait;p.insights=[];
+  const before=JSON.stringify(report),calls=[];
+  const data=readerContext.window.XumaiWorkspaceReader.mountModel({},report,{claim:c=>{calls.push(c);return c.text;},evidence:()=>''}),html=data.personAnalysis(data.people[0]);
+  assert.equal(html.includes('<h3>性格与为人</h3>'),version==='1'||!!portrait);
+  assert.equal(calls.filter(c=>c===p.identity).length,version==='1'&&!portrait?2:1);
+  if(version==='2'&&!portrait){assert.equal((html.match(/<section>/g)||[]).length,1);assert.doesNotMatch(html,/性格|为人|动机|关键经历|暂无|未知/);}
+  assert.equal(JSON.stringify(report),before);
+ }
+});
+test('queued dialog restoration respects newer focus and disconnected openers',()=>{
+ const timers=[],body={},inside={},newer={},doc=context.document;context.window.setTimeout=f=>timers.push(f);doc.body=body;
+ let count=0;const target={isConnected:true,focus(){count++;doc.activeElement=this;}},dialog={contains:n=>n===inside};a.state.dialogFocus.set(dialog,target);
+ for(const active of [body,target,inside]){doc.activeElement=active;a.restoreDialogFocus(dialog);timers.shift()();assert.equal(doc.activeElement,target);}
+ assert.equal(count,3);
+ doc.activeElement=body;a.restoreDialogFocus(dialog);doc.activeElement=newer;timers.shift()();assert.equal(doc.activeElement,newer);assert.equal(count,3);
+ doc.activeElement=body;target.isConnected=false;a.restoreDialogFocus(dialog);timers.shift()();assert.equal(doc.activeElement,body);assert.equal(count,3);
 });
 console.log(JSON.stringify({synthetic:true,count:cases.length,cases},null,2));
